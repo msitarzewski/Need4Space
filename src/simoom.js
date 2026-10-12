@@ -95,7 +95,7 @@ export class Simoom {
           float size = veil > 0.5 ? 0.6 + 1.4 * fract(seed.w * 13.1) : 0.06 + 0.07 * fract(seed.w * 5.7);
           gl_Position = a > 0.003 ? smStreak(p, wind * spd - camVel, size, veil > 0.5 ? 0.3 : 0.03, veil > 0.5 ? 14.0 : 6.0, kk) : vec4(0.0, 0.0, -2.0, 1.0);
           vK = kk; vVeil = veil;
-          vA = a * (veil > 0.5 ? 0.32 + 0.3 * deep : 0.8) * (1.0 + 0.35 * kk) / (1.0 + kk) * k;
+          vA = a * (veil > 0.5 ? 0.45 + 0.25 * deep : 0.9) * (1.0 + 0.35 * kk) / (1.0 + kk) * k;
           vC = smLight(normalize(rel), deep) * (veil > 0.5 ? 1.2 : 2.2);
         }`,
       fragmentShader: /* glsl */`

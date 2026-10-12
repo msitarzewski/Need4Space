@@ -31,7 +31,7 @@ const vec3 DA_SUN = ${v3(SUN_DIR)};
 const vec3 DA_SUNRAD = vec3(${f(SUN_E * SUN_COL.r)}, ${f(SUN_E * SUN_COL.g)}, ${f(SUN_E * SUN_COL.b)});
 const vec3 DA_WIND = ${v3(WIND)};
 const float DA_HD = 700.0;          // the dust's scale height (m)
-const float DA_BD = 3.3e-4;         // its extinction at the sand (per m)
+const float DA_BD = 2.7e-4;         // its extinction at the sand (per m)
 const float DA_BA = 1.2e-5;         // the thin air's, scale height 8 km
 // the sand far below the horizon, lit by the low sun and the sky (radiance)
 const vec3 DA_GROUND = vec3(0.21, 0.1, 0.045);
@@ -177,9 +177,9 @@ export function dustSkyDome(renderer, size = 768) {
         // the sun: a disc 1 deg across, flattened by the long path through the air, reddened toward its lower limb
         vec3 q = d - DA_SUN;
         float r = length(vec2(dot(q, normalize(cross(DA_SUN, vec3(0.0, 1.0, 0.0)))), dot(q, vec3(0.0, 1.0, 0.0)) * 1.15)) / 0.0087;
-        float od = (${f(3.3e-4 * 700)} + ${f(1.2e-5 * 8000)}) / max(d.y, 0.01);
+        float od = (${f(2.7e-4 * 700)} + ${f(1.2e-5 * 8000)}) / max(d.y, 0.01);
         vec3 T = exp(-od * vec3(0.82, 1.0, 1.22));
-        vec3 disc = DA_SUNRAD * (700.0 * (r < 1.0 ? 0.6 + 0.4 * sqrt(1.0 - r * r) : 0.0) * smoothstep(1.0, 0.9, r) + 5.0 * exp(-r * 0.6));
+        vec3 disc = DA_SUNRAD * (700.0 * (r < 1.0 ? 0.6 + 0.4 * sqrt(1.0 - r * r) : 0.0) * smoothstep(1.0, 0.9, r) + 2.0 * exp(-r * 1.3));
         // (in the reflections' bake - no disc - the glow round the sun is damped too: blurred over a glossy deck it
         // greyed the whole road racing into the sunset)
         vec3 c = a.rgb * mix(1.0, mix(0.35, 1.0, sunDisc), smoothstep(0.6, 0.97, dot(d, DA_SUN)));

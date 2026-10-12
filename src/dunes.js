@@ -76,7 +76,7 @@ class TrackField {
 export class Dunes {
   constructor(track, { canyons = [], rifts = [], piles = [] } = {}) {
     this.tr = track;
-    this.field = new TrackField(track);
+    this.field = new TrackField(track, 1100);
     const n = track.n, W = 28 + 0.7;
     // per sample: the deck's lowest point (its bank and its girders), its half-width across in plan, the gorge's share
     this.low = new Float32Array(n); this.half = new Float32Array(n); this.kc = new Float32Array(n);
@@ -182,8 +182,11 @@ export class Dunes {
     const RC = 8, half = Math.ceil((rIn + 400) / RC);
     const rn = 2 * half + 1, rx0 = Math.round(C.x / RC) * RC - half * RC, rz0 = Math.round(C.z / RC) * RC - half * RC;
     const H = new Float32Array(rn * rn), K = new Float32Array(rn * rn);
+    const rr2 = (half + 2) * (half + 2);
     for (let j = 0; j < rn; j++) for (let i = 0; i < rn; i++) {
-      const s = this.sample(rx0 + i * RC, rz0 + j * RC);
+      // (the corners outside the disc: the far ground's own heights)
+      const x = rx0 + i * RC, z = rz0 + j * RC, out = (i - half) ** 2 + (j - half) ** 2 > rr2;
+      const s = out ? { h: this.natural(x, z, true), rock: 0 } : this.sample(x, z);
       H[j * rn + i] = s.h; K[j * rn + i] = s.rock;
     }
     this.raster = { H, K, rn, rx0, rz0, RC };
@@ -218,7 +221,7 @@ export class Dunes {
         const n = this.field.near(x0 + (a / 4) * TS, z0 + (b / 4) * TS);
         if (n) { dmin = Math.min(dmin, n.d); if (n.d < 170) kc = Math.max(kc, this.kc[n.i]); }
       }
-      const res = kc > 0.3 ? 6 : dmin < 300 / Math.sqrt(dens) ? 8 : dmin < 1000 ? 16 : 32;
+      const res = kc > 0.3 ? 6 : dmin < 300 * Math.sqrt(dens) ? 8 : dmin < 800 ? 16 : Math.hypot(cxT, czT) < rIn * 0.62 ? 32 : 48;
       tiles.push({ x0, z0, res, cast: kc > 0.05 });
     }
     // blocks of 6 x 6 tiles

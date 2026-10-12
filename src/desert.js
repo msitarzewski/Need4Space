@@ -97,9 +97,9 @@ export class DesertWorld {
       u.sunDisc.value = 1;
       scene.environment = this.env;
     });
-    scene.environmentIntensity = 0.75;
+    scene.environmentIntensity = 0.62;
     this.exposure = 1.0;
-    this.grade = { contrast: 1.1, saturation: 1.12 };      // (post.js GradePass)
+    this.grade = { contrast: 1.16, saturation: 1.15 };      // (post.js GradePass)
     // (on: the air's own chunk does the work, haze.js; its colour carries the storm's strength and clock)
     scene.fog = new THREE.FogExp2(0xffffff, 1e-4);
     this.fog = scene.fog;
@@ -307,6 +307,23 @@ export class DesertWorld {
       }
       const g = archGeometry(pts, rad, { nr: 40, carve: 0.32, scale: 0.025, seed: lift });
       console.info(`${name}: clearance ${grid.geometryClear(g, 0, 2).toFixed(1)} m`);
+      bridges.push(g);
+    }
+    // and a great arch standing alone on the dunes over the low run to the second chasm: its legs ~170 m out either
+    // side, its span ~50 m over the deck
+    {
+      tr.frame(tr.at('crest2', -640), f);
+      const Rh = f.R.clone().setY(0).normalize(), Th = f.T.clone().setY(0).normalize(), pts = [], rad = [];
+      const g0 = D.height(f.P.x - Rh.x * 175, f.P.z - Rh.z * 175), g1 = D.height(f.P.x + Rh.x * 175, f.P.z + Rh.z * 175), top = f.P.y + 66;
+      for (let i = 0; i <= 72; i++) {
+        const u = i / 72 * 2 - 1, foot = u < 0 ? g0 : g1;
+        const p = f.P.clone().addScaledVector(Rh, u * 175).addScaledVector(Th, 14 * Math.sin(u * 2.4));
+        p.y = foot - 14 + (top - foot + 14) * (1 - Math.pow(Math.abs(u), 2.4));
+        pts.push(p);
+        rad.push(16 + 16 * Math.pow(Math.abs(u), 3) + 3 * Math.sin(u * 7));
+      }
+      const g = archGeometry(pts, rad, { nr: 40, carve: 0.34, scale: 0.022, seed: 9 });
+      console.info(`great arch: clearance ${grid.geometryClear(g, 0, 2).toFixed(1)} m`);
       bridges.push(g);
     }
     add(mergeGeometries(bridges), 'bridges', false);
@@ -522,7 +539,7 @@ export class DesertWorld {
     const sunT = stormSunT(camera.position, this.stormK), deep = stormDepth(camera.position) * this.stormK;
     this.sun.intensity = SUN_E * (0.15 + 0.85 * sunT);
     this.sun.color.copy(SUN_COL).lerp(new THREE.Color(1.0, 0.45, 0.2), 1 - sunT);
-    this.scene.environmentIntensity = 0.75 * (1 - 0.55 * smoothstep(0, 0.5, deep));
+    this.scene.environmentIntensity = 0.62 * (1 - 0.55 * smoothstep(0, 0.5, deep));
     const tr = this.track, gi = tr.gantryIdx, sIdx = Math.floor(s / tr.step);
     gi.map((i) => ({ i, d: Math.min((i - sIdx + tr.n) % tr.n, (sIdx - i + tr.n) % tr.n) }))
       .sort((p, q) => p.d - q.d).slice(0, 3).forEach(({ i }, k) => {
