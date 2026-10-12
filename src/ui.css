@@ -361,6 +361,7 @@ body.lite .hp { background: linear-gradient(115deg, rgba(9, 13, 19, 0.86), rgba(
 #settings { max-height: calc(100vh - 17.5rem); overflow: auto; padding-right: 0.5rem; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent; }
 .s-group { margin: 1.15rem 0 0.35rem; padding-left: 0.95rem; font: 700 0.74rem var(--ui); letter-spacing: 0.34em; text-transform: uppercase; color: var(--accent); }
 .s-group:first-child { margin-top: 0; }
+.s-ver { margin: 1.2rem 0 0.4rem; padding-left: 0.95rem; font: 600 0.7rem var(--ui); letter-spacing: 0.24em; text-transform: uppercase; color: var(--faint); }
 .srow { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.4rem 0.5rem 0.4rem 0.95rem; cursor: default;
   border-left: 2px solid transparent; font: 600 1.05rem var(--ui); letter-spacing: 0.04em; color: var(--soft); transition: background 0.2s; }
 .srow.focus { color: #fff; border-left-color: var(--accent); background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 18%, transparent), transparent 92%); }
