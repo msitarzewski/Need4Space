@@ -23,15 +23,15 @@ const f3 = (v, k = 2) => `vec3(${v.x.toFixed(k)}, ${v.y.toFixed(k)}, ${v.z.toFix
 // off to one side (dx: the river's bed beside the way - to the left, inside the bend, where the deck banks down to it)
 export const CHAMBERS = [
   { name: 'mouth', d0: -90, d1: 50, wl: 48, wr: 48, up: 44, down: 26, sq: 2.2, amp: 5 },
-  { name: 'gallery', d0: 70, d1: 225, wl: 46, wr: 46, up: 50, down: 26, sq: 2.4, amp: 5 },
-  { name: 'cavern', d0: 265, d1: 440, wl: 105, wr: 205, up: 140, down: 235, sq: 2.0, amp: 15 },
-  { name: 'throat', d0: 478, d1: 560, wl: 50, wr: 50, up: 54, down: 32, sq: 2.3, amp: 6 },
-  { name: 'hall', d0: 592, d1: 790, wl: 92, wr: 92, up: 62, down: 46, sq: 3.0, amp: 7 },
-  { name: 'roots', d0: 822, d1: 1080, wl: 74, wr: 74, up: 96, down: 46, sq: 2.4, amp: 9 },
-  { name: 'fungi', d0: 1112, d1: 1380, wl: 72, wr: 108, up: 72, down: 92, sq: 2.2, amp: 10 },
-  { name: 'river', d0: 1412, d1: 1640, wl: 110, wr: 52, up: 54, down: 34, sq: 2.6, amp: 6, dx: -58 },
-  { name: 'fissure', d0: 1672, d1: 1980, wl: 38, wr: 38, up: 104, down: 96, sq: 4.0, amp: 4 },
-  { name: 'exit', d0: 2012, d1: 9999, wl: 50, wr: 50, up: 46, down: 28, sq: 2.2, amp: 5 },
+  { name: 'gallery', d0: 50, d1: 85, wl: 46, wr: 46, up: 50, down: 26, sq: 2.4, amp: 5 },
+  { name: 'cavern', d0: 120, d1: 432, wl: 105, wr: 205, up: 140, down: 235, sq: 2.0, amp: 15 },
+  { name: 'throat', d0: 470, d1: 552, wl: 50, wr: 50, up: 54, down: 32, sq: 2.3, amp: 6 },
+  { name: 'hall', d0: 584, d1: 782, wl: 92, wr: 92, up: 62, down: 46, sq: 3.0, amp: 7 },
+  { name: 'roots', d0: 814, d1: 1072, wl: 74, wr: 74, up: 96, down: 46, sq: 2.4, amp: 9 },
+  { name: 'fungi', d0: 1104, d1: 1372, wl: 72, wr: 108, up: 72, down: 92, sq: 2.2, amp: 10 },
+  { name: 'river', d0: 1404, d1: 1632, wl: 110, wr: 52, up: 54, down: 34, sq: 2.6, amp: 6, dx: -58 },
+  { name: 'fissure', d0: 1664, d1: 1972, wl: 38, wr: 38, up: 104, down: 96, sq: 4.0, amp: 4 },
+  { name: 'exit', d0: 2004, d1: 9999, wl: 50, wr: 50, up: 46, down: 28, sq: 2.2, amp: 5 },
 ];
 // the faint light of each chamber (its glowworms, its moss; linear): teal galleries, a blue-black cavern, the violet
 // of the crystal throat, the hall's amber, the roots' green, the fungi's teal, the river's blue-green
@@ -40,7 +40,7 @@ const TINT = { mouth: [0.004, 0.011, 0.01], gallery: [0.004, 0.012, 0.011], cave
   fissure: [0.003, 0.005, 0.007], exit: [0.004, 0.009, 0.009] };
 // the sinkholes: down from the hill's top into a chamber (d, lateral offset from the track, radius); the first pours
 // the jungle's river into the cavern
-export const SHAFTS = [{ d: 392, x: 96, r: 30, fall: true }, { d: 948, x: -16, r: 26 }, { d: 1522, x: 12, r: 21 }];
+export const SHAFTS = [{ d: 347, x: 96, r: 30, fall: true }, { d: 940, x: -16, r: 26 }, { d: 1514, x: 12, r: 21 }];
 const XC = TRACK_W / 2 + 9, YB = -14, YT = 32;    // the walls stop this far out, the floor this far under, the roof over
 
 // how much of each chamber at d (weights summing to 1) and the section there
@@ -298,7 +298,7 @@ export function hollowCave(track, I) {
 
   // ---- water: the lake in the cavern and the river along the floor of the last chambers - each a strip across the
   // tube at its level, wall to wall
-  const lakeRow = rowAt(392), lakeY = lakeRow.P.y - 172;
+  const lakeRow = rowAt(347), lakeY = lakeRow.P.y - 172;
   // (the river 12 m under the deck in its gallery - in sight beyond the walls, its bed off to the left - down in the
   // fissure's slot after)
   const riverY = (d) => { const rw = rowAt(d), k = rw.sec.w.fissure + rw.sec.w.exit; return rw.P.y - (12 * (1 - k) + (rw.sec.down - 9) * k); };
@@ -335,8 +335,8 @@ export function hollowCave(track, I) {
     g.computeBoundingSphere();
     return g;
   };
-  const lake = strip(150, 470, () => lakeY);
-  const river = strip(1400, 2010, riverY);
+  const lake = strip(100, 450, () => lakeY);
+  const river = strip(1392, 2002, riverY);
 
   // ---- the dark: everything inside the hill's outline, under its top and over its cliffs' foot, save near the mouths
   // (light reaches ~60 m in) and down the sinkholes (the sky's light down the shaft, a beam of it on the floor)
@@ -721,7 +721,7 @@ export function caveDressing(scene, H, track, mats, dens = 1) {
     // columns, a stalactite and a stalagmite run together (each down / up past the middle): through the hall's S, one
     // close by the way every 55 m, left and right in turn - a slalom - and others further back
     const cols = [];
-    for (let d = 575, k = 0; d < 800; d += 55, k++) cols.push([d, k % 2 ? -1 : 1, XC + 11 + rnd() * 5]);
+    for (let d = 567, k = 0; d < 792; d += 55, k++) cols.push([d, k % 2 ? -1 : 1, XC + 11 + rnd() * 5]);
     for (const rw of rows) if (rw.sec.w.hall > 0.6 && rnd() < 0.05) cols.push([rw.d, rnd() < 0.5 ? -1 : 1, XC + 28 + rnd() * 18]);
     cols.forEach(([d, side, x]) => {
       const rw = H.rowAt(d), ri = rows.indexOf(rw);

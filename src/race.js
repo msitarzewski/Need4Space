@@ -55,6 +55,9 @@ function makePlan(track, lim, T) {
     const c = x[((j + 1) % N + N) % N], d = x[((j + 2) % N + N) % N];
     return 0.5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t * t + (3 * b - a - 3 * c + d) * t * t * t);
   };
+  // on the centre 70 m either side of a cut; of a gravity flip only 25 m (the field carries a ship along the centre line,
+  // and held there 70 m on it could not swing out for a bend after one)
+  const cut = (s) => track.gaps.some((g) => track.inSpan(s, g[0] - 70, g[1] + 70) && !(track.flips.includes(g) && !track.inSpan(s, g[0] - 25, g[1] + 25)));
   // least squared curvature, the bounds held (projected gradient descent on the bend; x0: a coarser solution)
   const solve = (N, pads, x0, iters) => {
     const h = L / N, per = Math.max(1, Math.round(h / st));
@@ -64,7 +67,7 @@ function makePlan(track, lim, T) {
       let a = 0;
       for (let k = 0; k < per; k++) a += track.kh[ix(s - h / 2 + (k + 0.5) * st)];
       K[j] = a / per;
-      if (track.inLoop(s, 40)) { lo[j] = -1.5; hi[j] = 1.5; K[j] = 0; } else if (track.inGap(s, 70)) { lo[j] = -2.5; hi[j] = 2.5; }
+      if (track.inLoop(s, 40)) { lo[j] = -1.5; hi[j] = 1.5; K[j] = 0; } else if (cut(s)) { lo[j] = -2.5; hi[j] = 2.5; }
     }
     for (const p of pads) {
       for (let d = -14; d <= 10; d += Math.min(4, h / 2)) {
@@ -92,13 +95,14 @@ function makePlan(track, lim, T) {
   const coarse = solve(Math.round(L / 40), pads, free, 6000);
   const fine = solve(Math.round(L / 10), pads, coarse, 5000);
   // per 2 m sample: the line, its slope, the bend the ship has to turn through (track + line), the speed limit
-  const x = new Float32Array(n), slope = new Float32Array(n), c = new Float32Array(n), vlim = new Float32Array(n);
+  const x = new Float32Array(n), slope = new Float32Array(n), c = new Float32Array(n), vlim = new Float32Array(n), ka = new Float32Array(n);
   for (let i = 0; i < n; i++) x[i] = cr(fine, (i * st / L) * fine.length);
   const D = 5, w = (k) => x[(k + n) % n];
   for (let i = 0; i < n; i++) {
     let kh = 0;
     for (let k = -4; k <= 4; k++) kh += track.kh[(i + k + n) % n];
     slope[i] = (w(i + 1) - w(i - 1)) / (2 * st);
+    ka[i] = kh / 9;
     c[i] = kh / 9 + (w(i + D) - 2 * x[i] + w(i - D)) / ((D * st) ** 2);
   }
   for (let i = 0; i < n; i++) {
@@ -115,7 +119,9 @@ function makePlan(track, lim, T) {
   const slack = new Float32Array(n), raw = new Float32Array(n), R = Math.round(150 / st);
   for (let i = 0; i < n; i++) {
     let cm = 0;
-    for (let j = -R; j <= R; j += 5) cm = Math.max(cm, Math.abs(c[(i + j + n) % n]));
+    // (the track's bend too: through a gentle S the line runs straight across the deck, apex to apex, and a lane held
+    // off it ran into the walls)
+    for (let j = -R; j <= R; j += 5) cm = Math.max(cm, Math.abs(c[(i + j + n) % n]), Math.abs(ka[(i + j + n) % n]));
     const s = i * st;
     let ok = 1 - smoothstep(0.0005, 0.0012, cm);
     if (track.inGap(s, 150) || track.inLoop(s, 150)) ok = 0;
@@ -183,7 +189,10 @@ class Driver {
     // the line where the ship will be once the steering has answered
     const iA = at(v * T.lead);
     const ws = r.s + this.seed[3] * 5000, wander = L.wander * (0.6 * Math.sin(ws / 173) + 0.4 * Math.sin(ws / 61 + this.seed[1] * 20));
-    let lineX = plan.x[iA] + this.lane * plan.slack[iA] + (jump || loop ? 0 : wander);
+    // (its lane and wander no further toward a wall than the line's own bound: where the line ran along that bound - the
+    // apex of a gentle bend, where the line is straight and a lane looks free - they took the hull into the wall)
+    const x0 = plan.x[iA], wb = lim - T.lineM;
+    let lineX = x0 + clamp(this.lane * plan.slack[iA] + (jump || loop ? 0 : wander), -wb - x0, wb - x0);
     // off the grid: its own column for the first few hundred metres, then onto the line (all three columns making for
     // the line at once side-swiped each other within a second of the lights)
     this.odo += r.vs * dt;
