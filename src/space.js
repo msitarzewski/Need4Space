@@ -1,6 +1,7 @@
 // Space: the backdrop (nebula, Milky Way band, stars, a ringed gas giant, the sun) rendered in its own scene and
 // camera (huge distances, its own depth range), then the circuit. One hard sun, a faint warm planet-shine, starlight.
 import * as THREE from 'three';
+import { bakeLater } from './bake.js';
 import { mulberry32 } from './noise.js';
 import { Track, TRACK_W, CAVE_R, CAVE_MOUTH } from './track.js';
 import { setCave } from './look.js';
@@ -128,11 +129,13 @@ function sunGroup() {
 function bakedNebula(renderer, nebula, size = 1024) {
   const rt = new THREE.WebGLCubeRenderTarget(size, { type: THREE.HalfFloatType, generateMipmaps: true,
     minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
-  const scene = new THREE.Scene(), parent = nebula.parent;
-  scene.add(nebula);
-  new THREE.CubeCamera(10, 200000, rt).update(renderer, scene);
-  parent.add(nebula);
-  nebula.material.dispose();
+  // (drawn from a stand-in with the live material: the nebula itself shows the cube from now on)
+  const scene = new THREE.Scene(), live = nebula.clone(), cube = new THREE.CubeCamera(10, 200000, rt);
+  scene.add(live);
+  bakeLater([[scene, cube.children[0]]], () => {
+    cube.update(renderer, scene);
+    live.material.dispose();
+  });
   nebula.material = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false,
     uniforms: { cube: { value: rt.texture } },
@@ -163,12 +166,15 @@ export class SpaceWorld {
     this.sky.add(this.nebula, this.stars, this.planet, this.sunG);
     this.bakeNebula(renderer);
     // environment for reflections: the same sky without the sun's disc (the sun light makes its own highlight)
-    this.sunG.visible = false;
-    const pm = new THREE.PMREMGenerator(renderer);
-    this.env = pm.fromScene(this.sky, 0.015, 50, 200000).texture;
-    pm.dispose();
-    this.sunG.visible = true;
-    scene.environment = this.env;
+    // (after the sky's own bakes: a bake too)
+    bakeLater([[this.sky, this.skyCam]], () => {
+      this.sunG.visible = false;
+      const pm = new THREE.PMREMGenerator(renderer);
+      this.env = pm.fromScene(this.sky, 0.015, 50, 200000).texture;
+      pm.dispose();
+      this.sunG.visible = true;
+      scene.environment = this.env;
+    });
     scene.environmentIntensity = 0.55;
     scene.fog = null;
     // lights: the sun (PCSS shadows round the ship), planet-shine, starlight

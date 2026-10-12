@@ -8,6 +8,7 @@
 // grime in the seams and in fine streaks, chipped paint on edges and bolt heads showing bare steel; small lamps in
 // the girders' bellies.
 import * as THREE from 'three';
+import { bakeLater, quadJob } from './bake.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 export const HULL_SIDE = 0, HULL_UNDER = 1, HULL_GIRDER = 2;
@@ -39,9 +40,11 @@ export function hullMaps(renderer) {
   rt.texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
   const quad = new FullScreenQuad(new THREE.ShaderMaterial({
     vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`, fragmentShader: NOISE }));
-  const prev = renderer.getRenderTarget();
-  renderer.setRenderTarget(rt); quad.render(renderer); renderer.setRenderTarget(prev);
-  quad.material.dispose(); quad.dispose();
+  bakeLater([quadJob(quad)], () => {
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(rt); quad.render(renderer); renderer.setRenderTarget(prev);
+    quad.material.dispose(); quad.dispose();
+  });
   U.hullNoise.value = rt.texture;
   return rt.texture;
 }

@@ -2,6 +2,7 @@
 // giant's clouds, the rings' ringlets and the moon's craters are painted once at load on the GPU into big textures
 // (static: no cost per frame beyond a lookup); the sun's surface boils live (granulation, spots) inside a corona.
 import * as THREE from 'three';
+import { bakeLater, quadJob } from './bake.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 const NOISE = /* glsl */`
@@ -33,17 +34,21 @@ function bake(renderer, frag, w, h, srgb, uniforms = {}) {
     uniforms, vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
     fragmentShader: 'precision highp float;\nvarying vec2 vUv;\n' + NOISE + frag,
   }));
-  const prev = renderer.getRenderTarget();
-  // in strips: one huge full-screen pass of heavy noise can trip the GPU watchdog
+  // in strips: one huge full-screen pass of heavy noise can trip the GPU watchdog (each strip a bake of its own; the
+  // mip chain built after the last)
   const strips = Math.ceil(h / 512);
   for (let k = 0; k < strips; k++) {
-    rt.scissor.set(0, k * 512, w, 512); rt.scissorTest = true;
-    renderer.setRenderTarget(rt);                       // (a target's scissor is applied when it is bound)
-    quad.render(renderer);
+    bakeLater(k ? [] : [quadJob(quad)], () => {
+      const prev = renderer.getRenderTarget();
+      rt.scissor.set(0, k * 512, w, 512); rt.scissorTest = true;
+      rt.texture.generateMipmaps = k === strips - 1;
+      renderer.setRenderTarget(rt);                     // (a target's scissor is applied when it is bound)
+      quad.render(renderer);
+      rt.scissorTest = false;
+      renderer.setRenderTarget(prev);
+      if (k === strips - 1) { quad.material.dispose(); quad.dispose(); }
+    });
   }
-  rt.scissorTest = false;
-  renderer.setRenderTarget(prev);
-  quad.material.dispose(); quad.dispose();
   rt.texture.userData.rt = rt;
   return rt.texture;
 }
@@ -58,10 +63,12 @@ function halve(renderer, tex, srgb) {
   const quad = new FullScreenQuad(new THREE.ShaderMaterial({ uniforms: { t: { value: tex } },
     vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
     fragmentShader: /* glsl */`uniform sampler2D t; varying vec2 vUv; void main() { gl_FragColor = textureLod(t, vUv, 0.0); }` }));
-  const prev = renderer.getRenderTarget();
-  renderer.setRenderTarget(rt); quad.render(renderer); renderer.setRenderTarget(prev);
-  quad.material.dispose(); quad.dispose();
-  src.dispose();
+  bakeLater([quadJob(quad)], () => {
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(rt); quad.render(renderer); renderer.setRenderTarget(prev);
+    quad.material.dispose(); quad.dispose();
+    src.dispose();
+  });
   return rt.texture;
 }
 

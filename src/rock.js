@@ -8,6 +8,7 @@
 // The meteorite also gets the sun's shadow baked once from the sun (bakeRockShadow): crater rims and boulders throw
 // real shadows at any distance; and an ambient occlusion per vertex (crater floors, boulder feet).
 import * as THREE from 'three';
+import { bakeLater, quadJob } from './bake.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 const GEN = /* glsl */`
@@ -111,9 +112,18 @@ export function rockMaps(renderer) {
     rt.texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
     const quad = new FullScreenQuad(new THREE.ShaderMaterial({ uniforms: { mode: { value: mode } },
       vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`, fragmentShader: GEN }));
-    const prev = renderer.getRenderTarget();
-    renderer.setRenderTarget(rt); quad.render(renderer); renderer.setRenderTarget(prev);
-    quad.material.dispose(); quad.dispose();
+    // in four strips, each a bake of its own (the colour pass is ~50 ms in one go on a fast GPU; mips after the last)
+    for (let k = 0; k < 4; k++) {
+      bakeLater(k ? [] : [quadJob(quad)], () => {
+        const prev = renderer.getRenderTarget();
+        rt.scissor.set(0, k * 512, 2048, 512); rt.scissorTest = true;
+        rt.texture.generateMipmaps = k === 3;
+        renderer.setRenderTarget(rt); quad.render(renderer);
+        rt.scissorTest = false;
+        renderer.setRenderTarget(prev);
+        if (k === 3) { quad.material.dispose(); quad.dispose(); }
+      });
+    }
     return rt.texture;
   };
   maps = { color: bake(0), normal: bake(1) };
@@ -139,12 +149,14 @@ export function bakeRockShadow(renderer, meshes, sunDir, res = 4096) {
     c.matrixAutoUpdate = false; c.matrix.copy(m.matrixWorld); c.frustumCulled = false;
     scene.add(c);
   }
-  const prev = renderer.getRenderTarget();
-  renderer.setRenderTarget(rt);
-  renderer.clear(true, true, true);
-  renderer.render(scene, cam);
-  renderer.setRenderTarget(prev);
-  mat.dispose();
+  bakeLater([[scene, cam]], () => {
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(rt);
+    renderer.clear(true, true, true);
+    renderer.render(scene, cam);
+    renderer.setRenderTarget(prev);
+    mat.dispose();
+  });
   U.rkSh.value = rt.depthTexture;
   U.rkShM.value.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
   // (x: the filter's radius in uv, 1.5 texels; y: normal offset in m; z: on; w: depth bias, 0.4 m of the box's depth)

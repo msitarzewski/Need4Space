@@ -4,6 +4,7 @@
 // tiles without a seam. (The canvas version was square specks and a brushed grain of straight lines: "the road had
 // like a lot of straight lines, kinda looks off".)
 import * as THREE from 'three';
+import { bakeLater, quadJob } from './bake.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 const W = 44, L = 40;                 // the deck texture's footprint (m): TRACK_W across, 40 m along
@@ -180,12 +181,14 @@ function bake(renderer, body, metres, res, mode, srgb) {
     vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
     fragmentShader: COMMON + body + FRAG,
   }));
-  const prev = renderer.getRenderTarget();
-  renderer.setRenderTarget(rt);
-  quad.render(renderer);                       // (the mip chain is built as the target is left)
-  renderer.setRenderTarget(prev);
-  quad.material.dispose();
-  quad.dispose();
+  bakeLater([quadJob(quad)], () => {
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(rt);
+    quad.render(renderer);                     // (the mip chain is built as the target is left)
+    renderer.setRenderTarget(prev);
+    quad.material.dispose();
+    quad.dispose();
+  });
   return rt.texture;
 }
 

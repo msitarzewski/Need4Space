@@ -21,6 +21,7 @@ import { agxPass, speedBlurPass, LayeredRenderPass, DeckSSRPass, StreakPass, Blo
 import { Settings } from './settings.js';
 import { Race, Driver } from './race.js';
 import { Menu } from './menu.js';
+import { compileAll, deferBakes, runBakes, gpuIdle } from './bake.js';
 
 const MAP = new URLSearchParams(location.search).get('map') === 'meadow' ? 'meadow' : 'space';
 const SHIP_URL = 'assets/racer_web.glb';
@@ -28,14 +29,22 @@ const LUTS = ['assets/agx_punchy_lut65.bin', 'assets/agx_mhc_lut65.bin'];   // B
 const status = (t) => (document.getElementById('loadtext').textContent = t);
 // let the loading text paint between steps (a timer too: a hidden tab never gets an animation frame)
 const nextFrame = () => new Promise((r) => { requestAnimationFrame(() => r()); setTimeout(r, 50); });
-
 async function boot() {
+  if (new URLSearchParams(location.search).has('bootprof')) (await import('./profile.js')).bootProfile();
   const sunDir = MAP === 'space' ? SPACE_SUN : MEADOW_SUN;
   patchShaders({ sunDir, sunFog: SUN_FOG, shadowHalf: MAP === 'space' ? FAR_HALF : 22, shadowDepth: 200,
     cascades: MAP === 'space' ? [{ half: SHADOW_HALF, depth: SHADOW_FAR - SHADOW_NEAR }, { half: MID_HALF, depth: MID_FAR - MID_NEAR },
       { half: FAR_HALF, depth: FAR_FAR - FAR_NEAR }] : null });
   const canvas = document.getElementById('view');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+  // the GPU driver reset (too long a job for a slow GPU, or out of memory): say so rather than a frozen screen
+  canvas.addEventListener('webglcontextlost', () => {
+    status('The graphics driver stopped responding - reload the page (lower settings in Settings may help)');
+    document.getElementById('loading').classList.remove('done');
+    document.getElementById('loading').classList.add('error');
+  });
+  const agxLoad = agxPass(LUTS);                           // (the colour transform's tables load meanwhile)
+  agxLoad.catch(() => {});
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setSize(innerWidth, innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;    // used only by the ACES setting (OutputPass)
@@ -50,12 +59,20 @@ async function boot() {
 
   status(MAP === 'space' ? 'Building the circuit' : 'Raising the hills');
   await nextFrame();
+  deferBakes(true);
   const world = MAP === 'space' ? new SpaceWorld(scene, renderer, camera) : new MeadowWorld(scene, renderer);
-
-  status('Loading the Feather S1');
-  const ship = await loadShip(SHIP_URL, (e) => {
-    if (e.total) status(`Loading the Feather S1  ${(e.loaded / 1e6).toFixed(1)} / ${(e.total / 1e6).toFixed(1)} MB`);
+  deferBakes(false);
+  let baking = true, got = '';
+  const shipLoad = loadShip(SHIP_URL, (e) => {
+    if (!e.total) return;
+    got = `  ${(e.loaded / 1e6).toFixed(1)} / ${(e.total / 1e6).toFixed(1)} MB`;
+    if (!baking) status('Loading the Feather S1' + got);
   });
+  shipLoad.catch(() => {});
+  await runBakes(renderer, (what, k, n) => status(`${what}  ${k} / ${n}`));
+  baking = false;
+  status('Loading the Feather S1' + got);
+  const ship = await shipLoad;
   ship.upgradeMaterials(renderer.capabilities.getMaxAnisotropy(), renderer);
   scene.add(ship.root);
   console.info(`ship: ${Math.round(ship.tris)} tris, ${ship.rotors.length} rotors, canopy ${!!ship.canopy}, ` +
@@ -134,7 +151,6 @@ async function boot() {
   fx.track = track;
   const hud = new HUD(mm, START);
   const audio = new GameAudio();
-  audio.prepareMusic();                              // rendered off the main thread while the game loads
 
   // post: sky + scene (HDR, 4x MSAA in the first pass only) + NaN guard -> AO -> deck reflections -> bloom -> streaks
   // -> speed blur -> Blender's AgX (or ACES); the chain's own targets are plain (no samples, no depth)
@@ -179,7 +195,7 @@ async function boot() {
   const blur = speedBlurPass();
   composer.addPass(blur);
   status('Loading the colour transform');
-  const agx = await agxPass(LUTS);
+  const agx = await agxLoad;
   const output = new OutputPass();
   composer.addPass(agx);
   composer.addPass(output);
@@ -263,16 +279,46 @@ async function boot() {
     const ships = race ? race.entries.map((e) => e.ship) : [ship];
     const lods = ships.flatMap((s) => (s.lodMeshes || []).map((l) => [l.mesh, l.mesh.geometry, l.levels]));
     const t0 = performance.now();
+    // every material's program first, all at once (scene and sky, bound to the scene's own target: a render target
+    // drops the tone mapping from the program) - compiled in parallel, the page alive meanwhile
+    renderer.setRenderTarget(scenePass.msaa);
+    const jobs = [[scene, camera]];
+    if (world.sky) jobs.push([world.sky, world.skyCam]);
+    await compileAll(renderer, jobs, (k, n) => status(`Compiling shaders  ${k} / ${n}`));
+    renderer.setRenderTarget(null);
+    // the textures onto the GPU one at a time (an 8K map and its mips is one long job on a slow GPU)
+    const texs = new Set();
+    for (const root of jobs.map((j) => j[0])) root.traverse((o) => {
+      for (const m of [].concat(o.material || [])) {
+        for (const v of Object.values(m)) if (v && v.isTexture && !v.isRenderTargetTexture) texs.add(v);
+        for (const u of Object.values(m.uniforms || {})) if (u && u.value && u.value.isTexture && !u.value.isRenderTargetTexture) texs.add(u.value);
+      }
+    });
+    let ti = 0;
+    for (const tx of texs) {
+      renderer.initTexture(tx);
+      await gpuIdle(renderer);
+      status(`Uploading textures  ${++ti} / ${texs.size}`);
+    }
+    // the warm-up draws themselves at an eighth of the size: what they are for (programs, buffers) does not depend on
+    // it, and a slow GPU drew three full frames of everything at once
+    status('Warming up the shaders');
+    composer.setPixelRatio(pixelRatio * renderScale / 8);
+    composer.setSize(innerWidth, innerHeight);
+    await nextFrame();
     for (const level of [0, 1]) {
       for (const [m, , levels] of lods) if (levels[level]) m.geometry = levels[level];
       scene.updateMatrixWorld(); composer.render();
     }
     for (const [m, g] of lods) m.geometry = g;
     for (const [o, v, f] of keep) { o.visible = v; o.frustumCulled = f; }
+    resize();
     scene.updateMatrixWorld(); composer.render();
+    await gpuIdle(renderer);
     console.info(`warm-up: ${renderer.info.programs.length} programs, ${Math.round(performance.now() - t0)} ms`);
   }
   document.getElementById('loading').classList.add('done');
+  audio.prepareMusic();                              // (the songs load once the game has: not over the ship's download)
 
   const FIXED = 1 / 120;
   let acc = 0, last = performance.now();

@@ -247,3 +247,69 @@ export async function exportMusic() {
   }
   return done;
 }
+
+// What the loading screen waits on (?bootprof; await window.__bootDone, then read window.__boot): per loading step
+// (its status text) the wall time, the GPU time of every draw and upload (timer queries: gl.finish does not wait for
+// the GPU in Chrome), the time spent waiting on the driver's shader compiles (three checks each link right away), and
+// every single GPU job over 4 ms - on an integrated GPU ~15-100x slower: one of those past ~2 s and Windows resets the
+// driver (the page's WebGL context is lost).
+export function bootProfile() {
+  const P = WebGL2RenderingContext.prototype, rec = { steps: {}, jobs: [], compile: 0, programs: 0 };
+  const box = document.getElementById('loading'), text = document.getElementById('loadtext');
+  const now = () => performance.now(), t00 = now();
+  const label = () => (text.textContent || '?').replace(/\s+[\d.]+ \/ [\d.]+( MB)?$/, '');
+  const S = (k) => (rec.steps[k] ||= { from: +(now() - t00).toFixed(0), wall: 0, gpu: 0, jobs: 0, compile: 0, cpu: 0 });
+  let done = false, cur = S(label()), curT = now(), ext = null;
+  const shaderName = new WeakMap(), progName = new WeakMap(), queries = [];
+  const wrap = (fn, f) => { const o = P[fn]; if (o) P[fn] = function (...a) { return done ? o.apply(this, a) : f.call(this, o, a, fn); }; };
+  const gpu = function (o, a, fn) {
+    ext ||= this.getExtension('EXT_disjoint_timer_query_webgl2');
+    const q = this.createQuery(), p = this.getParameter(this.CURRENT_PROGRAM), vp = this.getParameter(this.VIEWPORT);
+    this.beginQuery(ext.TIME_ELAPSED_EXT, q);
+    const t0 = now(), r = o.apply(this, a);
+    cur.cpu += now() - t0;
+    this.endQuery(ext.TIME_ELAPSED_EXT);
+    queries.push([q, cur, label(), fn.startsWith('draw') ? (p && progName.get(p)) || '?' : fn, vp[2] + 'x' + vp[3], this]);
+    return r;
+  };
+  for (const fn of ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced', 'drawRangeElements',
+    'texImage2D', 'texSubImage2D', 'texImage3D', 'texStorage2D', 'generateMipmap', 'blitFramebuffer', 'copyTexSubImage2D']) wrap(fn, gpu);
+  // (&cold: every shader made unique, so neither Chrome's shader cache nor ANGLE's helps - a first visit's compile)
+  const cold = new URLSearchParams(location.search).has('cold') ? `\n// ${Math.random()}\n` : '';
+  wrap('shaderSource', function (o, a) { shaderName.set(a[0], (/#define SHADER_NAME (\S+)/.exec(a[1]) || [])[1]); return o.call(this, a[0], a[1] + cold); });
+  wrap('attachShader', function (o, a) { const n = shaderName.get(a[1]); if (n) progName.set(a[0], n); return o.apply(this, a); });
+  wrap('linkProgram', function (o, a) { rec.programs++; return o.apply(this, a); });
+  for (const fn of ['getProgramParameter', 'getShaderParameter', 'getProgramInfoLog', 'getShaderInfoLog']) {
+    wrap(fn, function (o, a) { const t0 = now(), r = o.apply(this, a), dt = now() - t0; cur.compile += dt; rec.compile += dt; return r; });
+  }
+  const next = () => { cur.wall += now() - curT; curT = now(); cur = S(label()); };
+  window.__bootDone = new Promise((resolve) => {
+    const obs = new MutationObserver(async () => {
+      next();
+      if (!box.classList.contains('done') && !box.classList.contains('error')) return;
+      done = true; obs.disconnect();
+      rec.total = +(now() - t00).toFixed(0);
+      // the timer results arrive a few frames later
+      for (let k = 0; k < 200 && queries.length; k++) {
+        await new Promise((r) => setTimeout(r, 20));
+        for (let i = queries.length - 1; i >= 0; i--) {
+          const [q, st, lb, what, vp, gl] = queries[i];
+          if (!gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) continue;
+          const ms = gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6;
+          st.gpu += ms; st.jobs++;
+          if (ms > 4) rec.jobs.push([lb, +ms.toFixed(1), what, vp]);
+          gl.deleteQuery(q);
+          queries.splice(i, 1);
+        }
+      }
+      rec.lost = queries.length;
+      for (const s of Object.values(rec.steps)) for (const k of ['wall', 'gpu', 'compile', 'cpu']) s[k] = +s[k].toFixed(0);
+      rec.compile = +rec.compile.toFixed(0);
+      rec.jobs.sort((x, y) => y[1] - x[1]);
+      resolve(rec);
+    });
+    obs.observe(text, { childList: true, characterData: true, subtree: true });
+    obs.observe(box, { attributes: true });
+  });
+  window.__boot = rec;
+}
