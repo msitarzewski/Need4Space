@@ -22,6 +22,7 @@ import { Settings } from './settings.js';
 import { Race, Driver } from './race.js';
 import { Menu } from './menu.js';
 import { compileAll, deferBakes, runBakes, gpuIdle } from './bake.js';
+import { Q, setLite, integratedGPU } from './quality.js';
 
 const MAP = new URLSearchParams(location.search).get('map') === 'meadow' ? 'meadow' : 'space';
 const SHIP_URL = 'assets/racer_web.glb';
@@ -225,6 +226,11 @@ async function boot() {
   addEventListener('resize', resize);
   const fpsEl = document.getElementById('fps');
   const sunLights = world.sun ? [world.sun, world.sunMid, world.sunFar] : [world.sunL.sun];
+  const gpuName = (() => {
+    const gl = renderer.getContext(), e = gl.getExtension('WEBGL_debug_renderer_info');
+    return String(e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+  })();
+  console.info(`GPU: ${gpuName}${integratedGPU(gpuName) ? ' (integrated: Laptop mode on a first visit)' : ''}`);
   const settings = new Settings((v) => {
     agx.enabled = v.tonemap !== 'aces';
     agx.setLook(v.tonemap === 'agx' ? 1 : 0);
@@ -233,7 +239,7 @@ async function boot() {
     renderer.toneMappingExposure = 0.95 * Math.pow(2, v.exposure);
     gtao.enabled = v.ao;
     smaa.enabled = v.aa !== 'msaa';
-    const samples = v.aa === 'high' ? 8 : v.aa === 'fast' ? 2 : 4;   // the scene's MSAA (a new target when it changes)
+    const samples = v.aa === 'high' ? 8 : v.aa === 'fast' ? 2 : v.aa === 'smaa1' ? 0 : 4;   // the scene's MSAA (a new target when it changes)
     if (scenePass.msaa.samples !== samples) { scenePass.msaa.samples = samples; scenePass.msaa.dispose(); }
     ssr.enabled = !!track && v.ao && v.reflections;
     streaks.enabled = v.streaks;
@@ -256,13 +262,17 @@ async function boot() {
     renderScale = v.scale;
     resample.enabled = v.scale !== 1;
     resample.down = v.scale > 1;
-    resample.sharpen = v.scale < 1 ? 0.35 : 0;
+    resample.sharpen = v.scale < 0.7 ? 0.5 : v.scale < 1 ? 0.35 : 0;
+    // Laptop mode: the lite shaders (quality.js) and fewer lights - the rivals' lights in the cave, the exhaust's
+    // glow on the road and two of the three gantry lamps (each light costs every lit pixel)
+    setLite(!!v.laptop, [scene, world.sky]);
+    for (const l of [...rivalLights, ...ship.exhaustLights, ...(world.lamps || []).slice(1)]) l.visible = !v.laptop;
     aoRes = v.aoRes || 'auto';
     resize();
     fpsEl.style.display = v.fps ? '' : 'none';
     race?.setDifficulty(v.ai);                       // the rivals' AI difficulty (race.js AI_LEVELS)
     audio.setLevels(v.music, v.sfx);                 // music and effects volume
-  });
+  }, integratedGPU(gpuName));
 
   const lap = { started: false, time: 0, last: Infinity, best: Infinity, lap: 1, idx: START, progress: 0, s: 0 };
   let autoChase = false, wasCrashed = false, t = 0;
@@ -558,7 +568,7 @@ async function boot() {
     ship.update(dt, { throttle: ctl.throttle, boost: ctl.boosting, speed: ctl.speed, turn: ctl.turn,
       ...(mode === 'race' ? racer.animState() : { brakeLight: flight.brakeS || 0 }) }, scene, camera);
     if (MAP === 'meadow') fx.hover(flight, world, world.road.distance(flight.pos.x, flight.pos.z) < 12, dt);
-    const focalPx = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+    const focalPx = renderer.domElement.height * renderScale * (Q.lite ? 0.7 : 1) / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
     race?.visuals(dt, camera, fx, scene, focalPx);
     fx.exhaust(ship, ctl, dt);
     fx.update(dt, camera, ctl);

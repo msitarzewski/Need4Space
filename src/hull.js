@@ -9,6 +9,7 @@
 // the girders' bellies.
 import * as THREE from 'three';
 import { bakeLater, quadJob } from './bake.js';
+import { Q } from './quality.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 export const HULL_SIDE = 0, HULL_UNDER = 1, HULL_GIRDER = 2;
@@ -136,7 +137,7 @@ varying vec2 vHullUV; varying vec2 vHullF; varying vec3 vHullT;`)
   #endif
     vHullT = normalize((viewMatrix * vec4(mat3(modelMatrix) * ht, 0.0)).xyz);
   }`);
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + LAYOUT)
+    sh.fragmentShader = (Q.lite ? '#define HULL_LITE\n' : '') + sh.fragmentShader.replace('#include <common>', '#include <common>\n' + LAYOUT)
       .replace('#include <map_fragment>', `#include <map_fragment>
   float hu = vHullUV.x, hW = vHullF.x, hK = vHullF.y;
   // v split into a 12 m period's index and the metres into it: v runs to 14 km and its float steps are ~2 mm there
@@ -146,10 +147,14 @@ varying vec2 vHullUV; varying vec2 vHullF; varying vec3 vHullT;`)
   float hHatch, hVent;
   float hh = hullHeight(hc, hfp, hK, hHatch, hVent);
   // the relief's slope by finite differences (a step no smaller than the pixel), in mm per metre
+#ifdef HULL_LITE
+  vec2 hGrad = vec2(0.0);                                            // (Laptop mode: flat plates, the seams painted)
+#else
   float he = max(0.0015, hfp * 0.75), hd1, hd2;
   float hx = hullHeight(hullCell(hu + he, hvl, hvi, hW, hK), hfp, hK, hd1, hd2);
   float hy = hullHeight(hullCell(hu, hvl + he, hvi, hW, hK), hfp, hK, hd1, hd2);
   vec2 hGrad = vec2(hx - hh, hy - hh) / he * 0.001;
+#endif
   // grime and wear (noise in metres: broad 8 m, fine 2 m, flecks 1 m, streaks running across the face)
   vec2 hm = vec2(hvl + mod(hvi, 64.0) * 12.0, hu);                  // (wrapped at 768 m, a whole number of every tile)
   vec4 n1 = texture2D(hullNoise, hm / 8.0), n2 = texture2D(hullNoise, hm / 2.0 + 0.37), n3 = texture2D(hullNoise, hm / 1.0 + 0.71);
@@ -182,7 +187,7 @@ varying vec2 vHullUV; varying vec2 vHullF; varying vec3 vHullT;`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
   totalEmissiveRadiance += vec3(0.55, 0.85, 1.6) * 2.2 * hLamp * (0.8 + 0.2 * smoothstep(0.38, 0.0, lampV));`);
   };
-  mat.customProgramCacheKey = () => `feather-${key}`;
+  mat.customProgramCacheKey = () => `feather-${key}-${Q.lite}`;
   return mat;
 }
 

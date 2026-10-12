@@ -2,7 +2,9 @@
 const KEY = 'feather.settings.v4';
 export const DEFAULTS = { tonemap: 'aces', ao: true, bloom: true, shadows: 'high', scale: 1, exposure: 0, fps: true,
   blur: true, reflections: true, streaks: true, ai: 'normal', music: 'mid', sfx: 'high', aa: 'smaa', aoRes: 'auto',
-  brakeLights: true };
+  brakeLights: true, laptop: false };
+// Laptop mode's picture (quality.js has what else it cuts); turned off, the rows go back to what they were
+const LAPTOP = { scale: 0.5, aa: 'smaa1', ao: false, reflections: false, shadows: 'off', streaks: false, blur: false };
 // (AI difficulty: the rivals, race.js AI_LEVELS - Normal a fair fight, Hard close to a flawless lap, Brutal at it)
 const ROWS = [
   ['ai', 'AI difficulty', [['normal', 'Normal'], ['hard', 'Hard'], ['brutal', 'Brutal']]],
@@ -10,7 +12,7 @@ const ROWS = [
   ['sfx', 'Sound effects', [['low', 'Low'], ['mid', 'Medium'], ['high', 'High']]],
   ['tonemap', 'Tone mapping', [['punchy', 'AgX Punchy'], ['agx', 'AgX Medium'], ['aces', 'ACES']]],
   ['exposure', 'Exposure', [[-1.5, '-1.5'], [-1, '-1'], [-0.5, '-0.5'], [0, '0'], [0.5, '+0.5']]],
-  ['aa', 'Anti-aliasing', [['msaa', 'MSAA 4x'], ['fast', 'MSAA 2x + SMAA'], ['smaa', 'MSAA 4x + SMAA'], ['high', 'MSAA 8x + SMAA']]],
+  ['aa', 'Anti-aliasing', [['smaa1', 'SMAA'], ['msaa', 'MSAA 4x'], ['fast', 'MSAA 2x + SMAA'], ['smaa', 'MSAA 4x + SMAA'], ['high', 'MSAA 8x + SMAA']]],
   ['ao', 'Ambient occlusion', [[true, 'On'], [false, 'Off']]],
   ['aoRes', 'AO resolution', [['auto', 'Auto'], ['full', 'Full'], ['half', 'Half']]],
   ['bloom', 'Bloom', [[true, 'On'], [false, 'Off']]],
@@ -18,19 +20,23 @@ const ROWS = [
   ['streaks', 'Light streaks', [[true, 'On'], [false, 'Off']]],
   ['blur', 'Speed blur', [[true, 'On'], [false, 'Off']]],
   ['brakeLights', 'Brake lights', [[true, 'On'], [false, 'Off']]],
+  ['laptop', 'Laptop mode (integrated GPU)', [[false, 'Off'], [true, 'On']]],
   ['shadows', 'Shadows', [['high', 'High'], ['medium', 'Medium'], ['off', 'Off']]],
-  ['scale', 'Render scale', [[0.75, '75%'], [1, '100%'], [1.25, '125%'], [1.5, '150%']]],
+  ['scale', 'Render scale', [[0.5, '50%'], [0.75, '75%'], [1, '100%'], [1.25, '125%'], [1.5, '150%']]],
   ['fps', 'FPS readout', [[true, 'On'], [false, 'Off']]],
 ];
 
 // the headings the rows fall under (in the menu's Settings screen)
-const GROUPS = { ai: 'Race', music: 'Audio', tonemap: 'Picture', ao: 'Effects', shadows: 'Performance' };
+const GROUPS = { ai: 'Race', music: 'Audio', tonemap: 'Picture', ao: 'Effects', laptop: 'Performance' };
 
 export class Settings {
-  constructor(apply) {
+  // integrated: the GPU looks built-in (quality.js) - a first visit starts in Laptop mode
+  constructor(apply, integrated = false) {
     this.apply = apply;
     this.v = { ...DEFAULTS };
-    try { Object.assign(this.v, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch { /* private window */ }
+    let saved = null;
+    try { saved = localStorage.getItem(KEY); Object.assign(this.v, JSON.parse(saved || '{}')); } catch { /* private window */ }
+    if (!saved && integrated) this.laptop(true);
     // Normal is the default difficulty: a Hard saved before the player ever chose one goes back to it
     if (!this.v.aiPicked) this.v.ai = DEFAULTS.ai;
     this.focus = 0;                                  // the row the keyboard / gamepad is on
@@ -50,7 +56,20 @@ export class Settings {
     apply(this.v);
   }
 
+  // Laptop mode on: its rows set (what they were kept); off: those rows back
+  laptop(on) {
+    if (on && !this.v.laptop) {
+      this.v.beforeLaptop = Object.fromEntries(Object.keys(LAPTOP).map((k) => [k, this.v[k]]));
+      Object.assign(this.v, LAPTOP);
+    } else if (!on && this.v.laptop) {
+      Object.assign(this.v, this.v.beforeLaptop || Object.fromEntries(Object.keys(LAPTOP).map((k) => [k, DEFAULTS[k]])));
+      delete this.v.beforeLaptop;
+    }
+    this.v.laptop = on;
+  }
+
   set(k, val) {
+    if (k === 'laptop') this.laptop(val);
     this.v[k] = val;
     if (k === 'ai') this.v.aiPicked = true;
     try { localStorage.setItem(KEY, JSON.stringify(this.v)); } catch { /* storage blocked */ }

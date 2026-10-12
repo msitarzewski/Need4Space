@@ -35,6 +35,7 @@ function releaseAfterUpload(tex) {
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshoptSimplifier } from 'meshoptimizer/meshopt_simplifier.module.js';
 import { clamp, damp, smoothstep, noise2 } from './noise.js';
+import { Q } from './quality.js';
 
 // Blender (Z up) -> glTF / three (Y up): (x, y, z) -> (x, z, -y). The nose is at -Z, starboard at +X.
 const toThree = ([x, y, z]) => new THREE.Vector3(x, z, -y).normalize();
@@ -939,13 +940,14 @@ export class Ship {
       const m = new THREE.MeshPhysicalMaterial({
         map: old.map, normalMap: nm, normalScale: old.normalScale.clone(), aoMap: old.aoMap,
         roughnessMap: old.roughnessMap, metalnessMap: old.metalnessMap, roughness: old.roughness,
-        metalness: old.metalness, clearcoat: 0.25, clearcoatRoughness: 0.24,
+        metalness: old.metalness, clearcoat: Q.lite ? 0 : 0.25, clearcoatRoughness: 0.24,
       });
       m.name = 'RacerBaked';
+      m.userData.clearcoat = 0.25;                     // (Laptop mode drops it: quality.js setLite)
       const rg = !!nm?.userData.rg;
       m.onBeforeCompile = (sh) => {
         sh.fragmentShader = sh.fragmentShader.replace('#include <lights_physical_fragment>',
-          '#include <lights_physical_fragment>\n  material.clearcoat *= clamp(1.0 - metalnessFactor, 0.0, 1.0);');
+          '#include <lights_physical_fragment>\n#ifdef USE_CLEARCOAT\n  material.clearcoat *= clamp(1.0 - metalnessFactor, 0.0, 1.0);\n#endif');
         if (rg) sh.fragmentShader = rgNormalChunk(sh.fragmentShader);
       };
       m.customProgramCacheKey = () => (rg ? 'feather-hull-rg' : 'feather-hull');
@@ -971,7 +973,7 @@ export class Ship {
         .replace('#include <common>', '#include <common>\nuniform vec3 teamA;\nuniform vec3 teamB;')
         .replace('#include <map_fragment>', '#include <map_fragment>\n' + TEAM_GLSL)
         .replace('#include <lights_physical_fragment>',
-          '#include <lights_physical_fragment>\n  material.clearcoat *= clamp(1.0 - metalnessFactor, 0.0, 1.0);');
+          '#include <lights_physical_fragment>\n#ifdef USE_CLEARCOAT\n  material.clearcoat *= clamp(1.0 - metalnessFactor, 0.0, 1.0);\n#endif');
       if (m.normalMap?.userData.rg) sh.fragmentShader = rgNormalChunk(sh.fragmentShader);
     };
     m.customProgramCacheKey = () => (m.normalMap?.userData.rg ? 'feather-team-rg' : 'feather-team');

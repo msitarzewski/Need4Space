@@ -9,6 +9,7 @@
 // real shadows at any distance; and an ambient occlusion per vertex (crater floors, boulder feet).
 import * as THREE from 'three';
 import { bakeLater, quadJob } from './bake.js';
+import { Q } from './quality.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 const GEN = /* glsl */`
@@ -174,7 +175,7 @@ export function rockMaterial({ big = 45, small = 7, macro = big * 5.3, albedo = 
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, { rockCol: U.rockCol, rockNrm: U.rockNrm });
     if (shadow) Object.assign(sh.uniforms, { rkSh: U.rkSh, rkShM: U.rkShM, rkShP: U.rkShP });
-    const defs = (ao ? '#define ROCK_AO\n' : '') + (shadow ? '#define ROCK_SHADOW\n' : '');
+    const defs = (ao ? '#define ROCK_AO\n' : '') + (shadow ? '#define ROCK_SHADOW\n' : '') + (Q.lite ? '#define ROCK_LITE\n' : '');
     sh.vertexShader = defs + sh.vertexShader.replace('#include <common>', `#include <common>
 varying vec3 vTpW; varying vec3 vTpN;
 #ifdef ROCK_AO
@@ -229,12 +230,19 @@ void rkHex(vec2 uv, out vec4 col, out vec2 slope) {
 }
 // one projection (p: 2-D coordinates in metres) at the three scales
 void rkProj(vec2 p, float fs, out vec4 col, out vec2 slope) {
+#ifdef ROCK_LITE
+  // (Laptop mode: the middle scale alone)
+  vec4 cb; vec2 gb;
+  rkHex(p / ${f(big)}, cb, gb);
+  col = vec4(cb.rgb * 2.0, cb.a); slope = gb;
+#else
   vec4 cm, cb, cs = vec4(0.5); vec2 gm, gb, gs = vec2(0.0);
   rkHex(p / ${f(macro)}, cm, gm);
   rkHex(p / ${f(big)}, cb, gb);
   if (fs > 0.01) rkHex(p / ${f(small)}, cs, gs);
   col = vec4(sqrt(cm.rgb * 2.0) * cb.rgb * 2.0 * mix(vec3(1.0), cs.rgb * 2.0, 0.6 * fs), mix(cb.a, cs.a, 0.5 * fs));
   slope = gm * 0.8 + gb + gs * fs;
+#endif
 }
 float rkN3(vec3 x) {
   vec3 i = floor(x), u = fract(x); u = u * u * (3.0 - 2.0 * u);
@@ -250,11 +258,16 @@ float rkShadow() {
   vec3 sc = (rkShM * vec4(vTpW + normalize(vTpN) * rkShP.y, 1.0)).xyz * 0.5 + 0.5;
   if (sc.x <= 0.0 || sc.x >= 1.0 || sc.y <= 0.0 || sc.y >= 1.0 || sc.z >= 1.0) return 1.0;
   float lit = 0.0, rot = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-  for (int i = 0; i < 12; i++) {
-    float r = sqrt((float(i) + 0.5) / 12.0), a = float(i) * 2.39996323 + rot;
+#ifdef ROCK_LITE
+  const int RK_TAPS = 4;
+#else
+  const int RK_TAPS = 12;
+#endif
+  for (int i = 0; i < RK_TAPS; i++) {
+    float r = sqrt((float(i) + 0.5) / float(RK_TAPS)), a = float(i) * 2.39996323 + rot;
     lit += step(sc.z - rkShP.w, texture2D(rkSh, sc.xy + r * vec2(cos(a), sin(a)) * rkShP.x).x);
   }
-  return lit / 12.0;
+  return lit / float(RK_TAPS);
 }
 #endif`)
       .replace('#include <map_fragment>', `#include <map_fragment>
@@ -294,6 +307,6 @@ float rkShadow() {
         L.replace(at, `${at}\n\t\t#if UNROLLED_LOOP_INDEX == 0\n\t\tdirectLight.color *= rkShadow();\n\t\t#endif`));
     }
   };
-  mat.customProgramCacheKey = () => `feather-${key}-${big}-${small}-${macro}-${ao}-${shadow}`;
+  mat.customProgramCacheKey = () => `feather-${key}-${big}-${small}-${macro}-${ao}-${shadow}-${Q.lite}`;
   return mat;
 }
