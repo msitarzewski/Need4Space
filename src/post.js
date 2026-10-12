@@ -648,86 +648,153 @@ export class ShaftPass extends Pass {
   }
 }
 
-// Water on the lens, after flying through a waterfall: the screen wets in a flash (a pale veil and a wobble that
-// fade in ~0.3 s), then beads of water - each a little lens showing the picture flipped inside it, a dark rim - run
-// down the screen and dry off over ~2.5 s, the smallest first. On the finished picture (after the colour transform).
+// Water on the lens, after flying through a waterfall. First the sheet: the whole glass under a running film of water
+// (the picture behind it bent and blurred, a churn of white the instant it hits), draining down the screen, a bead of
+// water along its top edge. Behind it, what stays: drops of every size - never round, each a little fish-eye showing
+// the world upside down, out of focus (the lens is focused far away), dark at its steep rim, a glint of the sky on top
+// and the light it gathers along its bottom - a mist of droplets between them, and the big ones blown outward over
+// the glass by the air (the faster the camera, the faster they run), slowing as they shed water in a trail of
+// droplets. They dry off over ~3.5 s, the smallest first. On the finished picture (after the colour transform).
 export class LensWaterPass extends Pass {
   constructor() {
     super();
     this.wet = 0;          // 1 the moment the camera goes through, falling back to 0
-    this.splash = 0;       // the veil and wobble, gone in ~0.3 s
-    this.t = 0;
+    this.age = 9;          // since the hit (s)
+    this.travel = 0;       // how far the air has pushed the drops (the camera's speed, integrated)
     this.seed = 0;
     this.enabled = false;
     this.quad = new FullScreenQuad(new THREE.ShaderMaterial({
-      uniforms: { tDiffuse: { value: null }, wet: { value: 0 }, splash: { value: 0 }, time: { value: 0 }, seed: { value: 0 }, aspect: { value: 1 } },
+      uniforms: { tDiffuse: { value: null }, texel: { value: new THREE.Vector2(1 / 1920, 1 / 1080) }, wet: { value: 0 },
+        age: { value: 9 }, travel: { value: 0 }, seed: { value: 0 }, aspect: { value: 1 } },
       vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
       fragmentShader: /* glsl */`
-        uniform sampler2D tDiffuse; uniform float wet, splash, time, seed, aspect; varying vec2 vUv;
+        uniform sampler2D tDiffuse; uniform vec2 texel; uniform float wet, age, travel, seed, aspect; varying vec2 vUv;
         float h1(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
-        vec2 h2(vec2 p) { vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973)); q += dot(q, q.yzx + 33.33); return fract((q.xx + q.yz) * q.zy); }
-        // the drops of one layer: cells of the screen, a drop in a few, each its own size, the big ones running down
-        // (x, y: where in the drop, z: how far from its middle, w: its own random)
-        vec4 drops(vec2 uv, float cells, float salt, float dens) {
-          vec2 p = vec2(uv.x * aspect, uv.y) * cells;
-          vec4 best = vec4(0.0);
+        vec3 h3(vec2 p) { vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973)); q += dot(q, q.yxz + 33.33); return fract((q.xxy + q.yzz) * q.zyx); }
+        float vn(vec2 p) {
+          vec2 i = floor(p), u = fract(p); u = u * u * (3.0 - 2.0 * u);
+          return mix(mix(h1(i), h1(i + vec2(1, 0)), u.x), mix(h1(i + vec2(0, 1)), h1(i + vec2(1, 1)), u.x), u.y);
+        }
+        float fbm(vec2 p) { return 0.5 * vn(p) + 0.3 * vn(p * 2.1 + 7.1) + 0.2 * vn(p * 4.3 - 3.7); }
+        // a drop's cap at d from its middle (screen heights): an uneven round (its radius wobbles round it), drawn out
+        // by st along ax when it runs (the tail longer than the head); kept if it stands taller than what is there
+        // (D: x its height 0..1, yz where in it -1..1 - its slope, w its radius)
+        void cap(inout vec4 D, vec2 d, float R, vec3 r, float st, vec2 ax) {
+          if (R <= 1e-4) return;
+          vec2 pr = vec2(-ax.y, ax.x), l = vec2(dot(d, ax), dot(d, pr));
+          l.x /= 1.0 + st * (l.x < 0.0 ? 1.8 : 0.4);
+          float a = atan(l.y, l.x);
+          float Ra = R * (1.0 + 0.11 * sin(2.0 * a + r.x * 6.283) + 0.07 * sin(3.0 * a + r.y * 6.283) + 0.035 * sin(5.0 * a + r.z * 6.283));
+          vec2 n = l / Ra;
+          float h = 1.0 - dot(n, n);
+          if (h > D.x) D = vec4(h, n.x * ax + n.y * pr, R);
+        }
+        // the drops that stay put: a few cells in each, each its own size; the small dry first
+        void still(inout vec4 D, vec2 q, float cells, float salt, float dens) {
+          vec2 p = q * cells;
           for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
-            vec2 c = floor(p) + vec2(float(x), float(y)), r = h2(c + salt + seed);
-            float id = h1(c * 1.7 + salt + seed);
-            if (id > dens) continue;                                  // (most cells dry)
-            float big = r.x * r.x;
-            float run = big > 0.35 ? time * (0.25 + 0.8 * r.y) : 0.0; // only the heavy ones run
-            vec2 ctr = c + 0.2 + 0.6 * r + vec2(0.0, -run * cells * 0.3);
-            float rad = (0.08 + 0.38 * big) * smoothstep(id / dens * 0.9, id / dens * 0.9 + 0.12, wet);  // dries: small first
-            vec2 d = p - ctr;
-            d.y *= 0.9 + 0.5 * smoothstep(0.0, 0.4, run);            // a running drop drawn out
-            float q = dot(d, d) / max(rad * rad, 1e-5);
-            if (q < 1.0 && rad > 0.0) best = vec4(d / max(rad, 1e-5), q, id);
-            // the wet trail a running drop leaves above it
-            if (run > 0.0 && rad > 0.0 && abs(d.x) < rad * 0.25 && d.y > 0.0 && d.y < run * cells * 0.3 && best.z == 0.0) best = vec4(d.x / rad * 2.0, 0.0, 0.92, id);
+            vec2 c = floor(p) + vec2(float(x), float(y));
+            vec3 r = h3(c + salt + seed);
+            if (r.z > dens) continue;
+            float big = r.x * r.x, th = 0.8 * (1.0 - big) * (0.55 + 0.45 * r.y);
+            float R = (0.09 + 0.3 * big) * smoothstep(th, th + 0.15, wet);
+            vec2 ctr = c + 0.3 + 0.4 * h3(c * 1.31 + salt).xy;
+            cap(D, (p - ctr) / cells, R / cells, h3(c * 2.7 + salt), 0.0, vec2(1.0, 0.0));
           }
-          return best;
+        }
+        // the runners: big drops the air pushes outward from the middle of the glass, slowing as they shed their water
+        // in a line of droplets behind them (trail: how much of that line is here)
+        void runners(inout vec4 D, inout float trail, vec2 q) {
+          const float N = 24.0, TAU = 6.2831853;
+          float k0 = floor(atan(q.y, q.x) / TAU * N);
+          for (int k = -1; k <= 1; k++) {
+            float kk = mod(k0 + float(k), N);
+            vec3 r = h3(vec2(kk, 3.3) + seed), r2 = h3(vec2(kk, 9.1) + seed);
+            if (r2.z > 0.62) continue;
+            float a = (kk + 0.2 + 0.6 * r.x) / N * TAU;
+            vec2 ax = vec2(cos(a), sin(a));
+            float r0 = 0.12 + 0.4 * r.y, m = 0.12 + 0.4 * r.z;
+            float s = m * (1.0 - exp(-travel * 1.3)), v = m * 1.3 * exp(-travel * 1.3);
+            float R = (0.012 + 0.018 * r2.x) * smoothstep(0.0, 0.3, wet);
+            cap(D, q - ax * (r0 + s), R, r2, min(v * 4.0, 1.6), ax);
+            vec2 dq = q - ax * r0;
+            float al = dot(dq, ax), ac = abs(dot(dq, vec2(-ax.y, ax.x)));
+            if (al > 0.0 && al < s && ac < R * 0.7) trail = max(trail, (1.0 - ac / (R * 0.7)) * (0.35 + 0.65 * al / max(s, 1e-4)) * smoothstep(0.0, 0.4, wet));
+          }
+        }
+        // the finest droplets (thick along a runner's trail)
+        void mist(inout vec4 D, vec2 q, float trail) {
+          vec2 p = q * 72.0, c = floor(p);
+          vec3 r = h3(c + 5.5 + seed);
+          if (r.z > 0.12 * smoothstep(0.25, 0.75, wet) + 0.75 * trail) return;
+          cap(D, (p - c - 0.35 - 0.3 * r.xy) / 72.0, (0.16 + 0.16 * r.x) / 72.0, r.yzx, 0.0, vec2(1.0, 0.0));
+        }
+        // the picture behind the glass at uv, out of focus by r pixels (7 taps)
+        vec3 behind(vec2 uv, float r) {
+          vec3 c = texture2D(tDiffuse, uv).rgb;
+          if (r < 0.35) return c;
+          vec2 s = texel * r;
+          c += texture2D(tDiffuse, uv + s * vec2(1.0, 0.0)).rgb + texture2D(tDiffuse, uv + s * vec2(-0.5, 0.866)).rgb
+             + texture2D(tDiffuse, uv + s * vec2(-0.5, -0.866)).rgb + texture2D(tDiffuse, uv + s * vec2(0.25, 0.433)).rgb
+             + texture2D(tDiffuse, uv + s * vec2(0.25, -0.433)).rgb + texture2D(tDiffuse, uv + s * vec2(-0.5, 0.0)).rgb;
+          return c / 7.0;
         }
         void main() {
-          vec2 uv = vUv;
-          // the splash: a wobble through the picture
-          uv += splash * 0.01 * vec2(sin(vUv.y * 40.0 + time * 30.0), cos(vUv.x * 33.0 - time * 27.0));
-          // fewer toward the middle of the screen (the hull's own spray hits its edges), two sizes of cell
-          float edge = smoothstep(0.15, 0.6, length((vUv - 0.5) * vec2(aspect, 1.0)));
-          vec4 a = drops(uv, 7.0, 1.3, 0.12 + 0.2 * edge), b = drops(uv, 15.0, 7.7, 0.1 + 0.18 * edge);
-          vec4 d = a.z > 0.0 ? a : b;
-          vec2 off = vec2(0.0); float rim = 0.0, inDrop = 0.0;
-          if (d.z > 0.0 && wet > 0.01) {
-            float hgt = sqrt(max(1.0 - d.z, 0.0));
-            off = -d.xy * 0.05 * (0.4 + 0.6 * hgt);                      // a little lens: the picture flipped inside it
-            rim = smoothstep(0.8, 1.0, d.z);
-            inDrop = 1.0;
+          vec2 q = (vUv - 0.5) * vec2(aspect, 1.0);
+          vec4 D = vec4(0.0); float trail = 0.0;
+          float out_ = smoothstep(0.06, 0.42, length(q));             // fewer over the middle of the picture
+          still(D, q, 6.5, 1.3, 0.13 + 0.2 * out_);
+          still(D, q, 14.0, 7.7, 0.12 + 0.2 * out_);
+          runners(D, trail, q);
+          mist(D, q, trail);
+          // the sheet: a running film, its top edge draining down the glass (a bead of water along it)
+          float film = 0.0; vec2 fn = vec2(0.0);
+          if (age < 0.8) {
+            float front = 1.12 - age * 1.75 + 0.06 * (vn(vec2(q.x * 7.0, age * 4.0)) - 0.5);
+            film = smoothstep(0.0, 0.025, front - vUv.y);
+            vec2 f = vec2(q.x * 6.0, q.y * 2.6 + age * 7.0);
+            float h0 = fbm(f), e = 0.03;
+            fn = vec2(fbm(f + vec2(e, 0.0)) - h0, fbm(f + vec2(0.0, e)) - h0) / e;
+            float bead = exp(-pow((vUv.y - front) / 0.012, 2.0));
+            fn = fn * film * 0.012 + vec2(0.0, (vUv.y - front) / 0.012 * bead * 0.01);
+            film = max(film, bead * 0.8);
           }
-          vec3 col = texture2D(tDiffuse, uv + off).rgb;
-          col *= 1.0 - 0.25 * rim * inDrop;
-          col += inDrop * (1.0 - rim) * 0.08 * smoothstep(0.3, 1.0, -d.y) * (1.0 - d.z);   // a catch of light at the top of the drop
-          // the veil of spray at the moment it hits
-          col = mix(col, vec3(0.86, 0.9, 0.92), splash * 0.45);
+          float h = D.x, inD = smoothstep(0.0, 0.14, h), e = length(D.yz);
+          // a drop is a little fish-eye: the world from round it, upside down, out of focus
+          vec2 off = -D.yz * D.w * 2.8 * inD + fn;
+          vec3 col = behind(vUv + off / vec2(aspect, 1.0), 2.4 * inD + 7.0 * film);
+          col *= 1.0 - 0.5 * inD * smoothstep(0.62, 1.0, e) * smoothstep(0.002, 0.014, D.w);  // its steep rim: dark (faint on the finest)
+          vec3 N = normalize(vec3(D.yz * 1.2, 1.0));
+          col += inD * 0.6 * pow(max(dot(N, normalize(vec3(-0.35, 0.75, 0.55))), 0.0), 60.0);           // the sky's glint on it
+          col += inD * 0.1 * smoothstep(0.45, 0.88, e) * smoothstep(0.0, 0.7, -D.z) * (1.0 - smoothstep(0.9, 1.0, e)); // the light it gathers
+          // the film: a cool wash, its ripples catching the light; the instant it hits, a churn of white
+          vec3 Nf = normalize(vec3(fn * 60.0, 1.0));
+          col = mix(col, col * vec3(0.93, 0.97, 1.0) + 0.03 + 0.25 * pow(max(dot(Nf, normalize(vec3(-0.3, 0.8, 0.5))), 0.0), 24.0), film);
+          if (age < 0.2) {
+            float foam = smoothstep(0.42, 0.78, fbm(vec2(q.x * 3.5, q.y * 1.6 + age * 16.0)));
+            col = mix(col, vec3(0.88, 0.92, 0.95), (foam * 0.75 + 0.2) * (1.0 - smoothstep(0.03, 0.2, age)));
+          }
           gl_FragColor = vec4(col, 1.0);
         }`,
     }));
   }
 
-  setSize(w, h) { this.quad.material.uniforms.aspect.value = w / Math.max(1, h); }
+  setSize(w, h) { const u = this.quad.material.uniforms; u.aspect.value = w / Math.max(1, h); u.texel.value.set(1 / Math.max(1, w), 1 / Math.max(1, h)); }
 
   // the camera through a curtain of water
-  hit() { this.wet = 1; this.splash = 1; this.t = 0; this.seed = Math.floor(Math.random() * 100); }
+  hit() { this.wet = 1; this.age = 0; this.travel = 0; this.seed = 1 + Math.floor(Math.random() * 97); }
 
-  update(dt) {
-    this.t += dt;
-    this.wet = Math.max(0, this.wet - dt / 2.6);
-    this.splash = Math.max(0, this.splash - dt / 0.35);
+  // speed: the camera's (m/s) - the air on the glass
+  update(dt, speed = 0) {
+    this.age += dt;
+    this.wet = Math.max(0, this.wet - dt / 3.5);
+    this.travel += dt * Math.min(1.6, Math.max(0.15, speed / 110));
     this.enabled = this.allowed !== false && this.wet > 0.001;
   }
 
   render(renderer, writeBuffer, readBuffer) {
     const u = this.quad.material.uniforms;
-    u.tDiffuse.value = readBuffer.texture; u.wet.value = this.wet; u.splash.value = this.splash; u.time.value = this.t; u.seed.value = this.seed;
+    u.tDiffuse.value = readBuffer.texture; u.wet.value = this.wet; u.age.value = this.age; u.travel.value = this.travel; u.seed.value = this.seed;
     renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
     this.quad.render(renderer);
   }

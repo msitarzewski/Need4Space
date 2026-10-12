@@ -144,6 +144,8 @@ function scatterIslands(track, rnd, dens = 1) {
   return [...out, ...far, ...karst];
 }
 
+const _d = new THREE.Vector3();
+
 export class ForestWorld {
   constructor(scene, renderer, camera) {
     this.name = 'forest';
@@ -610,19 +612,24 @@ float rN(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
   // the camera inside a curtain of falling water (the sheet's arc within 2.5 m, inside its width) - once per pass
   // through it (main.js: water on the lens, a splash)
   wetCheck(p) {
-    let inside = false;
+    const inside = !!this.inFall(p);
+    const hit = inside && !this.wasWet;
+    this.wasWet = inside;
+    return hit;
+  }
+
+  // the fall whose curtain p is in (within r m of the sheet's arc, inside its width), or null
+  inFall(p, r = 2.5) {
     for (const f of this.waters.falls) {
-      const d = p.clone().sub(f.lip), h = d.x * f.out.x + d.z * f.out.z;
+      const d = _d.copy(p).sub(f.lip), h = d.x * f.out.x + d.z * f.out.z;
       if (h < -5 || h > f.v * 9 + 10 || d.y > 5 || d.y < -330) continue;
       // the nearest point of the arc (x = v t, y = -g t^2 / 2) in its own plane
       let best = 1e9, bt = 0;
       for (let t = 0; t <= 8; t += 0.08) { const x = f.v * t - h, y = -4.9 * t * t - d.y, q = x * x + y * y; if (q < best) { best = q; bt = t; } }
       const lat = Math.abs(d.x * -f.out.z + d.z * f.out.x), w = f.width * (1 + 0.07 * bt) + 2 * bt;
-      if (best < 2.5 * 2.5 && lat < w / 2 - 1) { inside = true; break; }
+      if (best < r * r && lat < w / 2 - 1) return f;
     }
-    const hit = inside && !this.wasWet;
-    this.wasWet = inside;
-    return hit;
+    return null;
   }
 
   // the gas giant (the space circuit's), its rings and a cratered moon - beyond the air (the dome dims them)

@@ -301,6 +301,7 @@ export class FX {
     this.sparks = new Pool(scene, 2200, { additive: true, map: glow, order: 5, stretch: true, ramp: 1 });
     this.ions = new Pool(scene, 1600, { additive: true, map: glow, order: 5, stretch: true, ramp: 2 });
     this.glints = new Pool(scene, 64, { additive: true, map: glow, order: 6 });
+    this.spray = new Pool(scene, 900, { map: glow, order: 4, stretch: true });         // water: drops on arcs, not lights
     this.marks = new WallMarks(scene);
     this.track = null;                        // set by main: sparks fall to its deck and bounce
     this.streaks = new Streaks(camera);
@@ -375,7 +376,25 @@ export class FX {
     }
   }
 
-  get pools() { return [this.dust, this.smoke, this.fire, this.sparks, this.ions, this.glints]; }
+  get pools() { return [this.dust, this.smoke, this.fire, this.sparks, this.ions, this.glints, this.spray]; }
+
+  // a ship through a curtain of falling water (at, its velocity v): the water bursts off its nose and over it - a
+  // cloud of white spray left hanging in its wake, and drops flung out on arcs, falling
+  splash(at, v) {
+    const V = new THREE.Vector3(), P = new THREE.Vector3(), white = new THREE.Color(1.1, 1.15, 1.2), drop = new THREE.Color(0.95, 1.0, 1.06);
+    for (let i = 0; i < 46; i++) {
+      V.set(Math.random() - 0.5, Math.random() * 0.8 - 0.25, Math.random() - 0.5).normalize().multiplyScalar(4 + Math.random() * 12).addScaledVector(v, 0.2 + 0.25 * Math.random());
+      P.copy(at).addScaledVector(V, 0.06);
+      this.smoke.emit(P, V, white, { size: 1.5 + Math.random() * 3, grow: 5 + Math.random() * 4, life: 0.7 + Math.random() * 1.1, alpha: 0.42,
+        drag: 2.2, grav: 2.5, spin: (Math.random() - 0.5) * 1.5, fadeIn: 0.03 });
+    }
+    for (let i = 0; i < 260; i++) {
+      V.set(Math.random() - 0.5, Math.random() * 0.9 - 0.1, Math.random() - 0.5).normalize().multiplyScalar(8 + Math.random() * 26).addScaledVector(v, 0.35 + 0.4 * Math.random());
+      P.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(5).add(at);
+      this.spray.emit(P, V, drop, { size: 0.05 + Math.random() * 0.08, life: 0.5 + Math.random() * 0.9, alpha: 0.75,
+        drag: 0.6, grav: 9.8, fadeIn: 0.02, stretch: 0.035 });
+    }
+  }
 
   // the deck under a point (for sparks to land on): the track frame there
   deckAt(p) {

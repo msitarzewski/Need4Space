@@ -381,6 +381,7 @@ async function boot() {
   audio.prepareMusic();                              // (the songs load once the game has: not over the ship's download)
 
   const FIXED = 1 / 120;
+  const _sprayV = new THREE.Vector3();
   const _sunP = new THREE.Vector3(), _camF = new THREE.Vector3();
   let acc = 0, last = performance.now();
   const render = () => { scene.updateMatrixWorld(); composer.render(); };
@@ -654,7 +655,14 @@ async function boot() {
     }
     // through a waterfall: water on the lens, and the splash
     if (world.wetCheck?.(camera.position)) { lens.hit(); audio.splash?.(); }
-    lens.update(dt);
+    // and every ship through one: spray off it (once a pass)
+    if (world.inFall && dt > 0) for (const s of race ? race.entries.map((e) => e.ship) : [ship]) {
+      const p = s.root.position, f = world.inFall(p, 6), was = s.inFall;
+      s.inFall = !!f;
+      if (f && !was && s.lastP) fx.splash(p, _sprayV.subVectors(p, s.lastP).divideScalar(dt));
+      (s.lastP ||= new THREE.Vector3()).copy(p);
+    }
+    lens.update(dt, ctl.speed);
 
     // lap timing: progress along the circuit (the track's arc length, or the road's samples near the road)
     if (!race && !lap.started && ship.ready && ctl.speed > 3) { lap.started = true; lap.time = 0; }
