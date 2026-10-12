@@ -35,7 +35,8 @@ const stats = (L) => [
 const MAIN = [['race', 'Race'], ['free', 'Free flight'], ['circuit', 'Circuit'], ['settings', 'Settings'], ['controls', 'Controls'], ['support', 'Support']];
 // the circuits (main.js loads the one chosen: the page reloads into it)
 export const CIRCUITS = [['space', 'Space', 'The orbital circuit over the ringed gas giant: a meteorite to fly through, a glass tunnel, a loop'],
-  ['forest', 'Forest moon', 'High over a jungle moon: floating islands, a river arching over the track, a colossal tree, a glowworm cave']];
+  ['forest', 'Forest moon', 'High over a jungle moon: floating islands, a river arching over the track, a colossal tree, a glowworm cave'],
+  ['ice', 'Ice planet', 'Over a frozen sea at dusk: aurora, a crescent ice giant, giant crystals, a glacier to fly through, two rifts to jump']];
 // donations (the author's Revolut)
 const DONATE_URL = 'https://revolut.me/alexan_vic', DONATE_HANDLE = '@alexan_vic';
 const donate = () => window.open(DONATE_URL, '_blank', 'noopener');
@@ -329,7 +330,7 @@ export class Menu {
       settings: 'Picture, effects, audio and performance',
       controls: 'Keyboard, mouse and gamepad',
       support: 'Donate to keep Need4Space flying',
-      circuit: 'Space, or the forest moon',
+      circuit: 'Space, the forest moon or the ice planet',
       ...Object.fromEntries(CIRCUITS.map(([id, , d]) => ['map:' + id, d])),
       resume: free ? 'Back to free flight' : 'Back to the race',
       restart: free ? 'Back over the start line' : 'Back to the grid and the lights',

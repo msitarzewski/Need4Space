@@ -491,7 +491,35 @@ export class Track {
           .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.95, deckMoss);');
       };
     }
-    deckMat.customProgramCacheKey = () => (TH.moss ? 'feather-deck-moss' : 'feather-deck');
+    if (TH.frost) {
+      // rime creeping in from both walls, and tongues of snow blown across the deck here and there
+      const before = deckMat.onBeforeCompile;
+      deckMat.onBeforeCompile = (sh) => {
+        before(sh);
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+float deckFrost = 0.0;
+float frH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+float frN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(frH(i), frH(i + vec2(1, 0)), f.x), mix(frH(i + vec2(0, 1)), frH(i + vec2(1, 1)), f.x), f.y); }`)
+          .replace('#include <map_fragment>', `#include <map_fragment>
+  {
+    // (v split into whole 400 m and the rest: along the lap it runs to ~10 km and the noise wants small numbers)
+    float x = abs(vMapUv.x - 0.5) * ${TRACK_W.toFixed(1)}, along = mod(vMapUv.y * 40.0, 400.0), edge = ${(TRACK_W / 2).toFixed(1)} - x;
+    float side = step(0.5, vMapUv.x) * 17.0;
+    float n1 = frN(vec2(along / 9.0, x / 3.0) + side), n2 = frN(vec2(along / 1.3, x / 1.1) + side + 3.7);
+    float reach = 1.2 + 5.5 * smoothstep(0.25, 0.8, frN(vec2(along / 37.0, 1.3) + side));
+    float base = 1.0 - smoothstep(reach * 0.35, reach, edge + (n1 - 0.5) * 1.6);
+    float tongue = smoothstep(0.56, 0.76, frN(vec2((along + x * 1.25) / 5.5, x / 19.0) + 7.1))
+      * smoothstep(0.35, 0.6, frN(vec2(along / 90.0, 2.9)));
+    deckFrost = clamp(smoothstep(0.35, 0.6, base * 0.9 + (n2 - 0.5) * 0.3) + tongue * (0.55 + 0.45 * n2), 0.0, 1.0);
+    diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.24, 0.32, 0.43), vec3(0.48, 0.58, 0.72), n2), deckFrost * 0.7);
+  }`)
+          .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.85, deckFrost);')
+          // (a low sun's glint off the deck held to a glow: racing into the sunset it greyed the whole road)
+          .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.directSpecular = min(reflectedLight.directSpecular, vec3(0.6));');
+      };
+    }
+    deckMat.customProgramCacheKey = () => (TH.moss ? 'feather-deck-moss' : TH.frost ? 'feather-deck-frost' : 'feather-deck');
     this.deckMat = deckMat;
     out.deck = new THREE.Mesh(top, deckMat);
     const E = W + WALL_T;
