@@ -27,8 +27,8 @@ vec3 ssStrata(float y, out float lip, out float groove) {
   float r = ssH1(id), r2 = ssH1(id + 31.0);
   // thick beds and thin: a bed splits in two now and then
   if (r2 > 0.62) { fb = fract(fb * 2.0); id += 0.5 * step(0.5, fract(b)); r = ssH1(id * 3.7); }
-  vec3 c = r < 0.26 ? vec3(0.4, 0.115, 0.048) : r < 0.52 ? vec3(0.55, 0.22, 0.085) : r < 0.7 ? vec3(0.6, 0.34, 0.17)
-    : r < 0.87 ? vec3(0.66, 0.45, 0.27) : vec3(0.27, 0.105, 0.09);
+  vec3 c = r < 0.32 ? vec3(0.42, 0.12, 0.05) : r < 0.62 ? vec3(0.55, 0.22, 0.085) : r < 0.8 ? vec3(0.6, 0.33, 0.16)
+    : r < 0.91 ? vec3(0.64, 0.43, 0.26) : vec3(0.3, 0.11, 0.09);
   c *= 0.9 + 0.1 * sin(y * 5.3 + r2 * 6.0);                 // laminations
   lip = smoothstep(0.72, 0.97, fb) * step(0.4, r2);          // the harder beds' tops stand out
   groove = (smoothstep(0.72, 0.97, fb) - smoothstep(0.0, 0.08, fb)) * step(0.4, r2);
