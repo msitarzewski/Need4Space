@@ -53,7 +53,7 @@ function inset(k, d) {
 // ---------------------------------------------------------------- geometry accumulation
 // per vertex: position, normal, wUV (metres across / along the face), wT (direction u runs in), wA (kind, sky light,
 // soot, seed), wC (paint colour, or a lamp's colour)
-export const K_HULL = 0, K_INNER = 1, K_FRAME = 2, K_MACH = 3, K_TORN = 4, K_DECK = 5, K_LAMP = 6;
+export const K_HULL = 0, K_INNER = 1, K_FRAME = 2, K_MACH = 3, K_TORN = 4, K_DECK = 5, K_LAMP = 6, K_CABLE = 7;
 class Geo {
   constructor() { this.P = []; this.N = []; this.UV = []; this.T = []; this.A = []; this.C = []; this.I = []; this.n = 0; }
   v(p, n, u, v, t, a, c) {
@@ -260,8 +260,8 @@ ${lines.join('\n')}
 // nearest the camera, flickering) is added per pixel; the sky's light is scaled by each vertex's view of the sky.
 export function wreckMaterial() {
   const U = { wTime: { value: 0 }, wLampP: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, -1e6, 0, 1)) },
-    wLampC: { value: Array.from({ length: 8 }, () => new THREE.Vector3()) }, wFlick: { value: new Float32Array(64).fill(1) },
-    hullNoise: { value: null } };
+    wLampC: { value: Array.from({ length: 8 }, () => new THREE.Vector3()) }, wFlick: { value: new Float32Array(96).fill(1) },
+    hullNoise: { value: null }, wSway: { value: 1 } };
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.4 });
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
@@ -269,9 +269,15 @@ export function wreckMaterial() {
     sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>
 attribute vec2 wUV; attribute vec3 wT; attribute vec4 wA; attribute vec3 wC;
 varying vec2 vWUV; varying vec3 vWT; varying vec4 vWA; varying vec3 vWC;
-uniform float wFlick[64];`)
+uniform float wFlick[96]; uniform float wTime, wSway;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+  if ( wA.x > 6.5 ) {
+    float ph = dot( position, vec3( 0.013, 0.021, 0.017 ) );
+    transformed += vec3( sin( wTime * 0.43 + ph ), 0.4 * sin( wTime * 0.31 + ph * 1.7 ), cos( wTime * 0.37 + ph * 1.3 ) ) * wA.w * wSway;
+  }`)
       .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
   vWUV = wUV; vWA = wA; vWC = wC;
+  if ( wA.x > 6.5 ) vWA = vec4( 3.0, wA.y, wA.z, 0.0 );
   {
     vec3 ht = wT;
   #ifdef USE_INSTANCING
@@ -281,7 +287,7 @@ uniform float wFlick[64];`)
   }
   if ( wA.x > 5.5 ) vWC *= wFlick[ int( wA.w ) ];`);
     sh.fragmentShader = (Q.lite ? '#define WRECK_LITE\n' : '') + sh.fragmentShader.replace('#include <common>', `#include <common>
-uniform sampler2D hullNoise; uniform float wTime; uniform vec4 wLampP[8]; uniform vec3 wLampC[8];
+uniform sampler2D hullNoise; uniform vec4 wLampP[8]; uniform vec3 wLampC[8];
 varying vec2 vWUV; varying vec3 vWT; varying vec4 vWA; varying vec3 vWC;
 float wHash( vec2 p ) { vec3 q = fract( vec3( p.xyx ) * 0.1031 ); q += dot( q, q.yzx + 33.33 ); return fract( ( q.x + q.y ) * q.z ); }
 // a seam of half-width hw at distance d (>= 0) from its line, box-filtered over a pixel fp m wide: how much of the
@@ -468,6 +474,7 @@ export class Wreck {
       this.pylons(H);
     }
     this.hangar(this.fore);
+    for (const H of this.halves) this.markers(H);
     this.bulkhead(this.fore);
     this.corridor(this.fore);
     this.exterior(this.fore);
@@ -546,8 +553,9 @@ export class Wreck {
         hole(zb + 8, wrapA(tSide + side * -0.1), 118, 0.62, 7, 1),                   // the breach, round the track
         hole(zb + 175, Math.PI / 2 + 0.05, 120, 0.33, 5, 0.8),                        // the gash along its back
         hole(Lf - 70, wrapA(Math.PI / 2 - side * 0.55), 110, 0.75, 6, 0.9),           // torn open where it broke
-        hole(zb + 120, wrapA(tSide + side * 0.62), 40, 0.22, 4, 1),                    // smaller holes: shoulder, flanks
-        hole(zb - 120, wrapA(tSide + side * 0.75), 28, 0.18, 3, 1),
+        hole(zb + 70, wrapA(tSide + side * 0.56), 86, 0.24, 6, 1),                     // torn up over the breach to the shoulder
+
+        hole(zb - 120, wrapA(tSide + side * 0.75), 28, 0.18, 3, 1),                    // smaller holes: shoulder, flanks
         hole(zb + 430, wrapA(Math.PI - tSide - 0.1), 45, 0.28, 4, 1),
         hole(zb + 90, wrapA(Math.PI - tSide + 0.25), 30, 0.2, 3, 1),
         hole(zb + 520, -Math.PI / 2 + 0.3, 36, 0.2, 3, 1),
@@ -788,7 +796,7 @@ export class Wreck {
   // 8 m under to 15 m over it): vertices, triangle centres and edge middles, by the nearest track sample
   clearance(xMax = 26, yLo = -8, yHi = 15) {
     const tr = this.track, f = {}, pts = [];
-    for (let s = tr.at('wreckIn') - 700; s < tr.at('wreckOut') + 400; s += 2) { tr.frame(s, f); pts.push({ P: f.P.clone(), R: f.R.clone(), U: f.U.clone(), T: f.T.clone(), s }); }
+    for (let s = tr.at('back'); s < tr.at('wreckOut') + 400; s += 2) { tr.frame(s, f); pts.push({ P: f.P.clone(), R: f.R.clone(), U: f.U.clone(), T: f.T.clone(), s }); }
     const cell = 24, grid = new Map(), key = (x, y, z) => `${x},${y},${z}`;
     pts.forEach((q, i) => { const k = key(Math.floor(q.P.x / cell), Math.floor(q.P.y / cell), Math.floor(q.P.z / cell)); (grid.get(k) || grid.set(k, []).get(k)).push(i); });
     const hits = [], d = new THREE.Vector3();
@@ -866,19 +874,31 @@ export class Wreck {
   // the decks the hangar and the spine stand on (60 m under the axis), plated in 30 m strips per 24 m bay on transverse
   // beams from frame to frame; torn away near the breach and where the ship broke
   floor(H) {
-    const y = -62, xr = 89, R = this.rnd;
-    const z0 = H === this.fore ? 270 : 14, z1 = H === this.fore ? H.len - 8 : H.len - 26;
-    for (let z = Math.ceil((z0 - H.ribFrom) / RIB_EVERY) * RIB_EVERY + H.ribFrom; z + RIB_EVERY <= z1 + 12; z += RIB_EVERY) {
-      for (let k = 0; k < 6; k++) {
-        const xa = -xr + (k * 2 * xr) / 6, xb = xa + (2 * xr) / 6, xc = (xa + xb) / 2, zc = z + RIB_EVERY / 2;
-        // the beam under it, frame to frame (in pieces: gone where the track comes through)
-        if (this.free(H, new THREE.Vector3(xc, y - 1.5, z), 16)) this.beam(H, new THREE.Vector3(xa, y - 1.5, z), new THREE.Vector3(xb, y - 1.5, z), 1.2, 2.2, new THREE.Vector3(0, 1, 0), { kind: K_FRAME, paint: PAINT_FRAME });
-        // torn where the hull is open beside it, a few plates missing
-        const th = Math.atan2(y, xc > 0 ? HW : -HW), f = H.field(zc, xc > 0 ? th : wrapA(Math.PI - th));
-        if ((Math.abs(xc) > 40 && f < 25) || R() < 0.06 || zc > z1 || !this.free(H, new THREE.Vector3(xc, y, zc), 18)) continue;
-        this.box(H, Wreck.F(new THREE.Vector3(xc, y, zc)), (xb - xa) / 2 - 0.15, 0.35, RIB_EVERY / 2 - 0.15, { kind: K_DECK, paint: PAINT_DECK, b: 0.08 });
-      }
+    const y = -62, xr = 89, R = this.rnd, beams = new Set();
+    H.floorSet = new Set();
+    const z0 = H === this.fore ? 270 : 14, z1 = H === this.fore ? H.len - 8 : H.len - 26, zFirst = Math.ceil((z0 - H.ribFrom) / RIB_EVERY) * RIB_EVERY + H.ribFrom;
+    // the beams, frame to frame, in pieces (gone where the track comes through)
+    for (let z = zFirst; z <= z1 + 12; z += RIB_EVERY) for (let k = 0; k < 6; k++) {
+      const xa = -xr + (k * 2 * xr) / 6, xb = xa + (2 * xr) / 6, xc = (xa + xb) / 2;
+      if (!this.free(H, new THREE.Vector3(xc, y - 1.5, z), 16)) continue;
+      beams.add(`${Math.round(z)}:${k}`);
+      this.beam(H, new THREE.Vector3(xa, y - 1.5, z), new THREE.Vector3(xb, y - 1.5, z), 1.2, 2.2, new THREE.Vector3(0, 1, 0), { kind: K_FRAME, paint: PAINT_FRAME });
     }
+    // the plates, each on the beams at both its ends; torn where the hull is open beside it, a few missing
+    for (let z = zFirst; z + RIB_EVERY <= z1 + 12; z += RIB_EVERY) for (let k = 0; k < 6; k++) {
+      const xa = -xr + (k * 2 * xr) / 6, xb = xa + (2 * xr) / 6, xc = (xa + xb) / 2, zc = z + RIB_EVERY / 2;
+      const f = H.field(zc, Math.atan2(y, xc > 0 ? HW : -HW));
+      if ((Math.abs(xc) > 40 && f < 25) || R() < 0.06 || zc > z1 || !this.free(H, new THREE.Vector3(xc, y, zc), 18)) continue;
+      if (!beams.has(`${Math.round(z)}:${k}`) || !beams.has(`${Math.round(z + RIB_EVERY)}:${k}`)) continue;
+      H.floorSet.add(`${Math.round(z)}:${k}`);
+      this.box(H, Wreck.F(new THREE.Vector3(xc, y, zc)), (xb - xa) / 2 - 0.15, 0.35, RIB_EVERY / 2 - 0.15, { kind: K_DECK, paint: PAINT_DECK, b: 0.08 });
+    }
+  }
+
+  // a floor plate under local (x, z)
+  onFloor(H, x, z) {
+    const zi = Math.floor((z - H.ribFrom) / RIB_EVERY) * RIB_EVERY + H.ribFrom, k = Math.floor((x + 89) / (178 / 6));
+    return k >= 0 && k < 6 && H.floorSet.has(`${Math.round(zi)}:${k}`);
   }
 
   // the track's supports where it runs through: a column from the deck below up to a cross-head under its girders,
@@ -888,6 +908,7 @@ export class Wreck {
     for (const r of H.tt) {
       if (r.p.z < 40 || r.p.z > H.len - 30 || Math.abs(r.p.x) > 60 || r.p.z - last < 72) continue;
       if ((H === this.fore && r.p.z < 300) || r.p.y - 4.9 + 61.6 < 16) continue;      // (a column worth building)
+      if (!this.onFloor(H, r.p.x, r.p.z)) continue;                                    // (and a deck to stand on)
       last = r.p.z;
       const top = r.p.clone().addScaledVector(r.U, -4.9);
       const o = { kind: K_FRAME, paint: PAINT_PYLON, sky: 0 };
@@ -928,7 +949,10 @@ export class Wreck {
         const tip = k === stack - 1 && R() < 0.3 ? (R() - 0.5) * 0.5 : 0;
         const ax = new THREE.Vector3(Math.cos(tip), Math.sin(tip), 0), ay = new THREE.Vector3(-Math.sin(tip), Math.cos(tip), 0);
         const pc = new THREE.Vector3(xc + (R() - 0.5) * 2, -62 + 0.4 + 5 + k * 10.1 + Math.abs(tip) * 5, z + (R() - 0.5) * 2), pk = pods[Math.floor(R() * pods.length)];
-        if (this.free(H, pc, 12)) this.pod(H, Wreck.F(pc, ax, ay, new THREE.Vector3(0, 0, 1)), pk);
+        // (on the deck: every corner of it over a plate, and the stack on it)
+        const onDeck = [[-5, -10], [5, -10], [-5, 10], [5, 10]].every(([dx, dz]) => this.onFloor(H, pc.x + dx, pc.z + dz));
+        if (!onDeck) break;
+        if (this.free(H, pc, 12)) this.pod(H, Wreck.F(pc, ax, ay, new THREE.Vector3(0, 0, 1)), pk); else break;
       }
     }
     // the gantry crane: rails hung from the roof frames, a box-girder bridge on end trucks, a trolley, its hoist
@@ -952,6 +976,21 @@ export class Wreck {
     }
   }
 
+  // small red marker lamps high on the frames' flanges at the roof's corners, every other frame
+  markers(H) {
+    const q = inset(1, SKIN + RIB_D + 0.6 + 0.45 * 0.7);      // (the housing's back on the flange's face)
+    for (let z = H.ribFrom + RIB_EVERY; z < H.ribTo - 10; z += RIB_EVERY * 2) {
+      if (H === this.fore && z < 300) continue;
+      for (const i of [0, 1]) {
+        const [x, y] = q[i];
+        const th = Math.atan2(y, x);
+        if (H.field(z, th) < 16) continue;
+        const out = new THREE.Vector3(-x, -y, 0).normalize();
+        this.lamp(H, new THREE.Vector3(x, y, z), out, 'red', 0.7);
+      }
+    }
+  }
+
   // a cargo pod (20 x 10 x 10 m): a box with corner posts, ribbed sides, a door end
   pod(H, F, paint) {
     const o = { kind: K_MACH, paint, sky: 0 };
@@ -964,14 +1003,14 @@ export class Wreck {
   // an emergency lamp: a caged housing on a bracket, its lens lit (flickering: update)
   lamp(H, p, out, col, size = 1) {
     const i = this.lamps.length;
-    if (i >= 64) return;
+    if (i >= GLOW_I) return;                    // (the last index is the reactors' glow)
     const ay = new THREE.Vector3(0, 1, 0), az = out.clone().normalize(), ax = new THREE.Vector3().crossVectors(ay, az).normalize();
     const F = Wreck.F(p.clone(), ax, new THREE.Vector3().crossVectors(az, ax), az);
     this.box(H, F, 1.4 * size, 0.5 * size, 0.45 * size, { kind: K_MACH, paint: PAINT_MACH });
     this.box(H, Wreck.F(p.clone().addScaledVector(az, 0.5 * size), F.ax, F.ay, F.az), 1.15 * size, 0.3 * size, 0.1 * size, { kind: K_LAMP, paint: LAMP[col], seed: i, b: 0.03 });
     for (const k of [-1, 0, 1]) this.box(H, Wreck.F(p.clone().addScaledVector(az, 0.62 * size).addScaledVector(F.ax, k * 0.55 * size), F.ax, F.ay, F.az), 0.05 * size, 0.42 * size, 0.06 * size, { kind: K_FRAME, paint: PAINT_FRAME, layer: 'detail' });
     const w = H.toWorld(p.clone().addScaledVector(az, 1.5 * size), new THREE.Vector3());
-    this.lamps.push({ p: w, col: LAMP[col], i, fail: this.rnd() < 0.35, ph: this.rnd() * 6.28, half: H, big: size > 1.4, f: 1 });
+    this.lamps.push({ p: w, col: LAMP[col], i, fail: this.rnd() < 0.35, ph: this.rnd() * 6.28, half: H, big: size > 1.4, small: size < 1, f: 1 });
   }
 
   // the great bulkhead (fore, between the hangar and the spine): a wall 3 m thick across the hull, its door opening
@@ -1067,7 +1106,7 @@ export class Wreck {
       const z = z0 + 10 + R() * (H.len - 140 - z0), x = tz(z) + (R() - 0.5) * 80, span = 10 + R() * 24, sag = 8 + R() * 18;
       const a = new THREE.Vector3(x, yTop - 0.2, z), b = new THREE.Vector3(x + (R() - 0.5) * 16, yTop - 0.2, z + span), pts = [];
       for (let i = 0; i <= 12; i++) { const t = i / 12, c = a.clone().lerp(b, t); c.y -= sag * 4 * t * (1 - t); pts.push(c); }
-      this.tube(H, pts, 0.32 + R() * 0.3, { kind: K_MACH, paint: PAINT_CABLE, segs: 6, layer: 'detail' });
+      this.tube(H, pts, 0.32 + R() * 0.3, { kind: K_MACH, paint: PAINT_CABLE, segs: 6, layer: 'detail', sway: 0.25 + sag * 0.04 });
     }
   }
 
@@ -1209,6 +1248,28 @@ export class Wreck {
       this.cyl(H, F.o, top, 1.1, { kind: K_FRAME, paint: PAINT_FRAME, sky: 1, segs: 8 });
       this.cyl(H, top, top.clone().addScaledVector(F.ax, -12).addScaledVector(F.ay, 3).addScaledVector(F.az, 7), 1.0, { kind: K_FRAME, paint: PAINT_FRAME, sky: 1, segs: 8 });
       this.lamp(H, this.onHull(H, 0, 0.5, 120, 0.4).o, this.onHull(H, 0, 0.5, 120).ay, 'red', 1.2);
+      // the sensor boom: a lattice truss 150 m out of the nose, buckled two thirds of the way and bent down
+      const w = 4.5, of = { kind: K_FRAME, paint: PAINT_FRAME, sky: 1 }, kink = -105, bend = 0.42;
+      const at = (z, cx, cy) => {
+        if (z >= kink) return new THREE.Vector3(cx, cy, z);
+        const d = kink - z;
+        return new THREE.Vector3(cx, cy * Math.cos(bend) - d * Math.sin(bend), kink - d * Math.cos(bend) - cy * Math.sin(bend));
+      };
+      const C4 = [[-w, -w], [w, -w], [w, w], [-w, w]];
+      for (let z = -8; z > -150; z -= 10) {
+        const z1 = Math.max(-150, z - 10);
+        for (const [cx, cy] of C4) this.beam(H, at(z, cx, cy), at(z1, cx, cy), 0.9, 0.9, new THREE.Vector3(0, 1, 0), of);
+        for (let e = 0; e < 4; e++) {
+          const [ax, ay] = C4[e], [bx, by] = C4[(e + 1) % 4];
+          this.beam(H, at(z1, ax, ay), at(z1, bx, by), 0.5, 0.5, new THREE.Vector3(0, 0, 1), { ...of, layer: 'detail' });
+          this.beam(H, at(z, ax, ay), at(z1, bx, by), 0.4, 0.4, new THREE.Vector3(0, 0, 1), { ...of, layer: 'detail' });
+        }
+      }
+      this.cyl(H, new THREE.Vector3(0, 0, 2), new THREE.Vector3(0, 0, -12), 9, { kind: K_MACH, paint: PAINT_MACH, sky: 1, segs: 20 });
+      const tip = at(-150, 0, 0), tipD = at(-151, 0, 0).sub(tip).normalize();
+      const tx = new THREE.Vector3(1, 0, 0), ty = tipD.clone(), tz = new THREE.Vector3().crossVectors(tx, ty);
+      this.lathe(H, Wreck.F(tip, tx, ty, tz), [[0, 0], [7, 0.5], [12, 2.5], [12.6, 3.2], [12.6, 4.2], [8, 4.4]], { kind: K_MACH, paint: [0.07, 0.07, 0.072], sky: 1, segs: 24 });
+      this.lamp(H, tip.clone().addScaledVector(tipD, 4.6), tipD, 'red', 1.0);
     }
     void R;
   }
@@ -1330,6 +1391,7 @@ export class Wreck {
       }
       for (let z = z0 + 14; z < z1 - 6; z += 24) {
         this.cyl(H, new THREE.Vector3(x, y, z - 1.2), new THREE.Vector3(x, y, z + 1.2), r + 1.3, { kind: K_FRAME, paint: PAINT_CLAMP, segs: 40 });
+        for (const dz of [-1.75, 1.75]) this.cyl(H, new THREE.Vector3(x, y, z + dz - 0.25), new THREE.Vector3(x, y, z + dz + 0.25), r + 0.08, { kind: K_LAMP, paint: REACTOR_GLOW, seed: GLOW_I, segs: 40, caps: false });
         // on top: an instrument housing and a valve block, pipes over the shell between the rings
         const top = new THREE.Vector3(x, y + r + 1.2, z + 12);
         this.box(H, Wreck.F(top), 3.5, 1.4, 5, { kind: K_MACH, paint: PAINT_MACH });
@@ -1434,7 +1496,7 @@ export class Wreck {
         q.addScaledVector(Fh.Y, -sag * 4 * t * (1 - t));
         pts.push(Fh.toLocal(q, w).clone());
       }
-      this.tube(Fh, pts, 0.7 + R() * 0.6, { kind: K_MACH, paint: PAINT_CABLE, segs: 8 });
+      this.tube(Fh, pts, 0.7 + R() * 0.6, { kind: K_MACH, paint: PAINT_CABLE, segs: 8, sway: 1.2 });
     }
     // loose ones out of the torn end, drifting
     for (let k = 0; k < 9; k++) {
@@ -1442,7 +1504,7 @@ export class Wreck {
       const th = Math.atan2(y, x), r = Math.max(Math.abs(x) / HW, Math.abs(y) / HH);
       if (r > 0.92) continue;
       for (let i = 0; i <= 10; i++) { const t = i / 10; pts.push(new THREE.Vector3(x + Math.sin(t * 2.2 + k) * 4 * t, y - 9 * t * t, Fh.len - 10 + L * t)); }
-      if (pts.every((q) => this.free(Fh, q, 2))) this.tube(Fh, pts, 0.35 + R() * 0.4, { kind: K_MACH, paint: PAINT_CABLE, segs: 6, layer: 'detail' });
+      if (pts.every((q) => this.free(Fh, q, 4))) this.tube(Fh, pts.map((q, i) => q), 0.35 + R() * 0.4, { kind: K_MACH, paint: PAINT_CABLE, segs: 6, layer: 'detail', sway: 1.4 });
       void th;
     }
   }
@@ -1666,7 +1728,8 @@ export class Wreck {
   // a pipe along a local polyline (smooth round), clamps every o.clampEvery m
   tube(H, pts, r, o = {}) {
     const g = this.geo(H, pts[Math.floor(pts.length / 2)].z, o.layer), segs = o.segs ?? 8, F0 = Wreck.F(new THREE.Vector3());
-    let prevN = null, vacc = 0, prevRow = null;
+    let prevN = null, vacc = 0, prevRow = null, total = 0;
+    for (let i = 1; i < pts.length; i++) total += pts[i].distanceTo(pts[i - 1]);
     for (let i = 0; i < pts.length; i++) {
       const p = pts[i], tA = pts[Math.min(i + 1, pts.length - 1)].clone().sub(pts[Math.max(i - 1, 0)]).normalize();
       let n;
@@ -1675,10 +1738,10 @@ export class Wreck {
       n.normalize(); prevN = n;
       const bN = new THREE.Vector3().crossVectors(tA, n);
       if (i > 0) vacc += p.distanceTo(pts[i - 1]);
-      const row = [];
+      const row = [], oo = o.sway ? { ...o, kind: K_CABLE, seed: o.sway * Math.sin(Math.PI * vacc / total) } : o;
       for (let k = 0; k <= segs; k++) {
         const a = (k / segs) * TAU, d = n.clone().multiplyScalar(Math.cos(a)).addScaledVector(bN, Math.sin(a));
-        row.push(this.pv(g, H, F0, p.clone().addScaledVector(d, r), d, a * r, vacc, tA, o));
+        row.push(this.pv(g, H, F0, p.clone().addScaledVector(d, r), d, a * r, vacc, tA, oo));
       }
       if (prevRow) for (let k = 0; k < segs; k++) this.quadFacing(g, [prevRow[k], row[k], row[k + 1], prevRow[k + 1]], new THREE.Vector3().fromArray(g.N, row[k] * 3).add(new THREE.Vector3().fromArray(g.N, prevRow[k + 1] * 3)));
       prevRow = row;
@@ -1833,7 +1896,7 @@ export class Wreck {
       const o = (((iz + dz) * ny + (iy + dy)) * nx + (ix + dx)) * 6;
       for (let a = 0; a < 6; a++) s += wt * w[a] * cube[o + a];
     }
-    return 0.03 + 0.97 * s;
+    return 0.045 + 0.955 * s;
   }
 
   // each frame: the lamps' flicker (a third of them failing: dropping out, stuttering), the eight nearest the camera
@@ -1851,14 +1914,15 @@ export class Wreck {
       L.f = f;
       U.wFlick.value[L.i] = f;
     }
+    U.wFlick.value[GLOW_I] = 0.55 + 0.25 * Math.sin(t * 0.7) * (this.effects ? 1 : 0);
     const cands = this.lamps.map((L) => [L, L.p.distanceToSquared(cam)]);
     if (this.effects && this.sparks) for (const e of this.sparks.sites) if (e.flash > 0.02) cands.push([{ p: e.p, col: [1.0, 0.62, 0.3], f: e.flash, big: false }, e.p.distanceToSquared(cam) * 0.6]);
     const near = cands.sort((a, b) => a[1] - b[1]);
     for (let k = 0; k < 8; k++) {
       const e = near[k];
       if (!e || e[1] > 400 * 400) { U.wLampP.value[k].set(0, -1e6, 0, 1); U.wLampC.value[k].set(0, 0, 0); continue; }
-      const L = e[0], I = L.big ? 2600 : 900;
-      U.wLampP.value[k].set(L.p.x, L.p.y, L.p.z, L.big ? 110 : 75);
+      const L = e[0], I = L.big ? 2600 : L.small ? 380 : 900;
+      U.wLampP.value[k].set(L.p.x, L.p.y, L.p.z, L.big ? 110 : L.small ? 50 : 75);
       U.wLampC.value[k].set(L.col[0] * I * L.f, L.col[1] * I * L.f, L.col[2] * I * L.f);
     }
     for (const m of this.meshes) if (m.userData.detail) {
@@ -1876,6 +1940,7 @@ export class Wreck {
   // the setting (sparks, flicker, drifting debris)
   setEffects(on) {
     this.effects = on;
+    this.mat.userData.U.wSway.value = on ? 1 : 0;
     if (!on) this.placeDebris(0);
   }
 
@@ -1924,6 +1989,7 @@ const PAINT_MACH = [0.05, 0.052, 0.055], PAINT_CLAMP = [0.09, 0.075, 0.04], PAIN
 const PAINT_PYLON = [0.055, 0.058, 0.062], PAINT_RAIL = [0.1, 0.085, 0.035], PAINT_CRANE = [0.12, 0.09, 0.025], PAINT_CABLE = [0.02, 0.02, 0.022];
 const PAINT_BULK = [0.065, 0.066, 0.062], PAINT_JAMB = [0.07, 0.06, 0.04], PAINT_DOOR = [0.075, 0.072, 0.066], PAINT_PIPE = [0.06, 0.055, 0.05], PAINT_PIPE2 = [0.075, 0.05, 0.035];
 const PAINT_BELT = [0.06, 0.062, 0.064], PAINT_REACTOR = [0.034, 0.036, 0.04], PAINT_NOZZLE = [0.045, 0.04, 0.036], PAINT_BELL = [0.09, 0.082, 0.075];
+const REACTOR_GLOW = [0.5, 0.11, 0.025], GLOW_I = 95;          // (lamp index 95: the reactors' slow glow)
 // the emergency lamps' light (linear, x the lens's brightness)
 const LAMP = { red: [1.0, 0.07, 0.03], amber: [1.0, 0.42, 0.07] };
 
@@ -1955,7 +2021,7 @@ class Sparks {
     const S = this.sites.length;
     this.U = { time: { value: 0 }, sP: { value: this.sites.map((s) => s.p.clone()) }, sD: { value: this.sites.map((s) => s.d.clone()) }, sT: { value: new Float32Array(Math.max(1, S)).fill(-100) } };
     this.mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: this.U,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, uniforms: this.U,   // (a streak's winding turns with it)
       vertexShader: /* glsl */`
         uniform float time; uniform vec3 sP[${Math.max(1, S)}]; uniform vec3 sD[${Math.max(1, S)}]; uniform float sT[${Math.max(1, S)}];
         attribute vec4 spark; attribute vec3 jitter; varying float vA; varying vec2 vQ;
@@ -1968,15 +2034,18 @@ class Sparks {
           vec3 vel = dir * spark.z * ( 1.0 - 0.35 * age / life );
           vec3 head = sP[ e ] + dir * spark.z * age * ( 1.0 - 0.17 * age / life );
           vec3 tail = head - vel * 0.035;
-          vec3 side = normalize( cross( vel, head - cameraPosition ) ) * 0.06;
-          vec3 p = mix( tail, head, position.y ) + side * ( position.x * 2.0 - 1.0 );
+          // the streak in view space: from its tail to its head, as wide across the screen as 0.12 m
+          vec3 vH = ( viewMatrix * vec4( head, 1.0 ) ).xyz, vT = ( viewMatrix * vec4( tail, 1.0 ) ).xyz;
+          vec2 d2 = vH.xy - vT.xy;
+          vec2 across = length( d2 ) > 1e-5 ? normalize( vec2( -d2.y, d2.x ) ) : vec2( 1.0, 0.0 );
+          vec3 p = mix( vT, vH, position.y ) + vec3( across * 0.06 * ( position.x * 2.0 - 1.0 ), 0.0 );
           vA = 1.0 - age / life;
-          gl_Position = projectionMatrix * viewMatrix * vec4( p, 1.0 );
+          gl_Position = projectionMatrix * vec4( p, 1.0 );
         }`,
       fragmentShader: /* glsl */`varying float vA; varying vec2 vQ;
         void main() {
           float w = 1.0 - abs( vQ.x * 2.0 - 1.0 );
-          vec3 c = mix( vec3( 1.0, 0.32, 0.06 ), vec3( 1.0, 0.85, 0.55 ), vA ) * vA * w * 9.0;
+          vec3 c = mix( vec3( 1.0, 0.22, 0.03 ), vec3( 1.0, 0.62, 0.25 ), vA * vA ) * vA * w * 5.0;
           gl_FragColor = vec4( c, 1.0 );
         }`,
     }));
