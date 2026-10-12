@@ -45,7 +45,7 @@ export const CANOPY_A = W + WALL_T / 2, CANOPY_H = 17, CANOPY_SP = 10;
 export function vineCanopy(track, cards) {
   const rnd = mulberry32(91), A = CANOPY_A, H = CANOPY_H, SP = CANOPY_SP, f = {};
   // a rib: a box section (0.55 along the track, 0.7 deep) swept round the arch; base plates
-  const rib = new THREE.BufferGeometry(), pos = [], nrm = [], NK = 36;
+  const rib = new THREE.BufferGeometry(), pos = [], nrm = [], NK = 20;
   const arc = (k) => { const t = Math.PI * (1 - k / NK); return [A * Math.cos(t), WALL_H + 0.25 + H * Math.sin(t)]; };
   const nAt = (k) => { const t = Math.PI * (1 - k / NK), nx = Math.cos(t) / A, ny = Math.sin(t) / H, l = Math.hypot(nx, ny); return [nx / l, ny / l]; };
   const quad = (a, b, c, d, n) => { for (const p of [a, b, c, a, c, d]) { pos.push(...p); nrm.push(...n); } };
@@ -74,7 +74,7 @@ export function vineCanopy(track, cards) {
     }
     // the roof: leaves on the arch's outside, thick low on the sides (climbing from the walls), with holes
     for (let d = 0; d < len; d += 0.8) {
-      for (let q = 0; q < 26; q++) {
+      for (let q = 0; q < 6; q++) {
         const t = Math.PI * (0.03 + 0.94 * rnd()), side = Math.abs(Math.cos(t));
         const hole = fbm((s0 + d) / 26, t * 2.2, 3);
         if (hole < 0.3 - 0.25 * side) continue;
@@ -82,7 +82,7 @@ export function vineCanopy(track, cards) {
         const out = new THREE.Vector3(Math.cos(t) / A, Math.sin(t) / H, 0).normalize();
         track.frame(s0 + d, f);
         const outW = f.R.clone().multiplyScalar(out.x).addScaledVector(f.U, out.y);
-        leaves.push({ c: local(s0, x, y, d), s: 2.0 + rnd() * 2.2, out: outW, wind: 0.06, ao: 0.45 + 0.55 * rnd() });
+        leaves.push({ c: local(s0, x, y, d), s: 4.2 + rnd() * 3.6, out: outW, wind: 0.06, ao: 0.45 + 0.55 * rnd() });
       }
       // strands from the high part of the arch, ends >= 9 m over the deck
       for (let q = 0; q < 2; q++) if (rnd() < 0.6) {
@@ -96,6 +96,66 @@ export function vineCanopy(track, cards) {
     lines.push({ pts, len });
   }
   return { ribGeo, mats, leaves: leaves.length ? cards(leaves) : null, strands, lines };
+}
+
+// Bridges of lianas across the canyon: between the pillars either side of the track, two or three thick lianas
+// twisted round each other sagging from one cliff to the other (anchored into the rock), leaves along them, strands
+// hanging from them. Every point of them kept 35 m from the track's centre line (the track rolls in the canyon).
+// pairs: [[a, b]] pillars ({ rimAt, I }); returns tubes (geometry), leaves (list for leafCards), strands
+export function canyonBridges(track, pairs, tube) {
+  const rnd = mulberry32(73), leaves = [], strands = [], tubes = [], f = {};
+  const clearOf = (p) => {
+    let best = 1e18, bi = 0;
+    for (let i = 0; i < track.n; i += 3) { const d = track.P[i].distanceToSquared(p); if (d < best) { best = d; bi = i; } }
+    return Math.sqrt(best);
+  };
+  // a pillar's cliff facing the other one, at height y (pushed 1.5 m into the rock: anchored, not resting on it)
+  const anchor = (P, toward, y) => {
+    const I = P.I, cr = Math.cos(I.rot || 0), sr = Math.sin(I.rot || 0), dx = toward.x - I.x, dz = toward.z - I.z;
+    const th = Math.atan2((-dx * sr + dz * cr) / I.rz, (dx * cr + dz * sr) / I.rx), r = P.rimAt(th);
+    return r.p.clone().addScaledVector(r.out, -1.5).setY(y);
+  };
+  for (const [A, B] of pairs) {
+    const top = Math.min(A.I.top, B.I.top) - 20;
+    // two bridges a pair, the second ~25 m over the first: as low as each can hang with its sag 35 m clear of the line
+    let floor = 0;
+    for (let bridge = 0; bridge < 2; bridge++) {
+      for (let tries = 0, y = Math.max(floor, Math.min(top, 60)); tries < 30; tries++, y += 6) {
+        const a = anchor(A, B.I, y + (rnd() - 0.5) * 12), b = anchor(B, A.I, y + (rnd() - 0.5) * 12), span = a.distanceTo(b), sag = span * (0.1 + rnd() * 0.06);
+        const at = (t, off = new THREE.Vector3()) => a.clone().lerp(b, t).add(new THREE.Vector3(0, -sag * 4 * t * (1 - t), 0)).add(off);
+        let ok = y + 10 < top;
+        for (let t = 0.05; t < 0.96 && ok; t += 0.05) if (clearOf(at(t)) < 36) ok = false;
+        if (!ok) { if (y + 10 >= top) break; continue; }
+        // three to five lianas wound round each other, thick (an old bridge: they have grown for centuries)
+        const n = 3 + Math.floor(rnd() * 3), dir = b.clone().sub(a).normalize(), side = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();
+        for (let k = 0; k < n; k++) {
+          const ph = (k / n) * Math.PI * 2 + rnd(), R0 = 0.9 + rnd() * 1.4, turns = 1.5 + rnd() * 2.5, spread = 1.6 + rnd() * 1.6;
+          const path = [];
+          for (let i = 0; i <= 48; i++) {
+            const t = i / 48, a2 = ph + t * turns * Math.PI * 2, wob = spread * Math.sin(Math.PI * t) + 0.6;
+            path.push(at(t, side.clone().multiplyScalar(Math.cos(a2) * wob).add(new THREE.Vector3(0, Math.sin(a2) * wob, 0))));
+          }
+          tubes.push(tube(path, path.map((_, i) => R0 * (1.25 - 0.35 * Math.sin(Math.PI * i / 48))), 9));
+        }
+        // leaves all along, thick at the ends (they grow from the cliffs); curtains of strands hanging off
+        for (let t = 0.0; t < 1.0; t += 0.004) {
+          const ends = 1 - Math.sin(Math.PI * t) * 0.5;
+          if (rnd() > 0.6 + 0.4 * ends) continue;
+          const c = at(t, side.clone().multiplyScalar((rnd() - 0.5) * 6).add(new THREE.Vector3(0, (rnd() - 0.3) * 5, 0)));
+          leaves.push({ c, s: 2.4 + rnd() * 2.6, out: new THREE.Vector3(rnd() - 0.5, rnd() * 0.9 - 0.2, rnd() - 0.5), wind: 0.2, ao: 0.6 + 0.4 * rnd() });
+          if (rnd() < 0.18) strands.push({ p: c.clone().add(new THREE.Vector3(0, -1.5, 0)), len: 4 + Math.pow(rnd(), 1.2) * 34, wid: 1.8 + rnd() * 2.2 });
+        }
+        // and the growth where each end meets its cliff
+        for (const e of [a, b]) for (let k = 0; k < 40; k++) {
+          const c = e.clone().add(new THREE.Vector3((rnd() - 0.5) * 12, (rnd() - 0.5) * 14, (rnd() - 0.5) * 12));
+          leaves.push({ c, s: 2.5 + rnd() * 3, out: c.clone().sub(e).normalize(), wind: 0.15, ao: 0.55 + 0.45 * rnd() });
+        }
+        floor = y + 25;
+        break;
+      }
+    }
+  }
+  return { tubes, leaves, strands };
 }
 
 // ivy up the gantry pillars and along the beam: leaf cards on helices (in the gantry's own frame: x across, y up the

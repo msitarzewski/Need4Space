@@ -40,15 +40,16 @@ export function setCave(lines, R, mouth, shade = null) {
   if (C.common.includes('vCaveW') || !lines.length) return;
   const fn = polyK('caveLight', lines, R, mouth) + (shade?.lines.length ? polyK('shadeK0', shade.lines, shade.R, shade.mouth)
     + `float shadeLight( vec3 w ) { return mix( ${shade.amb.toFixed(3)}, 1.0, shadeK0( w ) ); }\n` : 'float shadeLight( vec3 w ) { return 1.0; }\n');
-  C.common += '\nvarying vec3 vCaveW;\n';
-  C.project_vertex += '\n\tvCaveW = ( vec4( mvPosition.xyz - viewMatrix[ 3 ].xyz, 0.0 ) * viewMatrix ).xyz;\n';
-  C.lights_pars_begin += '\n' + fn;
+  // (worked out per vertex - it changes over metres, and per pixel it was a loop over the line for every lit pixel
+  // near the cave or a tunnel; vCaveW stays for whoever reads it)
+  C.common += '\nvarying vec3 vCaveW;\nvarying vec2 vCaveK;\n' + fn;
+  C.project_vertex += '\n\tvCaveW = ( vec4( mvPosition.xyz - viewMatrix[ 3 ].xyz, 0.0 ) * viewMatrix ).xyz;\n\tvCaveK = vec2( caveLight( vCaveW ), shadeLight( vCaveW ) );\n';
   const L = C.lights_fragment_begin;
   const a = 'getDirectionalLightInfo( directionalLight, directLight );';
   if (!L.includes(a)) throw new Error('lights chunk changed: cave patch not applied');
-  C.lights_fragment_begin = 'float caveK = caveLight( vCaveW );\n' + L.replace(a, a + '\n\t\tdirectLight.color *= caveK;');
+  C.lights_fragment_begin = 'float caveK = vCaveK.x;\n' + L.replace(a, a + '\n\t\tdirectLight.color *= caveK;');
   C.lights_fragment_end = `{
-	float caveAmb = mix( 0.012, 1.0, caveK ) * shadeLight( vCaveW );
+	float caveAmb = mix( 0.012, 1.0, caveK ) * vCaveK.y;
 	irradiance *= caveAmb;
 	iblIrradiance *= caveAmb;
 	#if defined( RE_IndirectSpecular )
@@ -57,6 +58,20 @@ export function setCave(lines, R, mouth, shade = null) {
 	#endif
 }
 ` + C.lights_fragment_end;
+}
+
+// Lit by the sun and the sky alone: no point, spot, hemisphere or area lights in the shader. For the scenery that
+// fills the screen (the jungle, the islands, the plants): the track's lamps and the ships' lights reach tens of metres
+// and were worked out for every one of its pixels (~10 lights). three writes the lights' counts into the shader as
+// text once it has inlined its chunks, so the light chunks are inlined here with those counts at 0. Apply to a
+// fragment shader in onBeforeCompile, after its own replacements.
+const NO_LAMPS = ['NUM_SPOT_LIGHT_SHADOWS_WITH_MAPS', 'NUM_SPOT_LIGHT_SHADOWS', 'NUM_SPOT_LIGHT_COORDS', 'NUM_SPOT_LIGHT_MAPS',
+  'NUM_POINT_LIGHT_SHADOWS', 'NUM_POINT_LIGHTS', 'NUM_SPOT_LIGHTS', 'NUM_HEMI_LIGHTS', 'NUM_RECT_AREA_LIGHTS'];
+export function sunOnly(fs) {
+  const C = THREE.ShaderChunk, zero = (t) => NO_LAMPS.reduce((x, k) => x.replaceAll(k, '0'), t);
+  for (const k of ['lights_pars_begin', 'lights_fragment_begin', 'lights_physical_pars_fragment', 'shadowmap_pars_fragment'])
+    fs = fs.replace(`#include <${k}>`, C[k]);
+  return zero(fs);
 }
 
 // fogChunk: a map's own fog in place of the height fog (fogPars: what it needs, ahead of every lit fragment shader)
@@ -150,14 +165,19 @@ export function patchShaders({ sunDir, sunFog, shadowHalf, shadowDepth, cascades
 #endif`;
     s += /* glsl */`
 #if defined( USE_SHADOWMAP )
-	// a map of the whole world drawn once (the forest's islands and trees, at any distance): 8 soft taps
+	// a map of the whole world drawn once (the forest's islands and trees, at any distance): 4 soft taps, each a
+	// bilinear blend of its texels (leaves: one - they are a mass, and drawn in layers)
 	float worldFilter( sampler2D map, vec2 size, vec4 coord, float bias ) {
 		vec3 sc = coord.xyz / coord.w;
 		sc.z += bias;
 		if ( sc.x <= 0.0 || sc.x >= 1.0 || sc.y <= 0.0 || sc.y >= 1.0 || sc.z >= 1.0 ) return 1.0;
+	#ifdef FOLIAGE_ONE_TAP
+		return pcssLerp( map, size, sc.xy, sc.z );
+	#else
 		float lit = 0.0;
-		for ( int i = 0; i < 8; i ++ ) lit += pcssLerp( map, size, sc.xy + pcssSpiral( i, 8.0 ) * 1.6 / size.x, sc.z );
-		return lit / 8.0;
+		for ( int i = 0; i < 4; i ++ ) lit += pcssLerp( map, size, sc.xy + pcssSpiral( i, 4.0 ) * 1.4 / size.x, sc.z );
+		return lit / 4.0;
+	#endif
 	}
 #endif
 #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS >= 4
@@ -178,7 +198,11 @@ export function patchShaders({ sunDir, sunFog, shadowHalf, shadowDepth, cascades
     C.lights_fragment_begin = L.replace(old, `\t\t#if defined( USE_SHADOWMAP ) && ( UNROLLED_LOOP_INDEX < NUM_DIR_LIGHT_SHADOWS )
 \t\t#if NUM_DIR_LIGHT_SHADOWS >= 3
 \t\t#if UNROLLED_LOOP_INDEX == 0
+\t\t#ifdef FOLIAGE_SHADOW
+\t\tdirectLight.color *= ( directLight.visible && receiveShadow ) ? worldShadow() : 1.0;
+\t\t#else
 \t\tdirectLight.color *= ( directLight.visible && receiveShadow ) ? cascadeShadow() * worldShadow() : 1.0;
+\t\t#endif
 \t\t#endif
 \t\t#elif NUM_DIR_LIGHT_SHADOWS == 1 && ${worldOnly ? 1 : 0}
 \t\tdirectionalLightShadow = directionalLightShadows[ i ];

@@ -507,6 +507,14 @@ export class GameAudio {
       if (w) this.whaleCall(w);
     }
   }
+  // through a curtain of water: a rushing burst, the thud of it on the hull
+  splash() {
+    if (!this.ctx || !this.gate('splash', 0.6)) return;
+    const t = this.ctx.currentTime, o = this.out(null, 0, 0.6);
+    this.burst(t, 0.9, o, { type: 'lowpass', f: 6000, f1: 700, q: 0.7, v: 0.7, buf: this.white });
+    this.burst(t, 0.6, o, { type: 'lowpass', f: 400, f1: 120, v: 0.8, buf: this.brown });
+    this.tone(t, 0.3, o, { f: 90, f1: 40, v: 0.4, tau: 0.08 });
+  }
   // a bird: a run of 2-6 quick whistled notes, each a little bend, from somewhere round you
   bird(pos, v) {
     const t = this.ctx.currentTime, o = this.out(pos, 40, 0.16 * v), n = 2 + Math.floor(Math.random() * 5);

@@ -13,8 +13,8 @@ import { mulberry32 } from './noise.js';
 import { SUN_DIR, SUN_E, SUN_COL, GIANT_DIR, skyDome } from './atmo.js';
 import { Abyss, groundHeight } from './abyss.js';
 import { islandShape, islandMaps, islandMaterial, trackClearance } from './islands.js';
-import { Flora, leafCards } from './flora.js';
-import { trackVines, gantryIvy, vineCanopy } from './overgrowth.js';
+import { Flora, leafCards, barkTube } from './flora.js';
+import { trackVines, gantryIvy, vineCanopy, canyonBridges } from './overgrowth.js';
 import { Waters } from './water.js';
 import { hollowIsland, caveGlow } from './cave.js';
 import { greatTree } from './greattree.js';
@@ -125,7 +125,7 @@ function scatterIslands(track, rnd, dens = 1) {
     const e = 0.7 + rnd() * 0.6;
     far.push({ name: 'far' + far.length, far: true, x, z, top: -500 + rnd() * 1100, rx: r * e, rz: r / e, rot: rnd() * 6.28,
       cliff: 40 + r * (0.2 + rnd() * 0.4), depth: r * (1.3 + rnd() * 1.2), seed: 900 + k, hill: 4 + r * 0.03,
-      lobes: 1 + Math.floor(rnd() * 4), taper: 0.8 + rnd() * 1.2, res: 72 });
+      lobes: 1 + Math.floor(rnd() * 4), taper: 0.8 + rnd() * 1.2, res: 48 });
   }
   // karst towers standing up out of the jungle far below, round the field (their feet in the canopy)
   const karst = [];
@@ -139,7 +139,7 @@ function scatterIslands(track, rnd, dens = 1) {
     if (![...HERO, ...out, ...far, ...karst].every((q) => Math.hypot(q.x - x, q.z - z) > (q.rx + q.rz) / 2 + r + 60 || q.top - q.depth > top + 80)) continue;
     const e = 0.8 + rnd() * 0.4;
     karst.push({ name: 'karst' + karst.length, far: true, x, z, top, rx: r * e, rz: r / e, rot: rnd() * 6.28,
-      depth: top - ground + 120, cliff: (top - ground) * 0.9, seed: 3000 + k, hill: 5, lobes: 1, taper: 3, crag: 1.3, res: 72 });
+      depth: top - ground + 120, cliff: (top - ground) * 0.9, seed: 3000 + k, hill: 5, lobes: 1, taper: 3, crag: 1.3, res: 48 });
   }
   return [...out, ...far, ...karst];
 }
@@ -147,6 +147,8 @@ function scatterIslands(track, rnd, dens = 1) {
 export class ForestWorld {
   constructor(scene, renderer, camera) {
     this.name = 'forest';
+    this.lightShafts = true;                        // (main.js: the shafts pass, and where the sun is)
+    this.sunDir = SUN_DIR;
     // the planting and far scenery by what the device can take (memory tier: a desktop card, an integrated GPU, a phone)
     this.dens = { high: 1, mid: 0.6, low: 0.4 }[Q.tier] ?? 1;
     // (what building the world costs, step by step: the console's 'forest built' line)
@@ -156,13 +158,12 @@ export class ForestWorld {
     // the backdrop: the gas giant, its rings and a moon beyond the air, then the air itself over them
     this.sky = new THREE.Scene();
     this.skyCam = new THREE.PerspectiveCamera(60, 1, 50, 200000);
-    this.dome = skyDome();
+    this.dome = skyDome(renderer, Q.tier === 'low' ? 384 : 768);
     this.bodies = this.skyBodies(renderer);
     this.sky.add(this.bodies, this.dome);
     // reflections: the sky without the sun's disc (the sun light makes its own highlight)
     bakeLater([[this.sky, this.skyCam]], () => {
       this.dome.material.uniforms.sunDisc.value = 0;
-      this.dome.material.uniforms.camPos.value.set(0, 0, 0);
       const pm = new THREE.PMREMGenerator(renderer);
       this.env = pm.fromScene(this.sky, 0.02, 50, 200000).texture;
       pm.dispose();
@@ -207,7 +208,8 @@ export class ForestWorld {
     islandMaps(renderer);
     this.buildIslands(scene);
     lap('islands');
-    camera.layers.enable(2);                                       // (layer 2: plants - seen, but in no cascade's shadow)
+    // (layer 2: seen, but in no cascade's shadow - the plants; 3 and 4: drawn only in the far / the near depth slice)
+    camera.layers.enable(2); camera.layers.enable(3); camera.layers.enable(4);
     this.flora = new Flora(scene);
     this.plant();
     lap('planting');
@@ -226,8 +228,16 @@ export class ForestWorld {
     this.pourFalls();
     lap('falls');
     this.worldShadow(scene);
+    // What casts only into the world's map (drawn once): the islands, the planting, the Great Tree. three picks a
+    // shadow's casters by the main camera's layers, not the shadow camera's - so they cast while that map is drawn and
+    // stop after (they were drawn into all three cascades every frame: most of the forest's extra cost)
+    this.statics = [];
+    scene.traverse((o) => { if ((o.isMesh || o.isInstancedMesh) && o.castShadow && o.layers.isEnabled(6)) this.statics.push(o); });
+    this.staticsCast = true;
     // the jungle far below
     this.abyss = new Abyss(scene, renderer, this.track);
+    // (a kilometre down, and kilometres off: no ambient occlusion to see - out of its depth pass)
+    this.noAO.push(this.abyss.mesh, ...scene.children.filter((o) => o.name === 'far-islands'));
     // gantry lamps, as in space
     this.lamps = [0, 1, 2].map(() => { const l = new THREE.PointLight(new THREE.Color(1.0, 0.92, 0.78), 0, 70, 2); scene.add(l); return l; });
     // pollen and spores in the sunlight round the camera
@@ -268,9 +278,9 @@ export class ForestWorld {
       if (I.hollow) {
         // (built round the bore: no clearance to settle)
         const h = (this.hollow = hollowIsland(this.track, I));
-        const shell = new THREE.Mesh(h.shell, mat), bore = new THREE.Mesh(h.boreGeo, islandMaterial({ key: 'island-bore', side: THREE.DoubleSide }));
+        const shell = new THREE.Mesh(h.shell, mat), bore = new THREE.Mesh(h.boreGeo, islandMaterial({ key: 'island-bore', side: THREE.DoubleSide, lamps: true }));
         shell.castShadow = shell.receiveShadow = bore.receiveShadow = true;
-        shell.layers.enable(6);
+        shell.layers.set(2); shell.layers.enable(6);
         shell.name = 'Hollow'; bore.name = 'Hollow-bore';
         scene.add(shell, bore);
         this.islands.push({ geometry: h.shell, I: h.I, topInfo: h.topInfo, topHeight: h.topHeight, rimAt: h.rimAt, mesh: shell });
@@ -293,23 +303,31 @@ export class ForestWorld {
       (I.far ? far : near).push(isl);
     }
     this.glow = caveGlow(scene, this.hollow, this.track);
+    // the near ones merged by 700 m cells (a draw a cell, not one an island; each still culled as a cell)
+    const cells = new Map();
     for (const isl of near) {
-      const m = new THREE.Mesh(isl.geometry, mat);
+      const k = `${Math.floor(isl.I.x / 700)},${Math.floor(isl.I.z / 700)}`;
+      if (!cells.has(k)) cells.set(k, []);
+      cells.get(k).push(isl);
+    }
+    for (const [k, list] of cells) {
+      const m = new THREE.Mesh(list.length > 1 ? mergeGeometries(list.map((i) => i.geometry)) : list[0].geometry, mat);
       m.castShadow = m.receiveShadow = true;
-      m.name = isl.I.name;
-      m.layers.enable(6);
+      m.name = 'islands ' + k;
+      // (their shadows come from the world's map, drawn once: in the cascades every island near one was drawn into
+      // all three every frame - a third of the islands' cost)
+      m.layers.set(2); m.layers.enable(6);
       scene.add(m);
-      isl.mesh = m;
     }
     // the far ones in one mesh (one draw)
     const merged = mergeGeometries(far.map((i) => i.geometry));
     const fm = new THREE.Mesh(merged, mat);
     // (seen, and in the world's shadow - never in the cascades: they are far beyond them, and drawn there every frame)
-    fm.receiveShadow = true; fm.castShadow = true; fm.layers.set(2); fm.layers.enable(6);
+    fm.receiveShadow = true; fm.castShadow = true; fm.layers.set(3); fm.layers.enable(6);       // (3: the far depth slice only)
     fm.name = 'far-islands';
     scene.add(fm);
     this.islandMat = mat;
-    console.info(`islands: ${near.length} near, ${far.length} far, ${pushed} pushes clear of the track`);
+    console.info(`islands: ${near.length} near (${cells.size} meshes), ${far.length} far, ${pushed} pushes clear of the track`);
   }
 
   // trees on every island's top, vines hanging off its rim and from under it - grouped in sectors of the field
@@ -387,7 +405,7 @@ export class ForestWorld {
     }
     console.info(`vines: ${clipped} shortened or removed clear of the track`);
     this.flora.addSector('far', far.plants, [], true);
-    console.info(`flora: ${nt} plants, ${nv} vines, ${sectors.size} sectors, ${(this.flora.tris / 1e6).toFixed(2)} M tris (near at full detail)`);
+    console.info(`flora: ${nt} plants, ${nv} vines`);
   }
 
   // the track's samples in 40 m cells (x, z): what is near a point, fast
@@ -430,7 +448,7 @@ export class ForestWorld {
     wood.name = 'great-tree'; crown.name = 'great-tree-crown';
     const strands = T.strands.map((v) => this.clipStrand(v)).filter(Boolean);
     this.flora.addSector('tree', {}, strands);
-    this.noAO.push(crown, ...this.flora.sectors.at(-1).meshes);
+    this.noAO.push(crown);
     const bad = trackClearance(this.track, [['great-tree', T.wood], ['great-tree-crown', T.leaves]], { nearest: (p) => this.nearTrack(p, 60) });
     console.info(`great tree: ${(T.wood.index.count / 3 / 1000).toFixed(0)} k wood tris, ${T.leaves.index.count / 6} leaf cards, ${strands.length} strands` +
       (bad.length ? ` - ${bad.length} points in the track's way!` : ''));
@@ -506,10 +524,22 @@ export class ForestWorld {
   // the track overgrown: vines off its edges and over its walls, ivy on the gantries, the tunnels of vines
   overgrow(scene) {
     const tr = this.track, cn = this.canopy, ivy = gantryIvy(tr, (list) => leafCards(list, 'A', 23));
-    const strands = [...trackVines(tr), ...ivy.strands, ...cn.strands];
+    // the lianas strung between the canyon's pillars, over the rolls
+    const pil = (n) => this.islands.find((i) => i.I.name === n);
+    const br = canyonBridges(tr, [['PillarW1', 'PillarE1'], ['PillarE1', 'PillarW2'], ['PillarW2', 'PillarE2'], ['PillarE2', 'PillarW3']]
+      .map(([a, b]) => [pil(a), pil(b)]).filter(([a, b]) => a && b), barkTube);
+    if (br.tubes.length) {
+      // (near the track: they cast into the cascades - their shadows across the deck - and stay casting)
+      const wood = new THREE.Mesh(mergeGeometries(br.tubes), this.flora.barkMat), leaves = new THREE.Mesh(leafCards(br.leaves, 'A', 29), this.flora.leafMat);
+      for (const m of [wood, leaves]) { m.castShadow = m.receiveShadow = true; m.name = 'canyon-lianas'; scene.add(m); }
+      this.noAO.push(leaves);
+    }
+    const strands = [...trackVines(tr), ...ivy.strands, ...cn.strands, ...br.strands.map((v) => this.clipStrand(v)).filter(Boolean)];
     this.flora.addSector('track', {}, strands);
-    // (leaves and strands out of the ambient occlusion's depth: drawn there whole, each card was a dark square)
-    this.noAO.push(...this.flora.sectors.flatMap((sec) => sec.meshes));
+    // the planting's meshes, now that all of it is in - out of the ambient occlusion's depth (drawn there whole,
+    // each card was a dark square)
+    this.flora.finish();
+    this.noAO.push(...this.flora.meshes);
     const M = new THREE.Matrix4();
     const ivyM = new THREE.InstancedMesh(ivy.geo, this.flora.leafMat, tr.gantryIdx.length);
     tr.gantryIdx.forEach((i, k) => ivyM.setMatrixAt(k, tr.basisAt(i, M)));
@@ -577,6 +607,24 @@ float rN(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
     console.info(`world shadow: ${size} px over ${(2 * half / 1000).toFixed(1)} km (${(2 * half / size).toFixed(2)} m a texel)`);
   }
 
+  // the camera inside a curtain of falling water (the sheet's arc within 2.5 m, inside its width) - once per pass
+  // through it (main.js: water on the lens, a splash)
+  wetCheck(p) {
+    let inside = false;
+    for (const f of this.waters.falls) {
+      const d = p.clone().sub(f.lip), h = d.x * f.out.x + d.z * f.out.z;
+      if (h < -5 || h > f.v * 9 + 10 || d.y > 5 || d.y < -330) continue;
+      // the nearest point of the arc (x = v t, y = -g t^2 / 2) in its own plane
+      let best = 1e9, bt = 0;
+      for (let t = 0; t <= 8; t += 0.08) { const x = f.v * t - h, y = -4.9 * t * t - d.y, q = x * x + y * y; if (q < best) { best = q; bt = t; } }
+      const lat = Math.abs(d.x * -f.out.z + d.z * f.out.x), w = f.width * (1 + 0.07 * bt) + 2 * bt;
+      if (best < 2.5 * 2.5 && lat < w / 2 - 1) { inside = true; break; }
+    }
+    const hit = inside && !this.wasWet;
+    this.wasWet = inside;
+    return hit;
+  }
+
   // the gas giant (the space circuit's), its rings and a cratered moon - beyond the air (the dome dims them)
   skyBodies(renderer) {
     const g = new THREE.Group(), D = 60000, R = D * Math.sin(THREE.MathUtils.degToRad(9));
@@ -628,6 +676,7 @@ float rN(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
     S.shadow.map?.dispose();
     S.shadow.map = null;
     S.shadow.needsUpdate = true;
+    this.castStatics?.(true);                        // (the world's map drawn again: the statics cast for it)
   }
 
   // keep a camera out of the track slab (deck, walls, fields): over the barrier tops if it is inside
@@ -657,12 +706,22 @@ float rN(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
     place(this.sunFar, FAR_HALF, camera ? camera.position.clone().addScaledVector(fwd, 140) : p);
   }
 
+  // the static casters on (the world's map is about to be drawn) or off (it has been)
+  castStatics(on) {
+    if (this.staticsCast === on) return;
+    for (const o of this.statics) o.castShadow = on;
+    this.staticsCast = on;
+    // (all the planting in the map, not only what the camera faced)
+    if (on) this.flora?.rebucket(null, null);
+  }
+
   update(t, camera, shipPos, s, renderer) {
+    // the world's map drawn (three clears needsUpdate when it has): the statics stop casting
+    if (this.staticsCast && !this.sunWorld.shadow.needsUpdate && !(this.worldOnly && this.sun.shadow.needsUpdate)) this.castStatics(false);
     this.skyCam.quaternion.copy(camera.quaternion);
     this.skyCam.fov = camera.fov;
     this.skyCam.aspect = camera.aspect;
     this.skyCam.updateProjectionMatrix();
-    this.dome.material.uniforms.camPos.value.copy(camera.position);
     const pr = renderer.getPixelRatio() * (this.renderScale || 1);
     this.dust.material.uniforms.pr.value = pr;
     this.dust.material.uniforms.cam.value.copy(camera.position);
@@ -670,7 +729,8 @@ float rN(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
     const dt = Math.max(0, t - (this.lastT ?? t));
     this.track.update(t, shipPos, dt);
     this.abyss.update(t, camera);
-    this.flora.update(t, camera);
+    if (!this.staticsCast) this.flora.update(t, camera);    // (while the world's map waits to be drawn: all of it, as it is)
+    else (this.flora && (this.flora.lastAt = null));
     this.waters.update(t);
     this.glow.update(t, pr);
     this.creatures.update(t);

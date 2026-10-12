@@ -391,3 +391,93 @@ export async function lapSpikes(W = 1920, H = 1080, sec = 40) {
   });
   return { med: +med.toFixed(3), passMed, nSpikes: spikes.length, spikes: spikes.slice(0, 40) };
 }
+
+// ---- A/B costs of groups of objects and passes, on a frozen frame (GPU timer queries, each pair interleaved; queued
+// in one go and collected after one wait - the hidden pane throttles timers to seconds)
+// abQueue('name', s): flies the player to arc length s (race running), queues the pairs; abCollect(): medians (ms)
+export function goTo(s) {
+  const F = window.__feather, tr = F.track;
+  for (let i = 0; i < 4000; i++) { const d = ((s - F.racer.s) % tr.length + tr.length) % tr.length; if (d < 6 || d > tr.length - 30) break; F.advance(Math.min(0.25, d / 400)); }
+}
+export function forestGroups() {
+  const F = window.__feather, W = F.world, g = {};
+  if (W.flora) { g.flora = W.flora.meshes.filter((m) => m !== W.flora.vineMesh); g.vines = [W.flora.vineMesh]; }
+  g.islands = []; g.roof = []; g.ribs = []; g.tree = [];
+  F.scene.traverse((o) => {
+    if (o.isMesh && W.islandMat && o.material === W.islandMat) g.islands.push(o);
+    if (W.canopy && o.geometry === W.canopy.leaves) g.roof.push(o);
+    if (o.material?.customProgramCacheKey?.() === 'forest-rib') g.ribs.push(o);
+    if (/great-tree/.test(o.name)) g.tree.push(o);
+  });
+  if (W.abyss) g.abyss = [W.abyss.mesh];
+  if (W.waters) g.water = [...W.waters.falls.map((f) => f.mesh), W.waters.mist];
+  if (W.creatures) g.creatures = [W.creatures.rays, W.creatures.birds, W.creatures.whaleMesh];
+  g.track = Object.values(F.track.parts).flat().filter(Boolean);
+  g.ships = F.race ? F.race.entries.map((e) => e.ship.root) : [F.ship.root];
+  return g;
+}
+const AB = { plan: [] };
+export function abQueue(loc, s, { W = 1920, H = 1080, reps = 3, groups = forestGroups } = {}) {
+  const F = window.__feather, r = F.renderer, gl = r.getContext(), ext = gl.getExtension('EXT_disjoint_timer_query_webgl2'), comp = F.composer;
+  goTo(s); F.advance(1 / 60);
+  const ow = innerWidth, oh = innerHeight, pr = r.getPixelRatio();
+  r.setPixelRatio(1); r.setSize(W, H, false); comp.setPixelRatio(1); comp.setSize(W, H); F.camera.aspect = W / H; F.camera.updateProjectionMatrix();
+  const q = () => { const k = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, k); F.render(); gl.endQuery(ext.TIME_ELAPSED_EXT); return k; };
+  for (let i = 0; i < 2; i++) F.render();
+  for (const [k, list] of Object.entries(groups())) for (let i = 0; i < reps; i++) {
+    const a = q(), vis = list.map((o) => o.visible);
+    list.forEach((o) => (o.visible = false));
+    const b = q();
+    list.forEach((o, j) => (o.visible = vis[j]));
+    AB.plan.push([loc, k, a, b]);
+  }
+  for (const k of ['gtao', 'ssr', 'bloom', 'streaks']) for (let i = 0; i < reps; i++) {
+    const P = F[k], was = P.enabled, a = q(); P.enabled = false; const b = q(); P.enabled = was; AB.plan.push([loc, k, a, b]);
+  }
+  r.setPixelRatio(pr); r.setSize(ow, oh, false); comp.setPixelRatio(pr); comp.setSize(ow, oh); F.camera.aspect = ow / oh; F.camera.updateProjectionMatrix();
+  gl.flush();
+  return AB.plan.length;
+}
+export function abCollect() {
+  const gl = window.__feather.renderer.getContext(), res = {}, med = (a) => { a = [...a].sort((x, y) => x - y); return +a[a.length >> 1].toFixed(2); };
+  let pending = 0;
+  for (const [loc, k, a, b] of AB.plan) {
+    if (!gl.getQueryParameter(a, gl.QUERY_RESULT_AVAILABLE) || !gl.getQueryParameter(b, gl.QUERY_RESULT_AVAILABLE)) { pending++; continue; }
+    const A = gl.getQueryParameter(a, gl.QUERY_RESULT) / 1e6, B = gl.getQueryParameter(b, gl.QUERY_RESULT) / 1e6;
+    ((res[loc] ||= {})[k] ||= { d: [], base: [] }).d.push(A - B); res[loc][k].base.push(A);
+  }
+  const out = {};
+  for (const [loc, gs] of Object.entries(res)) {
+    out[loc] = {}; const bases = [];
+    for (const [k, v] of Object.entries(gs)) { out[loc][k] = med(v.d); bases.push(...v.base); }
+    out[loc].frame = med(bases);
+  }
+  if (!pending) { for (const [, , a, b] of AB.plan) { gl.deleteQuery(a); gl.deleteQuery(b); } AB.plan = []; }
+  return { pending, out };
+}
+
+// Steadier: whole blocks of frames per configuration (the GPU's clock settles in each), configurations alternated
+// twice; configs: [[name, apply(), undo()]]. blockQueue at the current view (race or a set camera), blockCollect().
+const BL = { plan: [] };
+export function blockQueue(configs, { W = 1920, H = 1080, frames = 24, warm = 12, rounds = 2 } = {}) {
+  const F = window.__feather, r = F.renderer, gl = r.getContext(), ext = gl.getExtension('EXT_disjoint_timer_query_webgl2'), comp = F.composer;
+  const ow = innerWidth, oh = innerHeight, pr = r.getPixelRatio();
+  r.setPixelRatio(1); r.setSize(W, H, false); comp.setPixelRatio(1); comp.setSize(W, H); F.camera.aspect = W / H; F.camera.updateProjectionMatrix();
+  for (let k = 0; k < rounds; k++) for (const [name, on, off] of configs) {
+    on?.();
+    for (let i = 0; i < warm; i++) F.render();
+    for (let i = 0; i < frames; i++) { const q = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, q); F.render(); gl.endQuery(ext.TIME_ELAPSED_EXT); BL.plan.push([name, q]); }
+    off?.();
+  }
+  r.setPixelRatio(pr); r.setSize(ow, oh, false); comp.setPixelRatio(pr); comp.setSize(ow, oh); F.camera.aspect = ow / oh; F.camera.updateProjectionMatrix();
+  gl.flush();
+}
+export function blockCollect() {
+  const gl = window.__feather.renderer.getContext(), res = {};
+  let pending = 0;
+  for (const [n, q] of BL.plan) { if (!gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) { pending++; continue; } (res[n] ||= []).push(gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6); }
+  const out = {};
+  for (const [n, v] of Object.entries(res)) { v.sort((a, b) => a - b); out[n] = +v[v.length >> 1].toFixed(2); }
+  if (!pending) { for (const [, q] of BL.plan) gl.deleteQuery(q); BL.plan = []; }
+  return { pending, out };
+}

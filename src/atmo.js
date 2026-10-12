@@ -9,6 +9,7 @@
 // The sky dome (in the backdrop scene) evaluates it to infinity; every lit material, through the fog chunk
 // (look.js patchShaders fogChunk), from the camera to its pixel.
 import * as THREE from 'three';
+import { bakeLater } from './bake.js';
 
 export const SUN_DIR = new THREE.Vector3(-0.475, 0.407, -0.781).normalize(); // toward the sun: north-west, 24 deg up
 export const SUN_E = 5.6;                                                    // its irradiance (three units)
@@ -69,7 +70,8 @@ float atmoFbm(vec2 p, int oct) {
 // a deck's density at xz (0 in its gaps); cover: how much of the sky it fills
 float atmoDeck(vec2 xz, float scale, float cover, float seed, int oct) {
   vec2 p = xz / scale + seed;
-  float n = atmoFbm(p + 0.6 * vec2(atmoFbm(p * 0.5 + 3.1, 3), atmoFbm(p * 0.5 - 7.7, 3)), oct);
+  // (oct < 4: the cheap deck for what is seen through the air - no swirl)
+  float n = oct < 4 ? atmoFbm(p, oct) : atmoFbm(p + 0.6 * vec2(atmoFbm(p * 0.5 + 3.1, 3), atmoFbm(p * 0.5 - 7.7, 3)), oct);
   return smoothstep(1.0 - cover, 1.0 - cover + 0.22, n);
 }
 // a ray through a deck [y0, y1] up to dist: the length inside it and where it crosses its middle
@@ -117,7 +119,7 @@ export const ATMO_FOG_CHUNK = /* glsl */`#ifdef USE_FOG
 		float fogDist = length( fogRay );
 		vec3 fogDir = fogRay / max( fogDist, 1e-3 );
 		float fogCT; vec3 fogCC;
-		atmoClouds( cameraPosition, fogDir, fogDist, fogCT, fogCC, 4 );
+		atmoClouds( cameraPosition, fogDir, fogDist, fogCT, fogCC, 3 );
 		gl_FragColor.rgb = gl_FragColor.rgb * fogCT + fogCC * ( 1.0 - fogCT );
 		vec3 fogT, fogL;
 		atmoPath( cameraPosition, fogDir, fogDist, fogT, fogL );
@@ -128,31 +130,52 @@ export const ATMO_FOG_CHUNK = /* glsl */`#ifdef USE_FOG
 // The sky dome: the backdrop scene's sphere round the camera - the air to infinity, the clouds, the sun's disc. Drawn
 // last in the backdrop, over what lies beyond the air (the gas giant, its rings, the moon - drawn first, as in space):
 // they are dimmed by the air's transmittance (the blend: dst x (1 - alpha)) and the air's own light is added.
-export function skyDome() {
+// The air and the clouds never change: they are worked out once at load into a cube (rgb: their light, a: how much
+// of what lies beyond they hide) and the dome looks that up - per pixel, every frame, they cost ~0.6 ms at 1080p.
+// Only the sun's disc is drawn live.
+const DOME_BAKE = /* glsl */`
+  varying vec3 vDir;
+  ${ATMO_GLSL}
+  void main() {
+    vec3 d = normalize(vDir), o = vec3(0.0);
+    float cT; vec3 cC;
+    atmoClouds(o, d, 1e7, cT, cC, 5);
+    vec3 T, L;
+    atmoPath(o, d, 1e7, T, L);
+    gl_FragColor = vec4(cC * (1.0 - cT) * T + L, 1.0 - dot(T, vec3(0.3333)) * cT);
+  }`;
+export function skyDome(renderer, size = 768) {
+  const rt = new THREE.WebGLCubeRenderTarget(size, { type: THREE.HalfFloatType, generateMipmaps: true,
+    minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
+  const geo = new THREE.SphereGeometry(100000, 96, 48);
+  const bakeScene = new THREE.Scene(), cube = new THREE.CubeCamera(10, 200000, rt);
+  bakeScene.add(new THREE.Mesh(geo, new THREE.ShaderMaterial({ side: THREE.BackSide, depthWrite: false,
+    vertexShader: /* glsl */`varying vec3 vDir; void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: DOME_BAKE })));
+  bakeLater([[bakeScene, cube.children[0]]], () => {
+    cube.update(renderer, bakeScene);
+    bakeScene.children[0].material.dispose();
+  });
   const m = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, depthTest: false, transparent: true,
     blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
     blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
-    uniforms: { camPos: { value: new THREE.Vector3() }, sunDisc: { value: 1 } },
+    uniforms: { sky: { value: rt.texture }, camPos: { value: new THREE.Vector3() }, sunDisc: { value: 1 } },
     vertexShader: /* glsl */`varying vec3 vDir; void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: /* glsl */`
-      uniform vec3 camPos; uniform float sunDisc; varying vec3 vDir;
+      uniform samplerCube sky; uniform float sunDisc; varying vec3 vDir;
       ${ATMO_GLSL}
       void main() {
         vec3 d = normalize(vDir);
-        // what lies beyond: the sun, a disc 1.1 deg across, its limb darker, a tight glow round it
+        vec4 a = textureCube(sky, d);
+        // what lies beyond: the sun, a disc 1.1 deg across, its limb darker, a tight glow round it - through the air
         float c = dot(d, ATMO_SUN), r = acos(clamp(c, -1.0, 1.0)) / 0.0096;
         vec3 beyond = ATMO_SUNRAD * (420.0 * (r < 1.0 ? 0.55 + 0.45 * sqrt(1.0 - r * r) : 0.0) * smoothstep(1.0, 0.9, r)
           + 2.0 * exp(-r * 0.9)) * sunDisc;
-        float cT; vec3 cC;
-        atmoClouds(camPos, d, 1e7, cT, cC, 5);
-        vec3 T, L;
-        atmoPath(camPos, d, 1e7, T, L);
-        vec3 col = (beyond * cT + cC * (1.0 - cT)) * T + L;
-        gl_FragColor = vec4(col, 1.0 - dot(T, vec3(0.3333)) * cT);
+        gl_FragColor = vec4(a.rgb + beyond * (1.0 - a.a), a.a);
       }`,
   });
-  const mesh = new THREE.Mesh(new THREE.SphereGeometry(100000, 96, 48), m);
+  const mesh = new THREE.Mesh(geo, m);
   mesh.renderOrder = 10;
   mesh.frustumCulled = false;
   return mesh;

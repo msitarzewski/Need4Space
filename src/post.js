@@ -110,10 +110,11 @@ export class LayeredRenderPass extends Pass {
     for (const c of [this.farCam, this.nearCam]) { c.matrixAutoUpdate = false; c.matrixWorldAutoUpdate = false; }
   }
 
-  slice(c, near, far) {
+  // (layer 3: what is only ever far - drawn in the far slice alone; layer 4: only ever near - the near slice alone)
+  slice(c, near, far, skip = 0) {
     const cam = this.camera;
     c.fov = cam.fov; c.aspect = cam.aspect; c.zoom = cam.zoom; c.near = near; c.far = far;
-    c.layers.mask = cam.layers.mask;
+    c.layers.mask = cam.layers.mask & ~skip;
     c.updateProjectionMatrix();
     c.matrixWorld.copy(cam.matrixWorld);
     c.matrixWorldInverse.copy(cam.matrixWorldInverse);
@@ -134,9 +135,9 @@ export class LayeredRenderPass extends Pass {
     renderer.clearDepth();
     const cam = this.camera;
     if (this.split > 0 && cam.isPerspectiveCamera && cam.far > this.split * 2) {
-      renderer.render(this.scene, this.slice(this.farCam, this.split, cam.far));      // (the shadow maps update here)
+      renderer.render(this.scene, this.slice(this.farCam, this.split, cam.far, 1 << 4));      // (the shadow maps update here)
       renderer.clearDepth();
-      renderer.render(this.scene, this.slice(this.nearCam, cam.near, this.split));
+      renderer.render(this.scene, this.slice(this.nearCam, cam.near, this.split, 1 << 3));
     } else renderer.render(this.scene, cam);
     renderer.autoClear = ac;
     this.clean.material.uniforms.tDiffuse.value = this.msaa.texture;
@@ -583,6 +584,150 @@ export class ResamplePass extends Pass {
     u.texel.value.set(1 / readBuffer.width, 1 / readBuffer.height);
     u.sharpen.value = this.sharpen;
     u.down.value = this.down ? 1 : 0;
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    this.quad.render(renderer);
+  }
+}
+
+// Light shafts (the forest moon's air): the bright sky round the sun, streaked toward it - so wherever an island, a
+// tree or a roof of vines stands in front of the sun, the light comes through its gaps in shafts. A quarter-size mask
+// (bright and near the sun), two radial blurs toward the sun's place on screen (24 taps each, the second finer: ~600
+// samples in all), added back warm. Off when the sun is behind the camera.
+export class ShaftPass extends Pass {
+  constructor() {
+    super();
+    this.strength = 0.5;
+    this.sunUV = new THREE.Vector2(0.5, 0.5);
+    this.facing = 0;
+    const q = () => new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });
+    this.a = q(); this.b = q();
+    const vs = /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+    this.mask = new FullScreenQuad(new THREE.ShaderMaterial({
+      uniforms: { tIn: { value: null }, sun: { value: this.sunUV }, aspect: { value: 1 } }, vertexShader: vs,
+      fragmentShader: /* glsl */`uniform sampler2D tIn; uniform vec2 sun; uniform float aspect; varying vec2 vUv;
+        void main() {
+          vec3 c = min(texture2D(tIn, vUv).rgb, vec3(12.0));
+          float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+          vec2 d = (vUv - sun) * vec2(aspect, 1.0);
+          float near = exp(-dot(d, d) * 2.2);
+          gl_FragColor = vec4(c * smoothstep(0.9, 2.6, l) * near, 1.0);
+        }`,
+    }));
+    this.blur = new FullScreenQuad(new THREE.ShaderMaterial({
+      uniforms: { tIn: { value: null }, sun: { value: this.sunUV }, len: { value: 1 } }, vertexShader: vs,
+      fragmentShader: /* glsl */`uniform sampler2D tIn; uniform vec2 sun; uniform float len; varying vec2 vUv;
+        void main() {
+          vec2 st = (sun - vUv) * len / 24.0, uv = vUv;
+          vec3 c = vec3(0.0); float w = 1.0, wsum = 0.0;
+          for (int i = 0; i < 24; i++) { c += texture2D(tIn, uv).rgb * w; wsum += w; uv += st; w *= 0.95; }
+          gl_FragColor = vec4(c / wsum, 1.0);
+        }`,
+    }));
+    this.comp = new FullScreenQuad(new THREE.ShaderMaterial({
+      uniforms: { tColor: { value: null }, tShaft: { value: null }, strength: { value: 0.5 } }, vertexShader: vs,
+      fragmentShader: /* glsl */`uniform sampler2D tColor, tShaft; uniform float strength; varying vec2 vUv;
+        void main() { vec4 c = texture2D(tColor, vUv); gl_FragColor = vec4(c.rgb + texture2D(tShaft, vUv).rgb * vec3(1.0, 0.9, 0.72) * strength, c.a); }`,
+    }));
+  }
+
+  setSize(w, h) { for (const t of [this.a, this.b]) t.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2)); this.aspect = w / Math.max(1, h); }
+
+  render(renderer, writeBuffer, readBuffer) {
+    const m = this.mask.material.uniforms;
+    m.tIn.value = readBuffer.texture; m.aspect.value = this.aspect || 1;
+    renderer.setRenderTarget(this.a); this.mask.render(renderer);
+    const b = this.blur.material.uniforms;
+    b.tIn.value = this.a.texture; b.len.value = 0.9;
+    renderer.setRenderTarget(this.b); this.blur.render(renderer);
+    b.tIn.value = this.b.texture; b.len.value = 0.9 / 24;
+    renderer.setRenderTarget(this.a); this.blur.render(renderer);
+    const c = this.comp.material.uniforms;
+    c.tColor.value = readBuffer.texture; c.tShaft.value = this.a.texture; c.strength.value = this.strength * this.facing;
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    this.comp.render(renderer);
+  }
+}
+
+// Water on the lens, after flying through a waterfall: the screen wets in a flash (a pale veil and a wobble that
+// fade in ~0.3 s), then beads of water - each a little lens showing the picture flipped inside it, a dark rim - run
+// down the screen and dry off over ~2.5 s, the smallest first. On the finished picture (after the colour transform).
+export class LensWaterPass extends Pass {
+  constructor() {
+    super();
+    this.wet = 0;          // 1 the moment the camera goes through, falling back to 0
+    this.splash = 0;       // the veil and wobble, gone in ~0.3 s
+    this.t = 0;
+    this.seed = 0;
+    this.enabled = false;
+    this.quad = new FullScreenQuad(new THREE.ShaderMaterial({
+      uniforms: { tDiffuse: { value: null }, wet: { value: 0 }, splash: { value: 0 }, time: { value: 0 }, seed: { value: 0 }, aspect: { value: 1 } },
+      vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+      fragmentShader: /* glsl */`
+        uniform sampler2D tDiffuse; uniform float wet, splash, time, seed, aspect; varying vec2 vUv;
+        float h1(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+        vec2 h2(vec2 p) { vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973)); q += dot(q, q.yzx + 33.33); return fract((q.xx + q.yz) * q.zy); }
+        // the drops of one layer: cells of the screen, a drop in a few, each its own size, the big ones running down
+        // (x, y: where in the drop, z: how far from its middle, w: its own random)
+        vec4 drops(vec2 uv, float cells, float salt, float dens) {
+          vec2 p = vec2(uv.x * aspect, uv.y) * cells;
+          vec4 best = vec4(0.0);
+          for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+            vec2 c = floor(p) + vec2(float(x), float(y)), r = h2(c + salt + seed);
+            float id = h1(c * 1.7 + salt + seed);
+            if (id > dens) continue;                                  // (most cells dry)
+            float big = r.x * r.x;
+            float run = big > 0.35 ? time * (0.25 + 0.8 * r.y) : 0.0; // only the heavy ones run
+            vec2 ctr = c + 0.2 + 0.6 * r + vec2(0.0, -run * cells * 0.3);
+            float rad = (0.08 + 0.38 * big) * smoothstep(id / dens * 0.9, id / dens * 0.9 + 0.12, wet);  // dries: small first
+            vec2 d = p - ctr;
+            d.y *= 0.9 + 0.5 * smoothstep(0.0, 0.4, run);            // a running drop drawn out
+            float q = dot(d, d) / max(rad * rad, 1e-5);
+            if (q < 1.0 && rad > 0.0) best = vec4(d / max(rad, 1e-5), q, id);
+            // the wet trail a running drop leaves above it
+            if (run > 0.0 && rad > 0.0 && abs(d.x) < rad * 0.25 && d.y > 0.0 && d.y < run * cells * 0.3 && best.z == 0.0) best = vec4(d.x / rad * 2.0, 0.0, 0.92, id);
+          }
+          return best;
+        }
+        void main() {
+          vec2 uv = vUv;
+          // the splash: a wobble through the picture
+          uv += splash * 0.01 * vec2(sin(vUv.y * 40.0 + time * 30.0), cos(vUv.x * 33.0 - time * 27.0));
+          // fewer toward the middle of the screen (the hull's own spray hits its edges), two sizes of cell
+          float edge = smoothstep(0.15, 0.6, length((vUv - 0.5) * vec2(aspect, 1.0)));
+          vec4 a = drops(uv, 7.0, 1.3, 0.12 + 0.2 * edge), b = drops(uv, 15.0, 7.7, 0.1 + 0.18 * edge);
+          vec4 d = a.z > 0.0 ? a : b;
+          vec2 off = vec2(0.0); float rim = 0.0, inDrop = 0.0;
+          if (d.z > 0.0 && wet > 0.01) {
+            float hgt = sqrt(max(1.0 - d.z, 0.0));
+            off = -d.xy * 0.05 * (0.4 + 0.6 * hgt);                      // a little lens: the picture flipped inside it
+            rim = smoothstep(0.8, 1.0, d.z);
+            inDrop = 1.0;
+          }
+          vec3 col = texture2D(tDiffuse, uv + off).rgb;
+          col *= 1.0 - 0.25 * rim * inDrop;
+          col += inDrop * (1.0 - rim) * 0.08 * smoothstep(0.3, 1.0, -d.y) * (1.0 - d.z);   // a catch of light at the top of the drop
+          // the veil of spray at the moment it hits
+          col = mix(col, vec3(0.86, 0.9, 0.92), splash * 0.45);
+          gl_FragColor = vec4(col, 1.0);
+        }`,
+    }));
+  }
+
+  setSize(w, h) { this.quad.material.uniforms.aspect.value = w / Math.max(1, h); }
+
+  // the camera through a curtain of water
+  hit() { this.wet = 1; this.splash = 1; this.t = 0; this.seed = Math.floor(Math.random() * 100); }
+
+  update(dt) {
+    this.t += dt;
+    this.wet = Math.max(0, this.wet - dt / 2.6);
+    this.splash = Math.max(0, this.splash - dt / 0.35);
+    this.enabled = this.allowed !== false && this.wet > 0.001;
+  }
+
+  render(renderer, writeBuffer, readBuffer) {
+    const u = this.quad.material.uniforms;
+    u.tDiffuse.value = readBuffer.texture; u.wet.value = this.wet; u.splash.value = this.splash; u.time.value = this.t; u.seed.value = this.seed;
     renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
     this.quad.render(renderer);
   }

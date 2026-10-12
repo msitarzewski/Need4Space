@@ -20,7 +20,7 @@ import { TouchControls, isTouch } from './touch.js';
 import { FX } from './fx.js';
 import { HUD } from './hud.js';
 import { GameAudio } from './audio.js';
-import { agxPass, speedBlurPass, LayeredRenderPass, DeckSSRPass, StreakPass, BloomPass, ResamplePass } from './post.js';
+import { agxPass, speedBlurPass, LayeredRenderPass, DeckSSRPass, StreakPass, BloomPass, ResamplePass, ShaftPass, LensWaterPass } from './post.js';
 import { Settings, savedSettings } from './settings.js';
 import { Race, Driver } from './race.js';
 import { Menu } from './menu.js';
@@ -220,6 +220,9 @@ async function boot() {
     track.parts.deck.layers.enable(5);
     composer.addPass(ssr);
   } else ssr.enabled = false;
+  // light shafts through the gaps of what stands in front of the sun (a map with air: the forest moon)
+  const shafts = new ShaftPass();
+  composer.addPass(shafts);
   // only what is really bright, a tight halo (at 0.45 / threshold 1.1 every light strip hazed into white); the
   // dual-filter bloom (post.js): no squares round a glint
   const bloom = new BloomPass({ threshold: 2.6, knee: 1.0, strength: 0.9, radius: 0.62 });
@@ -236,6 +239,9 @@ async function boot() {
   composer.addPass(output);
   // SMAA on the finished, tone-mapped picture: MSAA smooths geometry edges only (and its HDR resolve leaves bright
   // edges stepped); SMAA also takes the stair-steps off shading, highlights and thin glowing lines
+  // water on the lens after flying through a waterfall (on the finished picture)
+  const lens = new LensWaterPass();
+  composer.addPass(lens);
   const smaa = new SMAAPass(innerWidth, innerHeight);
   composer.addPass(smaa);
   // the render scale: the frame drawn at a fraction (or a multiple) of the screen's pixels, resampled to it here
@@ -272,6 +278,8 @@ async function boot() {
     if (scenePass.msaa.samples !== samples) { scenePass.msaa.samples = samples; scenePass.msaa.dispose(); }
     ssr.enabled = !!track && v.ao && v.reflections;
     streaks.enabled = v.streaks;
+    shafts.enabled = !!world.lightShafts && v.shafts !== false;
+    lens.allowed = v.lensWater !== false;
     bloom.enabled = v.bloom;
     blurOn = v.blur;
     Ship.brakeLights = v.brakeLights;
@@ -354,10 +362,12 @@ async function boot() {
     composer.setPixelRatio(pixelRatio * renderScale / 8);
     composer.setSize(innerWidth, innerHeight);
     await nextFrame();
+    lens.enabled = true;                               // (its shader too: else compiled at the first splash)
     for (const level of [0, 1]) {
       for (const [m, , levels] of lods) if (levels[level]) m.geometry = levels[level];
       scene.updateMatrixWorld(); composer.render();
     }
+    lens.enabled = false;
     for (const [m, g] of lods) m.geometry = g;
     for (const [o, v, f] of keep) { o.visible = v; o.frustumCulled = f; }
     resize();
@@ -371,6 +381,7 @@ async function boot() {
   audio.prepareMusic();                              // (the songs load once the game has: not over the ship's download)
 
   const FIXED = 1 / 120;
+  const _sunP = new THREE.Vector3(), _camF = new THREE.Vector3();
   let acc = 0, last = performance.now();
   const render = () => { scene.updateMatrixWorld(); composer.render(); };
   // drawn between the last two physics steps: at 144 Hz a frame got 0, 1 or 2 steps of 8.3 ms, and everything that
@@ -635,6 +646,15 @@ async function boot() {
     menu.camera(dt);                                     // the title's shots, or a blend between two camera views
     world.follow(ctl.rPos, camera);
     world.update?.(t, camera, ship.root.position, racer ? racer.s : 0, renderer);
+    // the sun's place on screen for the shafts (fading out as it goes behind the camera)
+    if (shafts.enabled) {
+      const sp = _sunP.copy(camera.position).addScaledVector(world.sunDir, 5000).project(camera);
+      shafts.sunUV.set(sp.x * 0.5 + 0.5, sp.y * 0.5 + 0.5);
+      shafts.facing = smoothstep(0.05, 0.45, _camF.set(0, 0, -1).applyQuaternion(camera.quaternion).dot(world.sunDir));
+    }
+    // through a waterfall: water on the lens, and the splash
+    if (world.wetCheck?.(camera.position)) { lens.hit(); audio.splash?.(); }
+    lens.update(dt);
 
     // lap timing: progress along the circuit (the track's arc length, or the road's samples near the road)
     if (!race && !lap.started && ship.ready && ctl.speed > 3) { lap.started = true; lap.time = 0; }

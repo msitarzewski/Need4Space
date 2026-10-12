@@ -5,6 +5,9 @@ import * as THREE from 'three';
 import { fbm } from './noise.js';
 import { CANOPY_Y, SUN_DIR } from './atmo.js';
 import { Q } from './quality.js';
+import { sunOnly } from './look.js';
+import { bakeLater, quadJob } from './bake.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 const R_MAX = 34000;
 
@@ -73,15 +76,62 @@ export class Abyss {
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     g.setIndex(idx);
     g.computeVertexNormals();
+    // The jungle's colour - stands of trees in patches, their clumping, the rivers and their sand - painted once at load
+    // into a map 20 km across round the circuit (per pixel it was ~20 noise lookups over half the screen)
+    const MAPS = 20000, mapRes = Q.tier === 'low' ? 2048 : 4096;
+    const rt = new THREE.WebGLRenderTarget(mapRes, mapRes, { depthBuffer: false, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter,
+      magFilter: THREE.LinearFilter, colorSpace: THREE.NoColorSpace });
+    rt.texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    const quad = new FullScreenQuad(new THREE.ShaderMaterial({ uniforms: { org: { value: new THREE.Vector2(c.x, c.z) } },
+      vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+      fragmentShader: /* glsl */`
+        precision highp float;
+        uniform vec2 org; varying vec2 vUv;
+        float gH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+        float gN(vec2 p) { vec2 i = floor(p), u = fract(p); u = u * u * (3.0 - 2.0 * u);
+          return mix(mix(gH(i), gH(i + vec2(1, 0)), u.x), mix(gH(i + vec2(0, 1)), gH(i + vec2(1, 1)), u.x), u.y); }
+        float gF(vec2 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { s += a * gN(p); p = p * 2.03 + 7.1; a *= 0.5; } return s / 0.9375; }
+        ${RIVER_GLSL}
+        void main() {
+          vec2 gp = org + (vUv - 0.5) * ${MAPS.toFixed(1)};
+          float gpx = ${(MAPS / 4096).toFixed(3)};
+          float region = gF(gp / 900.0), region2 = gF(gp / 260.0 + 5.0), region3 = gF(gp / 95.0 + 9.0);
+          vec3 g1 = vec3(0.04, 0.085, 0.02), g2 = vec3(0.15, 0.19, 0.04), g3 = vec3(0.04, 0.11, 0.07), g4 = vec3(0.13, 0.12, 0.05);
+          vec3 alb = mix(g1, g2, smoothstep(0.3, 0.75, region));
+          alb = mix(alb, g3, smoothstep(0.45, 0.75, region2) * 0.75);
+          alb = mix(alb, g4, smoothstep(0.62, 0.8, region3) * 0.5);
+          alb *= 0.8 + 0.4 * gF(gp / 38.0 + 3.0);
+          float rw; float rd = riverDist(gp, rw);
+          float water = 1.0 - smoothstep(rw * 0.5 - gpx, rw * 0.5 + gpx, rd);
+          float bank = (1.0 - smoothstep(rw * 0.5, rw * 0.5 + 18.0, rd)) * (1.0 - water);
+          alb = mix(alb, vec3(0.16, 0.13, 0.08), bank * 0.6);
+          alb = mix(alb, vec3(0.012, 0.024, 0.022), water);
+          gl_FragColor = vec4(alb * 4.0, water);
+        }` }));
+    for (let k = 0; k < 4; k++) {
+      bakeLater(k ? [] : [quadJob(quad)], () => {
+        const prev = renderer.getRenderTarget();
+        rt.scissor.set(0, k * mapRes / 4, mapRes, mapRes / 4); rt.scissorTest = true;
+        rt.texture.generateMipmaps = k === 3;
+        renderer.setRenderTarget(rt); quad.render(renderer);
+        rt.scissorTest = false;
+        renderer.setRenderTarget(prev);
+        if (k === 3) { quad.material.dispose(); quad.dispose(); }
+      });
+    }
+    const jungleMap = { value: rt.texture };
     const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0 });
+    // (never in a cascade's box: the world's map alone, one soft tap)
+    mat.defines = { ...mat.defines, FOLIAGE_SHADOW: '', FOLIAGE_ONE_TAP: '' };
     const sxz = new THREE.Vector2(SUN_DIR.x, SUN_DIR.z).normalize(), tanE = SUN_DIR.y / Math.hypot(SUN_DIR.x, SUN_DIR.z);
     const L = THREE.ShaderChunk.lights_fragment_begin, at = 'getDirectionalLightInfo( directionalLight, directLight );';
     if (!L.includes(at)) throw new Error('lights chunk changed: canopy shadow not applied');
     mat.onBeforeCompile = (sh) => {
+      sh.uniforms.jungleMap = jungleMap;
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vGW; varying vec3 vGN;')
         .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n  vGW = (modelMatrix * vec4(transformed, 1.0)).xyz; vGN = normalize(mat3(modelMatrix) * objectNormal);');
       sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
-varying vec3 vGW; varying vec3 vGN;
+varying vec3 vGW; varying vec3 vGN; uniform sampler2D jungleMap;
 float gH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
 vec2 gH2(vec2 p) { vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973)); q += dot(q, q.yzx + 33.33); return fract((q.xx + q.yz) * q.zy); }
 float gN(vec2 p) { vec2 i = floor(p), u = fract(p); u = u * u * (3.0 - 2.0 * u);
@@ -104,36 +154,35 @@ vec4 crownLayer(vec2 p, float S, float salt, float fill, float lift) {
   }
   return vec4(best, g, id);
 }
-vec4 canopyAt(vec2 p) {
+// (fine: the smaller crowns too - only close enough for them to show)
+vec4 canopyAt(vec2 p, bool fine) {
   p += vec2(gN(p * 0.21), gN(p * 0.21 + 5.3)) * 4.0 - 2.0;              // warped: irregular crowns
-  vec4 a = crownLayer(p, 24.0, 0.0, 0.42, 9.0), b = crownLayer(p, 9.5, 31.0, 0.93, 0.0);
+  vec4 a = crownLayer(p, 24.0, 0.0, 0.42, 9.0);
+  if (!fine) return a.x > -100.0 ? vec4(a.x, a.yz, a.w + 2.0) : vec4(0.0, 0.0, 0.0, 0.5);       // (between: the mass of smaller crowns)
+  vec4 b = crownLayer(p, 9.5, 31.0, 0.93, 0.0);
   return a.x > b.x ? vec4(a.x, a.yz, a.w + 2.0) : b;          // (w > 2: an emergent's crown)
 }
 ${RIVER_GLSL}`)
         .replace('#include <map_fragment>', `#include <map_fragment>
   vec2 gp = vGW.xz;
   float gpx = length(fwidth(gp));                                        // metres a pixel
-  float detail = 1.0 - smoothstep(1.4, 3.2, gpx);
+  float detail = 1.0 - smoothstep(1.0, 2.4, gpx);
+  bool fine = gpx < 1.1;
   ${Q.lite ? 'detail = 0.0;                                         // (Laptop mode: the crowns as their average)' : ''}
   vec4 cn = vec4(0.0);
   float crownSun = 1.0, crownAO = 0.8;
-  float region = gF(gp / 900.0), region2 = gF(gp / 260.0 + 5.0), region3 = gF(gp / 95.0 + 9.0);
-  vec3 g1 = vec3(0.04, 0.085, 0.02), g2 = vec3(0.15, 0.19, 0.04), g3 = vec3(0.04, 0.11, 0.07), g4 = vec3(0.13, 0.12, 0.05);
-  // stands of different trees in patches (they read from far away), lighter on the ridges, darker in the hollows
-  vec3 alb = mix(g1, g2, smoothstep(0.3, 0.75, region));
-  alb = mix(alb, g3, smoothstep(0.45, 0.75, region2) * 0.75);
-  alb = mix(alb, g4, smoothstep(0.62, 0.8, region3) * 0.5);
+  // the painted map (stands of trees, their clumping, rivers): out past its edge, its average under the haze
+  vec2 ju = (gp - vec2(${c.x.toFixed(1)}, ${c.z.toFixed(1)})) / ${MAPS.toFixed(1)} + 0.5;
+  vec4 jm = texture2D(jungleMap, ju);
+  float inMap = step(max(abs(ju.x - 0.5), abs(ju.y - 0.5)), 0.499);
+  vec3 alb = mix(vec3(0.075, 0.115, 0.035), jm.rgb * 0.25, inMap);
+  float water = jm.a * inMap;
+  // lighter on the ridges, darker in the hollows
   alb *= 0.75 + 0.5 * smoothstep(${(CANOPY_Y - 150).toFixed(1)}, ${(CANOPY_Y + 250).toFixed(1)}, vGW.y);
-  // past the crowns' detail, their clumping still shades it (30-60 m clumps)
-  alb *= mix(0.8 + 0.4 * gF(gp / 38.0 + 3.0), 1.0, detail);
   if (detail > 0.0) {
-    cn = canopyAt(gp);
-    // the sun's shadow from the crowns toward it (two steps up the sun's ray)
-    float occ = 0.0;
-    for (int k = 1; k <= 2; k++) {
-      float t = float(k) * 4.5;
-      occ += smoothstep(-1.5, 1.5, canopyAt(gp + CANOPY_SUN * t).x - (cn.x + t * ${tanE.toFixed(4)}));
-    }
+    cn = canopyAt(gp, fine);
+    // the sun's shadow from the crowns toward it (one step up the sun's ray)
+    float occ = smoothstep(-1.5, 1.5, canopyAt(gp + CANOPY_SUN * 6.0, false).x - (cn.x + 6.0 * ${tanE.toFixed(4)})) * 1.4;
     crownSun = mix(1.0, 1.0 - 0.8 * min(occ, 1.0), detail);
     float covered = step(-100.0, cn.x);
     crownAO = mix(0.8, mix(0.25, 0.55 + 0.45 * smoothstep(2.0, 16.0, cn.x), covered), detail);
@@ -147,11 +196,6 @@ ${RIVER_GLSL}`)
     alb = mix(alb, alb * own, detail);
     if (fl.x > 0.0 && cn.x > -100.0) alb = mix(alb, fl * (0.7 + 0.5 * leaf), 0.6 * detail);
   }
-  // the rivers, a sand edge, open water
-  float rw; float rd = riverDist(gp, rw);
-  float water = 1.0 - smoothstep(rw * 0.5 - gpx, rw * 0.5 + gpx, rd);
-  float bank = (1.0 - smoothstep(rw * 0.5, rw * 0.5 + 18.0, rd)) * (1.0 - water);
-  alb = mix(alb, vec3(0.16, 0.13, 0.08), bank * 0.6);
   alb = mix(alb, vec3(0.012, 0.024, 0.022), water);
   crownSun = mix(crownSun, 1.0, water); crownAO = mix(crownAO, 1.0, water);
   diffuseColor.rgb = alb;`)
@@ -170,11 +214,13 @@ ${RIVER_GLSL}`)
         .replace('#include <aomap_fragment>', `#include <aomap_fragment>
   reflectedLight.indirectDiffuse *= crownAO;
   reflectedLight.directDiffuse *= 0.6 + 0.4 * crownAO;`);
+      sh.fragmentShader = sunOnly(sh.fragmentShader);
     };
     mat.customProgramCacheKey = () => `forest-abyss-${Q.lite}`;
     this.mesh = new THREE.Mesh(g, mat);
     this.mesh.receiveShadow = true;
     this.mesh.frustumCulled = false;
+    this.mesh.layers.set(3);                                       // (always beyond the near depth slice)
     scene.add(this.mesh);
   }
 

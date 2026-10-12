@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { mulberry32, smoothstep } from './noise.js';
 import { Q } from './quality.js';
 import { SUN_DIR } from './atmo.js';
+import { sunOnly } from './look.js';
 
 export const FLORA_U = { floraTime: { value: 0 } };
 const TAU = Math.PI * 2;
@@ -33,7 +34,7 @@ function paint(w, h, draw, ground) {
   t.generateMipmaps = true;
   t.minFilter = THREE.LinearMipmapLinearFilter;
   t.magFilter = THREE.LinearFilter;
-  t.anisotropy = 8;
+  t.anisotropy = 4;
   t.needsUpdate = true;
   return t;
 }
@@ -149,6 +150,8 @@ class Builder {
 
 const _v = new THREE.Vector3(), _w = new THREE.Vector3();
 // a tube along a path of points, radius per point, `seg` sides; uv: u round, v along in metres / 2; wind from windAt(p)
+// (barkTube: one on its own, a geometry - lianas)
+export function barkTube(path, radii, seg) { const B = new Builder(); tube(B, path, radii, seg, () => 0); return B.geometry(); }
 function tube(B, path, radii, seg, windAt, flare = null) {
   let N = new THREE.Vector3(1, 0, 0);
   const T0 = path[1].clone().sub(path[0]).normalize();
@@ -225,7 +228,7 @@ function broadleaf(seed, lod) {
   for (const c of clusters) {
     const rad = H * (0.15 + r() * 0.06);
     if (lod) cluster(L, r, c, rad, 4, rad * 1.9, 'A', windAt(c) + 0.3);
-    else cluster(L, r, c, rad, 12, rad * 1.2, 'A', windAt(c) + 0.3);
+    else cluster(L, r, c, rad, 8, rad * 1.45, 'A', windAt(c) + 0.3);
   }
   return { wood: W.geometry(), leaves: L.geometry(), H };
 }
@@ -253,7 +256,7 @@ function emergent(seed, lod) {
     // flattened: an umbrella crown
     const ctr = c;
     if (lod) cluster(L, r, ctr, rad, 4, rad * 2.0, 'A', windAt(c) + 0.25);
-    else cluster(L, r, ctr, rad, 13, rad * 1.25, 'A', windAt(c) + 0.25);
+    else cluster(L, r, ctr, rad, 9, rad * 1.5, 'A', windAt(c) + 0.25);
   }
   return { wood: W.geometry(), leaves: L.geometry(), H };
 }
@@ -351,6 +354,9 @@ export function leafMaterial() {
   atlas ||= leafAtlas();
   const mat = new THREE.MeshStandardMaterial({ map: atlas, alphaTest: 0.42, side: THREE.DoubleSide, roughness: 0.7, metalness: 0 });
   mat.alphaToCoverage = true;
+  // (leaves take only the world's shadow - 8 soft taps: the cascades' search ran for every layer of overlapping
+  // leaves, ~4 ms in a tunnel of vines)
+  mat.defines = { ...mat.defines, FOLIAGE_SHADOW: '', FOLIAGE_ONE_TAP: '' };
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, FLORA_U);
     sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>\n${WIND_VERT}\nattribute float leafAO; varying float vLeafAO;`)
@@ -378,6 +384,7 @@ export function leafMaterial() {
 		#endif`))
       .replace('#include <aomap_fragment>', `#include <aomap_fragment>
   reflectedLight.indirectDiffuse *= 0.5 + 0.5 * vLeafAO;`);
+    sh.fragmentShader = sunOnly(sh.fragmentShader);
   };
   mat.customProgramCacheKey = () => 'forest-leaf';
   return mat;
@@ -411,6 +418,7 @@ float bN(vec2 p) { vec2 i = floor(p), u = fract(p); u = u * u * (3.0 - 2.0 * u);
   float mossB = smoothstep(0.45, 0.7, bN(vBW.xz * 0.3 + vBW.y * 0.2) + 0.25 * (1.0 - normalize(vNormal).y));
   vec3 barkC = diffuseColor.rgb * vec3(0.24, 0.21, 0.17) * barkV;
   diffuseColor.rgb = mix(barkC, vec3(0.05, 0.085, 0.02), mossB * 0.55);`);
+    sh.fragmentShader = sunOnly(sh.fragmentShader);
   };
   mat.customProgramCacheKey = () => 'forest-bark';
   return mat;
@@ -423,6 +431,7 @@ export function vineMaterial() {
   vineTex.wrapT = THREE.RepeatWrapping;
   const mat = new THREE.MeshStandardMaterial({ map: vineTex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.75, metalness: 0 });
   mat.alphaToCoverage = true;
+  mat.defines = { ...mat.defines, FOLIAGE_SHADOW: '', FOLIAGE_ONE_TAP: '' };
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, FLORA_U);
     sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>
@@ -459,6 +468,7 @@ uniform float floraTime; attribute vec2 vineLW; varying float vVineAO;`)
 		#if UNROLLED_LOOP_INDEX == 0
 		reflectedLight.directDiffuse += directLight.color * material.diffuseColor * pow(max(dot(-geometryViewDir, directLight.direction), 0.0), 4.0) * 0.8;
 		#endif`));
+    sh.fragmentShader = sunOnly(sh.fragmentShader);
   };
   mat.customProgramCacheKey = () => 'forest-vine';
   return mat;
@@ -484,6 +494,12 @@ function vineStrip(n = 10) {
 export const SPECIES = ['broadleaf', 'emergent', 'palm', 'bush'];
 const BUILD = { broadleaf, emergent, palm, bush };
 
+// The planting, drawn in a fixed number of instanced meshes - one per species, part and level of detail (~25 draws
+// for all of it, wherever the camera is): every plant's matrix kept once, and every ~0.3 s (or 40 m of travel) each
+// one copied into the level its distance calls for - full near, coarse further, crossed cards far. The vines the
+// same: those within reach in one mesh. (Drawn per sector, the island field cost ~270 instanced draws a pass:
+// the CPU, not the GPU, set the frame rate.) Layer 4: drawn only in the near depth slice, 3: only in the far one.
+const NEAR_ONLY = 4, FAR_ONLY = 3;
 export class Flora {
   constructor(scene) {
     this.scene = scene;
@@ -494,74 +510,137 @@ export class Flora {
     // three levels: full (near), coarse (mid), crossed cards (far)
     for (const s of SPECIES) this.geo[s] = [BUILD[s](31 + s.length, 0), BUILD[s](31 + s.length, 1), FAR[s]()];
     this.strip = vineStrip();
-    this.sectors = [];
+    this.plants = Object.fromEntries(SPECIES.map((s) => [s, []]));
+    this.vines = [];
     this.tris = 0;
+    this.meshes = [];
   }
 
-  // a sector: instances per species [{ m: Matrix4, c: Color }], vines [{ p, len, wid }]; far: coarse trees only
+  // plants: per species [{ m: Matrix4, c: Color }]; vines: [{ p, len, wid }]; far: the far islands' (never full detail)
   addSector(name, plants, vines, far = false) {
-    const sec = { name, meshes: [], far, centre: new THREE.Vector3(), lod: -1 };
-    let n = 0;
-    for (const s of SPECIES) for (const p of plants[s] || []) { sec.centre.add(new THREE.Vector3().setFromMatrixPosition(p.m)); n++; }
-    if (n) sec.centre.divideScalar(n);
-    sec.radius = 0;
-    for (const s of SPECIES) for (const p of plants[s] || []) sec.radius = Math.max(sec.radius, sec.centre.distanceTo(new THREE.Vector3().setFromMatrixPosition(p.m)));
-    if (!n && vines.length) {                       // (vines alone: their own middle and reach)
-      for (const v of vines) sec.centre.add(v.p);
-      sec.centre.divideScalar(vines.length);
-      for (const v of vines) sec.radius = Math.max(sec.radius, sec.centre.distanceTo(v.p));
-    }
+    for (const s of SPECIES) for (const q of plants[s] || []) this.plants[s].push({ m: q.m.elements, c: q.c, far });
+    for (const v of vines) this.vines.push(v);
+  }
+
+  // the instanced meshes, once everything is planted; the plants kept in flat arrays (position, matrix, colour)
+  finish() {
+    const big = new THREE.Sphere(new THREE.Vector3(), 1e6);
+    this.sp = {};
     for (const s of SPECIES) {
-      const list = plants[s] || [];
-      if (!list.length) continue;
-      for (const part of ['wood', 'leaves']) {
-        const g = this.geo[s][far ? 2 : 1][part];
-        if (!g) continue;
-        const im = new THREE.InstancedMesh(g, part === 'wood' ? this.barkMat : this.leafMat, list.length);
-        list.forEach((p, i) => { im.setMatrixAt(i, p.m); im.setColorAt(i, p.c); });
-        im.computeBoundingSphere();
-        im.layers.set(2); im.layers.enable(6);           // seen, and in the world's shadow - not in the cascades
-        im.castShadow = true; im.receiveShadow = true;
-        im.userData.lods = this.geo[s].map((x) => x[part]);
-        this.scene.add(im);
-        sec.meshes.push(im);
-        this.tris += (g.index.count / 3) * list.length;
+      const list = this.plants[s], n = list.length;
+      if (!n) continue;
+      const P = { n, pos: new Float32Array(n * 3), mat: new Float32Array(n * 16), col: new Float32Array(n * 3), far: new Uint8Array(n), lods: [[], [], []] };
+      list.forEach((q, i) => { P.mat.set(q.m, i * 16); P.pos.set([q.m[12], q.m[13], q.m[14]], i * 3); P.col.set([q.c.r, q.c.g, q.c.b], i * 3); P.far[i] = q.far ? 1 : 0; });
+      this.sp[s] = P;
+      for (let lod = 0; lod < 3; lod++) {
+        for (const part of ['wood', 'leaves']) {
+          const g = this.geo[s][lod][part];
+          if (!g) continue;
+          const im = new THREE.InstancedMesh(g, part === 'wood' ? this.barkMat : this.leafMat, n);
+          im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+          im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
+          im.instanceColor.setUsage(THREE.DynamicDrawUsage);
+          im.count = 0;
+          im.boundingSphere = big;
+          // seen (2), in the world's shadow (6), not in the cascades; full detail only near, crossed cards only far
+          im.layers.set(2); im.layers.enable(6);
+          if (lod === 0) { im.layers.disable(2); im.layers.enable(NEAR_ONLY); }
+          if (lod === 2) { im.layers.disable(2); im.layers.enable(FAR_ONLY); }
+          im.castShadow = true; im.receiveShadow = true;
+          this.scene.add(im);
+          this.meshes.push(im);
+          P.lods[lod].push(im);
+        }
       }
     }
-    if (vines.length) {
-      const g = this.strip.clone(), lw = new Float32Array(vines.length * 2);
-      vines.forEach((v, i) => lw.set([v.len, v.wid], i * 2));
-      g.setAttribute('vineLW', new THREE.InstancedBufferAttribute(lw, 2));
-      const im = new THREE.InstancedMesh(g, this.vineMat, vines.length);
-      const M = new THREE.Matrix4();
-      vines.forEach((v, i) => { M.makeTranslation(v.p.x, v.p.y, v.p.z); im.setMatrixAt(i, M); });
-      // (bounds: the strips hang below their anchors)
-      const box = new THREE.Box3();
-      for (const v of vines) { box.expandByPoint(v.p); box.expandByPoint(v.p.clone().add(new THREE.Vector3(0, -v.len, 0))); }
-      im.boundingSphere = box.getBoundingSphere(new THREE.Sphere());
-      im.boundingSphere.radius += 10;
+    this.plants = null;
+    const nv = this.vines.length;
+    if (nv) {
+      this.vp = new Float32Array(nv * 3); this.vl = new Float32Array(nv * 2);
+      this.vines.forEach((v, i) => { this.vp.set([v.p.x, v.p.y, v.p.z], i * 3); this.vl.set([v.len, v.wid], i * 2); });
+      const g = this.strip.clone();
+      this.vineLW = new THREE.InstancedBufferAttribute(new Float32Array(nv * 2), 2);
+      this.vineLW.setUsage(THREE.DynamicDrawUsage);
+      g.setAttribute('vineLW', this.vineLW);
+      const im = (this.vineMesh = new THREE.InstancedMesh(g, this.vineMat, nv));
+      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      // (translation-only matrices: the identity part written once)
+      const arr = im.instanceMatrix.array;
+      for (let i = 0; i < nv; i++) { arr[i * 16] = arr[i * 16 + 5] = arr[i * 16 + 10] = arr[i * 16 + 15] = 1; }
+      im.count = 0;
+      im.boundingSphere = big;
       im.layers.set(2);
       im.castShadow = false; im.receiveShadow = true;           // (no depth material that bends them: no shadow)
       this.scene.add(im);
-      sec.meshes.push(im);
-      sec.vines = im;
+      this.meshes.push(im);
+      this.vines = null;
     }
-    this.sectors.push(sec);
-    return sec;
+    // the world's shadow is drawn once with everything at its coarse level and nothing culled
+    this.rebucket(null, null);
+  }
+
+  // every plant into the level its distance calls for, and only those ahead of the camera (within ~80 deg of where it
+  // looks: the frame never shows more, and a turn or a cut re-sorts at once); cam null: all coarse, nothing culled
+  rebucket(cam, fwd) {
+    const n0 = Q.lite ? 260 : 420, n1 = Q.lite ? 900 : 1400, nv = Q.lite ? 1200 : 1800;
+    const n02 = n0 * n0, n12 = n1 * n1, nv2 = nv * nv, cone = Math.cos(THREE.MathUtils.degToRad(80));
+    const cx = cam ? cam.x : 0, cy = cam ? cam.y : 0, cz = cam ? cam.z : 0, fx = fwd ? fwd.x : 0, fy = fwd ? fwd.y : 0, fz = fwd ? fwd.z : 0;
+    for (const s of SPECIES) {
+      const P = this.sp[s];
+      if (!P) continue;
+      const cnt = [0, 0, 0];
+      for (let i = 0; i < P.n; i++) {
+        let lod = P.far[i] ? 2 : 1;
+        if (cam) {
+          const dx = P.pos[i * 3] - cx, dy = P.pos[i * 3 + 1] - cy, dz = P.pos[i * 3 + 2] - cz, d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 > 3600 && dx * fx + dy * fy + dz * fz < cone * Math.sqrt(d2)) continue;      // behind, out to the sides
+          if (!P.far[i]) lod = d2 > n12 ? 2 : d2 > n02 ? 1 : 0;
+        }
+        const k = cnt[lod]++;
+        for (const im of P.lods[lod]) {
+          const A = im.instanceMatrix.array, C = im.instanceColor.array, o = k * 16, m = i * 16;
+          for (let j = 0; j < 16; j++) A[o + j] = P.mat[m + j];
+          C[k * 3] = P.col[i * 3]; C[k * 3 + 1] = P.col[i * 3 + 1]; C[k * 3 + 2] = P.col[i * 3 + 2];
+        }
+      }
+      for (let lod = 0; lod < 3; lod++) for (const im of P.lods[lod]) {
+        const n = cnt[lod];
+        im.count = n;
+        im.visible = n > 0;
+        if (!n) continue;
+        im.instanceMatrix.clearUpdateRanges(); im.instanceMatrix.addUpdateRange(0, n * 16); im.instanceMatrix.needsUpdate = true;
+        im.instanceColor.clearUpdateRanges(); im.instanceColor.addUpdateRange(0, n * 3); im.instanceColor.needsUpdate = true;
+      }
+    }
+    if (this.vineMesh) {
+      const im = this.vineMesh, arr = im.instanceMatrix.array, lw = this.vineLW.array, V = this.vp, Lw = this.vl, n = V.length / 3;
+      let k = 0;
+      for (let i = 0; i < n; i++) {
+        if (cam) {
+          const dx = V[i * 3] - cx, dy = V[i * 3 + 1] - cy, dz = V[i * 3 + 2] - cz, d2 = dx * dx + dz * dz;
+          if (d2 > nv2) continue;
+          if (d2 > 3600 && dx * fx + dy * fy + dz * fz < cone * Math.sqrt(d2 + dy * dy)) continue;
+        }
+        arr[k * 16 + 12] = V[i * 3]; arr[k * 16 + 13] = V[i * 3 + 1]; arr[k * 16 + 14] = V[i * 3 + 2];
+        lw[k * 2] = Lw[i * 2]; lw[k * 2 + 1] = Lw[i * 2 + 1];
+        k++;
+      }
+      im.count = k;
+      im.instanceMatrix.clearUpdateRanges(); im.instanceMatrix.addUpdateRange(0, k * 16); im.instanceMatrix.needsUpdate = true;
+      this.vineLW.clearUpdateRanges(); this.vineLW.addUpdateRange(0, k * 2); this.vineLW.needsUpdate = true;
+    }
+    this.lastAt = cam ? cam.clone() : null;
+    this.lastFwd = fwd ? fwd.clone() : null;
   }
 
   update(t, camera) {
     FLORA_U.floraTime.value = t;
-    // a sector's trees swap geometry by its distance: full near, coarse further, crossed cards far; its vines go past ~1.8 km
-    const n0 = Q.lite ? 260 : 420, n1 = Q.lite ? 900 : 1400;
-    for (const sec of this.sectors) {
-      if (sec.far) continue;
-      const d = Math.max(0, camera.position.distanceTo(sec.centre) - sec.radius);
-      const lod = d < n0 ? 0 : d < n1 ? 1 : 2;
-      if (sec.vines) sec.vines.visible = d < (Q.lite ? 1200 : 1800);
-      if (lod === sec.lod) continue;
-      sec.lod = lod;
-      for (const m of sec.meshes) if (m.userData.lods) { const g = m.userData.lods[lod]; if (g) { m.geometry = g; m.visible = true; } else m.visible = false; }
+    const p = camera.position, f = (this._f ||= new THREE.Vector3()).set(0, 0, -1).applyQuaternion(camera.quaternion);
+    // re-sorted after 50 m of travel or a turn of ~20 deg (a camera cut too), and now and then on the move
+    if (!this.lastAt || p.distanceToSquared(this.lastAt) > 2500 || f.dot(this.lastFwd) < 0.94 ||
+      (t - (this.lastT ?? -9) > 1 && p.distanceToSquared(this.lastAt) > 4)) {
+      this.rebucket(p, f);
+      this.lastT = t;
     }
   }
 }

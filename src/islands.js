@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { bakeLater, quadJob } from './bake.js';
 import { Q } from './quality.js';
+import { sunOnly } from './look.js';
 import { mulberry32, fbm, smoothstep, clamp } from './noise.js';
 
 const TAU = Math.PI * 2;
@@ -37,7 +38,9 @@ export function fbm3(x, y, z, oct = 4) {
 // Returns { geometry, top(x, z) -> height of the top surface or null, rim(θ) -> world point on the rim, ... }
 export function islandShape(I) {
   const rnd = mulberry32(I.seed);
-  const NU = I.res || 160, NT = 12, NRIM = 6, NC = Math.max(6, Math.round(I.cliff / 9)), NB = Math.max(18, Math.round((I.depth - I.cliff) / 9));
+  const coarse = I.far ? 2.2 : 1;                 // (far ones: rows ~20 m apart, not 9)
+  const NU = I.res || 160, NT = I.far ? 6 : 12, NRIM = I.far ? 3 : 6, NC = Math.max(I.far ? 3 : 6, Math.round(I.cliff / 9 / coarse)),
+    NB = Math.max(I.far ? 8 : 18, Math.round((I.depth - I.cliff) / 9 / coarse));
   const rx = I.rx, rz = I.rz, cr = Math.cos(I.rot || 0), sr = Math.sin(I.rot || 0), avgR = (rx + rz) / 2;
   const hill = I.hill ?? 8, crag = I.crag ?? 1, taper = I.taper ?? 1.2;
   const s1 = rnd() * 50, s2 = rnd() * 50;
@@ -242,7 +245,7 @@ export function islandMaps(renderer) {
     const S = Q.tier === 'low' ? 1024 : 2048;
     const rt = new THREE.WebGLRenderTarget(S, S, { depthBuffer: false, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter,
       magFilter: THREE.LinearFilter, wrapS: THREE.RepeatWrapping, wrapT: THREE.RepeatWrapping, colorSpace: THREE.NoColorSpace });
-    rt.texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    rt.texture.anisotropy = 4;                     // (16x on 4-8 taps a pixel, the cliffs seen edge-on: ~0.7 ms)
     const quad = new FullScreenQuad(new THREE.ShaderMaterial({ uniforms: { mode: { value: mode } },
       vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`, fragmentShader: GEN }));
     for (let k = 0; k < 4; k++) {
@@ -266,13 +269,24 @@ export function islandMaps(renderer) {
 // ---------------------------------------------------------------- the material
 // rock from the tile (three axes, two scales), strata, streaks, moss; grass where the geometry says top ('isl'.x);
 // 'isl'.y deep under the island (darker, rootier)
-export function islandMaterial({ key = 'island', side = THREE.FrontSide } = {}) {
+// lamps: the point and spot lights too (the cave's bore: lit by the ships)
+export function islandMaterial({ key = 'island', side = THREE.FrontSide, lamps = false } = {}) {
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0, side });
+  // (the islands take only the world's shadow - their own and each other's, the trees' - not the cascades' search:
+  // a ship's shadow on a cliff 20 m off is not worth ~1.5 ms where a cliff fills the frame)
+  mat.defines = { ...mat.defines, FOLIAGE_SHADOW: '' };
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
     const lite = Q.lite ? '#define ISL_LITE\n' : '';
     sh.vertexShader = lite + sh.vertexShader.replace('#include <common>', `#include <common>
-attribute vec2 isl; varying vec2 vIsl; varying vec3 vIW; varying vec3 vIN;`)
+attribute vec2 isl; varying vec2 vIsl; varying vec3 vIW; varying vec3 vIN; varying vec3 vIA; varying vec3 vIB;
+float iH(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float iN(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(iH(i), iH(i + vec3(1, 0, 0)), f.x), mix(iH(i + vec3(0, 1, 0)), iH(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(iH(i + vec3(0, 0, 1)), iH(i + vec3(1, 0, 1)), f.x), mix(iH(i + vec3(0, 1, 1)), iH(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+float iF(vec3 p) { return iN(p) * 0.5 + iN(p * 2.07 + 3.1) * 0.3 + iN(p * 4.3 - 1.7) * 0.2; }`)
       .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
   vIsl = isl;
   {
@@ -281,9 +295,14 @@ attribute vec2 isl; varying vec2 vIsl; varying vec3 vIW; varying vec3 vIN;`)
     tw = instanceMatrix * tw; tn = mat3(instanceMatrix) * tn;
   #endif
     vIW = (modelMatrix * tw).xyz; vIN = normalize(mat3(modelMatrix) * tn);
+    // (the noises that vary over tens of metres, per vertex: strata, iron stains, the deep's soil, moss patches, the
+    // grass's drifts and bare patches - per pixel they were ~2/3 of the island's shader)
+    vIA = vec3(iN(vec3(vIW.x * 0.004, vIW.y * 0.09 + iN(vIW * 0.008) * 4.0, vIW.z * 0.004)) * 0.7 + iN(vIW * 0.03) * 0.3,
+      iN(vec3(vIW.xz * 0.006, vIW.y * 0.06)), iF(vIW * 0.03));
+    vIB = vec3(iF(vIW * vec3(0.09, 0.05, 0.09) + 2.0), iF(vIW * 0.02), iN(vIW * 0.06 + 9.0));
   }`);
     sh.fragmentShader = lite + sh.fragmentShader.replace('#include <common>', `#include <common>
-uniform sampler2D islCol, islNrm; varying vec2 vIsl; varying vec3 vIW; varying vec3 vIN;
+uniform sampler2D islCol, islNrm; varying vec2 vIsl; varying vec3 vIW; varying vec3 vIN; varying vec3 vIA; varying vec3 vIB;
 float iH(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 float iN(vec3 x) {
   vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
@@ -300,46 +319,50 @@ void iTap(vec2 p, float rot, out vec4 c, out vec2 g) {
   vec3 n = texture2D(islNrm, u).xyz * 2.0 - 1.0;
   g = transpose(R) * (-n.xy / max(n.z, 0.25));
 }
+float iFine = 1.0;                               // (the fine tile's weight: 0 where a pixel spans more than ~1/3 of it)
 void iProj(vec2 p, float rot, out vec4 c, out vec2 g) {
   vec4 ca, cb; vec2 ga, gb;
   iTap(p / 21.0, rot, ca, ga);
 #ifdef ISL_LITE
   c = vec4(ca.rgb * 2.0, ca.a); g = ga;
 #else
-  iTap(p / 4.7 + 0.37, rot, cb, gb);
-  c = vec4(ca.rgb * cb.rgb * 4.0, mix(ca.a, cb.a, 0.5)); g = ga + gb;
+  if (iFine > 0.0) {
+    iTap(p / 4.7 + 0.37, rot, cb, gb);
+    c = vec4(ca.rgb * mix(vec3(0.5), cb.rgb, iFine) * 4.0, mix(ca.a, mix(ca.a, cb.a, 0.5), iFine)); g = ga + gb * iFine;
+  } else { c = vec4(ca.rgb * 2.0, ca.a); g = ga; }
 #endif
 }`)
       .replace('#include <map_fragment>', `#include <map_fragment>
   vec3 iN0 = normalize(vIN);
   // (the sides' tiles stand upright; the top's is turned)
-  vec3 tpw = pow(abs(iN0), vec3(5.0));
+  vec3 tpw = pow(abs(iN0), vec3(8.0));
   tpw /= tpw.x + tpw.y + tpw.z;
+  iFine = 1.0 - smoothstep(0.35, 1.2, length(fwidth(vIW)));
   vec4 iC = vec4(0.0); vec2 gX = vec2(0.0), gY = vec2(0.0), gZ = vec2(0.0);
-  if (tpw.x > 0.02) { vec4 c; iProj(vIW.zy, 0.0, c, gX); iC += c * tpw.x; }
-  if (tpw.y > 0.02) { vec4 c; iProj(vIW.xz, 1.3, c, gY); iC += c * tpw.y; }
-  if (tpw.z > 0.02) { vec4 c; iProj(vIW.xy, 0.0, c, gZ); iC += c * tpw.z; }
-  iC /= max(tpw.x * step(0.02, tpw.x) + tpw.y * step(0.02, tpw.y) + tpw.z * step(0.02, tpw.z), 1e-3);
+  if (tpw.x > 0.05) { vec4 c; iProj(vIW.zy, 0.0, c, gX); iC += c * tpw.x; }
+  if (tpw.y > 0.05) { vec4 c; iProj(vIW.xz, 1.3, c, gY); iC += c * tpw.y; }
+  if (tpw.z > 0.05) { vec4 c; iProj(vIW.xy, 0.0, c, gZ); iC += c * tpw.z; }
+  iC /= max(tpw.x * step(0.05, tpw.x) + tpw.y * step(0.05, tpw.y) + tpw.z * step(0.05, tpw.z), 1e-3);
   // the rock: pale limestone in strata (bands warped through the island), darker water streaks down the faces
-  float strata = iN(vec3(vIW.x * 0.004, vIW.y * 0.09 + iN(vIW * 0.008) * 4.0, vIW.z * 0.004)) * 0.7 + iN(vIW * 0.03) * 0.3;
+  float strata = vIA.x;
   vec3 rock = mix(vec3(0.17, 0.16, 0.145), vec3(0.25, 0.235, 0.205), strata);
-  rock = mix(rock, vec3(0.26, 0.18, 0.11), smoothstep(0.6, 0.8, iN(vec3(vIW.xz * 0.006, vIW.y * 0.06))) * 0.55);   // iron stains
+  rock = mix(rock, vec3(0.26, 0.18, 0.11), smoothstep(0.6, 0.8, vIA.y) * 0.55);   // iron stains
   float streak = smoothstep(0.5, 0.85, iN(vec3(vIW.x * 0.13, vIW.y * 0.006, vIW.z * 0.13)) * 0.7 + iN(vec3(vIW.x * 0.5, vIW.y * 0.02, vIW.z * 0.5)) * 0.3);
   rock *= 1.0 - 0.5 * streak;
   // deep under the island: darker, roots and old soil showing
-  rock = mix(rock, vec3(0.16, 0.12, 0.09), smoothstep(0.15, 0.7, vIsl.y) * 0.65 * smoothstep(0.4, 0.7, iF(vIW * 0.03)));
+  rock = mix(rock, vec3(0.16, 0.12, 0.09), smoothstep(0.15, 0.7, vIsl.y) * 0.65 * smoothstep(0.4, 0.7, vIA.z));
   rock *= iC.rgb;
   // moss: over the rim and down the wet streaks, on faces that see the sky, in patches
   float up = iN0.y;
-  float mossN = iF(vIW * vec3(0.09, 0.05, 0.09) + 2.0) * 0.7 + iN(vIW * 0.4) * 0.3;
+  float mossN = vIB.x * 0.7 + iN(vIW * 0.4) * 0.3;
   float ledge = smoothstep(0.6, 0.8, iN(vec3(vIW.x * 0.02, vIW.y * 0.25, vIW.z * 0.02)));                // ledges here and there
   float moss = smoothstep(0.5, 0.66, mossN + streak * 0.3 + ledge * 0.25 * smoothstep(-0.3, 0.3, up) + vIsl.x * 0.6 - vIsl.y * 0.5)
     * smoothstep(-0.6, 0.0, up);
   vec3 mossC = mix(vec3(0.03, 0.055, 0.014), vec3(0.075, 0.11, 0.025), iN(vIW * 0.25));
   // grass on top: two greens in drifts, flowers' specks, darker under the trees (the planting's own noise)
-  float gn = iF(vIW * 0.02), gn2 = iN(vIW * 0.35);
+  float gn = vIB.y, gn2 = iN(vIW * 0.35);
   vec3 grass = mix(vec3(0.06, 0.11, 0.025), vec3(0.13, 0.17, 0.04), gn) * (0.8 + 0.4 * gn2);
-  grass = mix(grass, vec3(0.09, 0.08, 0.03), smoothstep(0.62, 0.72, iN(vIW * 0.06 + 9.0)) * 0.5);
+  grass = mix(grass, vec3(0.09, 0.08, 0.03), smoothstep(0.62, 0.72, vIB.z) * 0.5);
   float grassK = smoothstep(0.25, 0.6, vIsl.x + (up - 0.8) * 0.8) * smoothstep(0.35, 0.65, up);
   vec3 alb = mix(rock, mossC * (0.8 + 0.4 * iC.r), moss * (1.0 - grassK));
   alb = mix(alb, grass, grassK);
@@ -354,6 +377,7 @@ void iProj(vec2 p, float rot, out vec4 c, out vec2 g) {
     vec3 nw = normalize(tx.zyx * tpw.x + ty.xzy * tpw.y + tz.xyz * tpw.z);
     normal = normalize((viewMatrix * vec4(nw, 0.0)).xyz) * (gl_FrontFacing ? 1.0 : -1.0);
   }`);
+    if (!lamps) sh.fragmentShader = sunOnly(sh.fragmentShader);
   };
   mat.customProgramCacheKey = () => `forest-${key}-${Q.lite}`;
   return mat;
