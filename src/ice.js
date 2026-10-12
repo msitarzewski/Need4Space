@@ -14,6 +14,7 @@ import { IceSheet, iceMaps, iceSheetMaterial } from './glacier.js';
 import { glacierMaterial, crystalMaterial, crystalGeometry, spireGeometry, sweptIce, TrackGrid, crystalField, glacier,
   icicleGeometry, frozenFall, mergeGeometries } from './spires.js';
 import { mulberry32, smoothstep } from './noise.js';
+import { Blizzard } from './blizzard.js';
 export { SUN_DIR };
 const TRACK_W_HALF = TRACK_W / 2;
 
@@ -59,7 +60,7 @@ export const ICE_LAYOUT = layout(P, {
   // its light: magenta barriers, ice-white lanes, cold gantries
   theme: { field: [1.0, 0.14, 0.62], fieldFlash: [1.0, 0.75, 0.95], strip: [1.0, 0.06, 0.42], stripCore: [1.0, 0.8, 0.92],
     lane: [0.05, 0.7, 1.0], laneCore: [0.85, 0.97, 1.0], spill: [0.04, 0.5, 0.9], stud: [1.0, 2.2, 2.8], trim: [1.2, 0.12, 0.6],
-    gantry: [1.6, 2.4, 3.2], lamp: [2.2, 2.7, 3.4], moss: false },
+    gantry: [1.6, 2.4, 3.2], lamp: [2.2, 2.7, 3.4], moss: false, frost: true },
 });
 
 export class IceWorld {
@@ -132,6 +133,10 @@ export class IceWorld {
     this.staticsCast = true;
     // gantry lamps, as in space
     this.lamps = [0, 1, 2].map(() => { const l = new THREE.PointLight(new THREE.Color(0.8, 0.9, 1.0), 0, 70, 2); scene.add(l); return l; });
+    // the weather: snow streaming across the circuit, diamond dust, the ships' wakes of ice dust (blizzard.js)
+    this.snow = new Blizzard(scene, this.dens);
+    this.noAO.push(...this.snow.meshes);
+    this.wakeShips = [];
     this.minimap = this.track;
     this.startIndex = this.track.start;
     lap('lights');
@@ -183,15 +188,15 @@ export class IceWorld {
     // ---- the crystals: the garden (sweepers among them), the gallery's walls (the rolls), scattered over the sea, and
     // a few enormous ones out toward the peaks
     const clusters = [];
-    for (let s = tr.at('crest1', 260); s < tr.at('arch', -120); s += 70 + rnd() * 60) {
+    for (let s = tr.at('crest1', 260); s < tr.at('arch', -120); s += 110 + rnd() * 90) {
       const sd = rnd() < 0.5 ? -1 : 1;
-      clusters.push({ c: side(s, sd * (75 + rnd() * 140)), n: 4 + Math.floor(rnd() * 7), size: 70 + rnd() * 120 });
+      clusters.push({ c: side(s, sd * (80 + rnd() * 150)), n: 4 + Math.floor(rnd() * 7), size: 90 + rnd() * 130 });
     }
     for (let s = tr.at('rollIn', -80); s < tr.at('rollOut', 80); s += 34 + rnd() * 18) {
       for (const sd of [-1, 1]) clusters.push({ c: side(s, sd * (64 + rnd() * 30)), n: 3 + Math.floor(rnd() * 4), size: 60 + rnd() * 70 });
     }
     const box = new THREE.Box3().setFromPoints(tr.P), ctr = box.getCenter(new THREE.Vector3());
-    for (let k = 0; k < 900 && clusters.length < 150; k++) {
+    for (let k = 0; k < 900 && clusters.length < 105; k++) {
       const x = box.min.x - 900 + rnd() * (box.max.x - box.min.x + 1800), z = box.min.z - 900 + rnd() * (box.max.z - box.min.z + 1800);
       const p = new THREE.Vector3(x, 0, z), i = grid.nearest(p, 1e9);
       const d = i < 0 ? 1e9 : Math.hypot(tr.P[i].x - x, tr.P[i].z - z);
@@ -339,6 +344,14 @@ export class IceWorld {
     this.castStatics?.(true);
   }
 
+  // the settings' switches for this world's own effects (main.js, on every change)
+  setOptions(v) {
+    const snow = v.iceSnow !== false;
+    this.snow.streams.visible = this.snow.wakes.visible = snow;
+    this.snow.dust.visible = v.iceDust !== false;
+    this.aurora.visible = v.aurora !== false;
+  }
+
   // the static casters on (the world's map is about to be drawn) or off (it has been)
   castStatics(on) {
     if (this.staticsCast === on) return;
@@ -388,6 +401,20 @@ export class IceWorld {
     const dt = Math.max(0, t - (this.lastT ?? t));
     this.track.update(t, shipPos, dt);
     this.lastT = t;
+    // the ships' wakes: under each ship on the deck, behind it (none in the air, none over a cut)
+    const tr0 = this.track, ws = this.wakeShips;
+    if (this.race) {
+      this.race.entries.forEach((e, k) => {
+        const r = e.racer, w = (ws[k] ||= { pos: new THREE.Vector3(), vel: new THREE.Vector3(), tail: new THREE.Vector3(), up: new THREE.Vector3(), f: {} });
+        tr0.frame(r.s, w.f);
+        w.pos.copy(e.ship.root.position);
+        w.vel.copy(r.vel);
+        w.up.copy(w.f.U);
+        w.tail.copy(w.f.P).addScaledVector(w.f.R, r.x).addScaledVector(w.f.T, -7).addScaledVector(w.f.U, 0.4);
+        w.low = e.ship.engineOn && !tr0.inGap(r.s, 4) ? 1 - smoothstep(2.5, 6, r.y) : 0;
+      });
+    }
+    this.snow.update(t, dt, camera, pr, ws, 1 - this.track.caveLight(camera.position), this.track.frame(s - 12, this.camDeck ||= {}));
     const tr = this.track, gi = tr.gantryIdx, sIdx = Math.floor(s / tr.step);
     gi.map((i) => ({ i, d: Math.min((i - sIdx + tr.n) % tr.n, (sIdx - i + tr.n) % tr.n) }))
       .sort((p, q) => p.d - q.d).slice(0, 3).forEach(({ i }, k) => {

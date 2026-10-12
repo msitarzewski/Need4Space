@@ -121,6 +121,7 @@ async function boot() {
   status('Rolling out the rivals');
   progress('rivals');
   const race = racer ? new Race(scene, track, ship, racer) : null;
+  world.race = race;                                       // (a world may read the ships: the ice planet's wakes)
   let mode = racer ? 'race' : 'free';
   let ctl = racer || flight;
   const rig = new CameraRig(camera, world);
@@ -283,6 +284,7 @@ async function boot() {
     streaks.enabled = v.streaks;
     shafts.enabled = !!world.lightShafts && v.shafts !== false;
     lens.allowed = v.lensWater !== false;
+    world.setOptions?.(v);                           // (a world's own effects: the ice planet's weather, its aurora)
     bloom.enabled = v.bloom;
     blurOn = v.blur;
     Ship.brakeLights = v.brakeLights;

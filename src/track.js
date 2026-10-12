@@ -488,7 +488,27 @@ export class Track {
           .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.95, deckMoss);');
       };
     }
-    deckMat.customProgramCacheKey = () => (TH.moss ? 'feather-deck-moss' : 'feather-deck');
+    if (TH.frost) {
+      // rime creeping in from both walls, and tongues of snow blown across the deck here and there
+      const before = deckMat.onBeforeCompile;
+      deckMat.onBeforeCompile = (sh) => {
+        before(sh);
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nfloat deckFrost = 0.0;')
+          .replace('#include <map_fragment>', `#include <map_fragment>
+  {
+    float x = abs(vMapUv.x - 0.5) * ${TRACK_W.toFixed(1)}, along = vMapUv.y * 40.0, edge = ${(TRACK_W / 2).toFixed(1)} - x;
+    float n1 = texture2D(detailMap, vec2(along / 31.0, x / 11.0)).r, n2 = texture2D(detailMap, vec2(along / 4.1, x / 3.3) + 0.21).r;
+    float reach = 0.6 + 3.2 * smoothstep(0.35, 0.75, texture2D(detailMap, vec2(along / 83.0, 0.41)).r);
+    float base = 1.0 - smoothstep(reach * 0.3, reach, edge);
+    float drift = smoothstep(0.6, 0.78, texture2D(detailMap, vec2((along + x * 1.7) / 9.0, x / 60.0) + 0.53).r)
+      * smoothstep(0.45, 0.72, texture2D(detailMap, vec2(along / 140.0, 0.77)).r);
+    deckFrost = clamp(smoothstep(0.42, 0.62, base * 0.85 + n1 * 0.4 + n2 * 0.25 - 0.3) + drift * 0.75 * (0.5 + 0.5 * n2), 0.0, 1.0);
+    diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.36, 0.46, 0.58), vec3(0.7, 0.8, 0.93), n2), deckFrost * 0.9);
+  }`)
+          .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.85, deckFrost);');
+      };
+    }
+    deckMat.customProgramCacheKey = () => (TH.moss ? 'feather-deck-moss' : TH.frost ? 'feather-deck-frost' : 'feather-deck');
     this.deckMat = deckMat;
     out.deck = new THREE.Mesh(top, deckMat);
     const E = W + WALL_T;

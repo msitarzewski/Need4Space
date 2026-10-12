@@ -130,7 +130,7 @@ ${GLSL_N}`)
     float inner = pow(ndv, 3.0);                              // looking straight in: into its depth
     vec3 c = vCC * (inner * (0.12 + 1.3 * base + 0.45 * planes) + edge * (0.35 + 1.6 * base + 1.0 * tip) + shoulder * 0.7 + tip * inner * 0.8);
     c += vec3(0.85, 0.97, 1.0) * (tip * tip * 0.35 + edge * tip * 0.5);
-    totalEmissiveRadiance += c * 0.8;
+    totalEmissiveRadiance += c * 0.7;
   }`);
     sh.fragmentShader = sunOnly(sh.fragmentShader);
   };
@@ -264,8 +264,9 @@ export class TrackGrid {
 export function crystalField(clusters, grid, ground, seed = 7) {
   const rnd = mulberry32(seed), M = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
   const mats = [], cols = [], ax = new THREE.Vector3(), p = new THREE.Vector3();
-  const HUES = [new THREE.Color(0.08, 0.75, 1.0), new THREE.Color(0.08, 0.75, 1.0), new THREE.Color(0.45, 0.25, 1.0),
-    new THREE.Color(0.1, 1.0, 0.65), new THREE.Color(0.85, 0.2, 1.0)];
+  // mostly the ice's own cyan and a deep blue; now and then violet, sea-green, rarely magenta
+  const HUES = [[0.08, 0.72, 1.0], [0.08, 0.72, 1.0], [0.06, 0.55, 1.0], [0.1, 0.85, 1.0], [0.15, 0.32, 1.0], [0.15, 0.32, 1.0],
+    [0.45, 0.25, 1.0], [0.1, 0.95, 0.62], [0.85, 0.2, 1.0]].map((c) => new THREE.Color(...c));
   let dropped = 0;
   for (const cl of clusters) {
     const hue = HUES[Math.floor(rnd() * HUES.length)];
