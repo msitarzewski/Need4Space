@@ -10,7 +10,7 @@ import { SpaceWorld, SUN_DIR as SPACE_SUN, SHADOW_HALF, SHADOW_NEAR, SHADOW_FAR,
 import { TrackRacer, TRACK_W } from './track.js';
 import { patchShaders } from './look.js';
 import { smoothstep } from './noise.js';
-import { loadShip } from './ship.js';
+import { loadShip, Ship } from './ship.js';
 import { Flight } from './flight.js';
 import { CameraRig } from './camera.js';
 import { Input } from './input.js';
@@ -223,6 +223,7 @@ async function boot() {
     streaks.enabled = v.streaks;
     bloom.enabled = v.bloom;
     blurOn = v.blur;
+    Ship.brakeLights = v.brakeLights;
     const size = { high: 4096, medium: 2048 }[v.shadows];
     if (renderer.shadowMap.enabled !== !!size) {
       renderer.shadowMap.enabled = !!size;
@@ -509,7 +510,7 @@ async function boot() {
     ship.root.quaternion.copy(ctl.rQ);
     ship.root.updateMatrixWorld(true);
     ship.update(dt, { throttle: ctl.throttle, boost: ctl.boosting, speed: ctl.speed, turn: ctl.turn,
-      ...(mode === 'race' ? racer.animState() : {}) }, scene, camera);
+      ...(mode === 'race' ? racer.animState() : { brakeLight: flight.brakeS || 0 }) }, scene, camera);
     if (MAP === 'meadow') fx.hover(flight, world, world.road.distance(flight.pos.x, flight.pos.z) < 12, dt);
     const focalPx = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
     race?.visuals(dt, camera, fx, scene, focalPx);

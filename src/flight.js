@@ -66,6 +66,7 @@ export class Flight {
     this.boosting += ((wantBoost ? 1 : 0) - this.boosting) * damp(6, dt);
     this.boostEnergy = clamp(this.boostEnergy + (wantBoost ? -0.22 : 0.09) * dt, 0, 1);
     const airbrake = inp.throttleDown && this.throttle <= 0.001 ? 1 : 0;
+    this.brakeS = (this.brakeS || 0) + ((live && ship.ready && inp.throttleDown > 0.5 ? 1 : 0) - (this.brakeS || 0)) * damp(9, dt);
 
     // ---- rotation: rates chase the stick; the assist levels the wings, and the nose near the ground
     const fwd = this.forward, up = this.up, right = this.right;

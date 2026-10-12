@@ -344,6 +344,9 @@ function shieldMaterial(tint) {
 const GLOWS = ['EngineGlow', 'EngineCore'];
 const AVIONICS = ['LedCyan', 'LedAmber', 'BayLight', 'Screen', 'NavLamp', 'NavGreen', 'NavRed'];
 const BAY_FILL = ['Chip', 'PCB', 'Cable', 'CableOrange', 'Copper', 'Gold'];
+// the brake lights: the engine glow's long bars under the wings turn this red with the brake (linear; any green and
+// ACES burns the core orange)
+const BRAKE_RED = new THREE.Color(1, 0, 0.014), BRAKE_I = 1.15, _brakeC = new THREE.Color();
 // the engine glow rings: [centre-line radius, width] (m), in each ring's own space (its own xy plane)
 const RINGS = { InletGlow: [0.51, 0.03], ExhaustGlow: [0.54, 0.035], TailGlow: [0.15, 0.016] };
 const MAPS = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap', 'bumpMap', 'lightMap', 'displacementMap'];
@@ -437,12 +440,9 @@ const TEAM_GLSL = /* glsl */`
 #endif
 `;
 
-// the width of a mesh's thickest connected piece (m): vertices welded by position (0.5 mm), triangles joined into
-// pieces, each piece's bounding box; its second-largest extent is how wide it draws. Cached per geometry (the rivals'
-// clones share them).
-const _pieceW = new WeakMap();
-function pieceWidth(geo, matrix) {
-  if (_pieceW.has(geo)) return _pieceW.get(geo);
+// a mesh's connected pieces: vertices welded by position (0.5 mm), triangles joined into pieces. Per vertex its
+// piece (of), per piece its bounding box (min xyz, max xyz) - in the space `matrix` puts it in.
+function pieces(geo, matrix) {
   const pos = geo.attributes.position, n = pos.count, v = new THREE.Vector3();
   const P = new Float32Array(n * 3), weld = new Int32Array(n), seen = new Map();
   for (let i = 0; i < n; i++) {
@@ -461,17 +461,49 @@ function pieceWidth(geo, matrix) {
     const a = idx ? idx[t] : t, b = idx ? idx[t + 1] : t + 1, c = idx ? idx[t + 2] : t + 2;
     join(a, b); join(b, c);
   }
-  const box = new Map();
+  const box = new Map(), of = new Int32Array(n);
   for (let i = 0; i < n; i++) {
-    const r = find(weld[i]);
+    const r = (of[i] = find(weld[i]));
     let B = box.get(r);
     if (!B) box.set(r, (B = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]));
     for (let k = 0; k < 3; k++) { const x = P[i * 3 + k]; if (x < B[k]) B[k] = x; if (x > B[k + 3]) B[k + 3] = x; }
   }
+  return { of, box };
+}
+
+// the width of a mesh's thickest connected piece (m): each piece's second-largest extent is how wide it draws.
+// Cached per geometry (the rivals' clones share them).
+const _pieceW = new WeakMap();
+function pieceWidth(geo, matrix) {
+  if (_pieceW.has(geo)) return _pieceW.get(geo);
   let w = 0;
-  for (const B of box.values()) { const e = [B[3] - B[0], B[4] - B[1], B[5] - B[2]].sort((p, q) => p - q); w = Math.max(w, e[1]); }
+  for (const B of pieces(geo, matrix).box.values()) { const e = [B[3] - B[0], B[4] - B[1], B[5] - B[2]].sort((p, q) => p - q); w = Math.max(w, e[1]); }
   _pieceW.set(geo, w);
   return w;
+}
+
+// a geometry (position, normal, index) split by its pieces: [the pieces whose box passes `test`, the rest] (null for
+// an empty side)
+function splitPieces(geo, test) {
+  const { of, box } = pieces(geo, IDENTITY), pass = new Map();
+  for (const [r, B] of box) pass.set(r, test(B));
+  const pos = geo.attributes.position, nrm = geo.attributes.normal, n = pos.count;
+  const idx = geo.index ? geo.index.array : Array.from({ length: n }, (_, i) => i);
+  const side = (want) => {
+    const map = new Int32Array(n).fill(-1), P = [], N = [], I = [];
+    for (let t = 0; t < idx.length; t += 3) {
+      if (pass.get(of[idx[t]]) !== want) continue;
+      for (let k = 0; k < 3; k++) {
+        const i = idx[t + k];
+        if (map[i] < 0) { map[i] = P.length / 3; P.push(pos.getX(i), pos.getY(i), pos.getZ(i)); N.push(nrm.getX(i), nrm.getY(i), nrm.getZ(i)); }
+        I.push(map[i]);
+      }
+    }
+    if (!I.length) return null;
+    return new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(P, 3))
+      .setAttribute('normal', new THREE.Float32BufferAttribute(N, 3)).setIndex(I);
+  };
+  return [side(true), side(false)];
 }
 
 export class Ship {
@@ -713,6 +745,18 @@ export class Ship {
         eng: ring ? null : n === 'EngineGlow' ? 0 : n === 'EngineCore' ? 0.6 : null });
     });
     if (!list.length) return;
+    // the brake lights: the engine glow's two long bars (from the fuselage out to each nacelle, under the wings) become a
+    // part of their own - same glow, same culling rule - that updateParts turns red with the brake; the rest stays
+    const eg = list.find((p) => p.kind === 'glow' && p.mat.name === 'EngineGlow');
+    const bars = eg && splitPieces(eg.geo, (B) => Math.max(B[3] - B[0], B[4] - B[1], B[5] - B[2]) > 1.5);
+    if (bars && bars[0] && bars[1]) {
+      if (eg.geo !== eg.mesh.geometry) eg.geo.dispose();
+      const w = pieceWidth(bars[0], IDENTITY);
+      list.push({ ...eg, id: list.length, name: 'BrakeLights', geo: bars[0], w, cull: w < 0.6, brake: true });
+      eg.geo = bars[1];
+      eg.w = pieceWidth(bars[1], IDENTITY);
+      eg.cull = eg.w < 0.6;
+    }
     const groups = [], key = (p) => (p.cull ? p.w / p.thr : Infinity);
     for (const [name, cast] of [['Parts_cast', true], ['Parts_glow', false]]) {
       const parts = list.filter((p) => p.cast === cast).sort((a, b) => (key(a) === key(b) ? 0 : key(b) - key(a)));
@@ -773,7 +817,7 @@ export class Ship {
       const e = p.eng != null ? this.engineColor.clone().lerp(white, p.eng) : p.mat.emissive.clone();
       B[p.id * 4 + 3] = p.mat.metalness;
       if (p.kind === 'const') B.set([e.r * p.base, e.g * p.base, e.b * p.base], p.id * 4);
-      else this.partE.push({ o: p.id * 4, kind: p.kind, base: p.base, e });
+      else this.partE.push({ o: p.id * 4, kind: p.kind, base: p.base, e, brake: !!p.brake });
     }
     this.partU = { partA: { value: S.A }, partB: { value: B }, partR: { value: S.R },
       ringEng: { value: this.engineColor.clone() }, ringHot: { value: this.engineColor.clone().lerp(white, 0.8) } };
@@ -794,12 +838,13 @@ export class Ship {
   }
 
   // the atlas parts' emissive this frame (each exactly what its own material's emissive x intensity was):
-  // f the spool-up, drive the throttle / boost / brake, av the avionics
-  updateParts(f, drive, av) {
+  // f the spool-up, drive the throttle / boost / brake, av the avionics, lamp the brake lights (0..1)
+  updateParts(f, drive, av, lamp = 0) {
     const B = this.partU.partB.value;
     for (const q of this.partE) {
-      const I = q.kind === 'bay' ? av : q.kind === 'avi' ? q.base * av : q.base * f * drive;
-      B[q.o] = q.e.r * I; B[q.o + 1] = q.e.g * I; B[q.o + 2] = q.e.b * I;
+      let I = q.kind === 'bay' ? av : q.kind === 'avi' ? q.base * av : q.base * f * drive, e = q.e;
+      if (q.brake && lamp > 0) { I = q.base * f * (drive + (BRAKE_I - drive) * lamp); e = _brakeC.copy(q.e).lerp(BRAKE_RED, lamp); }
+      B[q.o] = e.r * I; B[q.o + 1] = e.g * I; B[q.o + 2] = e.b * I;
     }
   }
 
@@ -1035,7 +1080,9 @@ export class Ship {
       if (this.mats[n]) this.mats[n].emissiveIntensity = this.glowBase[n] * ease(this.avionics);
     }
     for (const n of BAY_FILL) if (this.mats[n]) this.mats[n].emissiveIntensity = ease(this.avionics);
-    if (this.partE.length) this.updateParts(0.03 + 0.97 * this.spin, drive, ease(this.avionics));     // (the same, atlased)
+    // the brake lights: red with the brake (or what the caller says is braking), if the setting has them on
+    const lamp = Ship.brakeLights !== false ? smoothstep(0.08, 0.6, ctrl.brakeLight ?? brake) : 0;
+    if (this.partE.length) this.updateParts(0.03 + 0.97 * this.spin, drive, ease(this.avionics), lamp);     // (the same, atlased)
     // plumes and exhaust light
     const kick = Math.max(this.boostKick, this.accelKick * 0.6);   // a pad or a hard launch: the plumes flare, then settle
     // braking: the main jets collapse to a flicker, the retro-jets fire forward
