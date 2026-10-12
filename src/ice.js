@@ -78,10 +78,11 @@ const exit = arcs(700, 1800, Math.atan2(-30, 200), 145, 100,
   [[60, 0], [170, 22], [300, -44], [300, 44], [170, -22], [100, 0], [500, -76], [60, 0]], 'canyonOut');
 // the dive off the cliff past the falls to the broken sea ice, among the bergs; north over the floes and home
 pt(exit.x + Math.sin(exit.h) * 260, 58, exit.z + Math.cos(exit.h) * 260, 0, 'dive');
-pt(exit.x + Math.sin(exit.h) * 520, 24, exit.z + Math.cos(exit.h) * 520); pt(-520, 22, 3040, 16); pt(-665, 26, 2810, 16);
+pt(exit.x + Math.sin(exit.h) * 500, 24, exit.z + Math.cos(exit.h) * 500); pt(-500, 22, 3150, 12); pt(-640, 24, 2990, 16);
+pt(-705, 28, 2780, 10);
 // gravity flips: up onto the underside of the deck overhead, half a kilometre upside down over the floes (the bergs
 // hanging overhead, the aurora under the nose), and back down
-pt(-700, 30, 2560, 0, 'flipA'); pt(-706, 56, 2340, 180, 'flipB'); pt(-700, 58, 2060, 180, 'floes');
+pt(-714, 30, 2560, 0, 'flipA'); pt(-714, 56, 2340, 180, 'flipB'); pt(-704, 58, 2060, 180, 'floes');
 pt(-680, 58, 1830, 180, 'flipC'); pt(-650, 36, 1630, 0, 'flipD'); pt(-520, 40, 1420, 12); pt(-300, 44, 1220, 10);
 
 export const ICE_LAYOUT = layout(P, {

@@ -143,7 +143,7 @@ float gSnow = 0.0, gBand = 0.0, gSeam = 0.0;`)
     float ndv = abs(dot(normal, normalize(vViewPosition)));
     // the light through the ice: blue, brighter in the paler bands, where it is thin, looked into straight
     float thru = vGlow * (0.35 + 0.65 * gBand) * (0.4 + 0.6 * ndv) * (1.0 - gSnow);
-    totalEmissiveRadiance += vec3(0.02, 0.32, 0.8) * thru * ${(0.32 * glow).toFixed(3)} + vec3(0.1, 0.65, 1.0) * gSeam * ${(0.9 * glow).toFixed(3)};
+    totalEmissiveRadiance += vec3(0.02, 0.32, 0.8) * thru * ${(0.32 * glow).toFixed(3)} + vec3(0.1, 0.65, 1.0) * gSeam * ${(0.7 * glow).toFixed(3)};
   }`);
     if (!lamps) sh.fragmentShader = sunOnly(sh.fragmentShader);
   };

@@ -318,7 +318,11 @@ export function bergGeometry(kind, seed) {
   // outward: a vertex on the side must face away from the axis
   const v = new THREE.Vector3().fromBufferAttribute(g.attributes.position, 3 * seg), nv = new THREE.Vector3().fromBufferAttribute(g.attributes.normal, 3 * seg);
   if (nv.x * v.x + nv.z * v.z < 0) { for (let q = 0; q < idx.length; q += 3) { const t = idx[q + 1]; idx[q + 1] = idx[q + 2]; idx[q + 2] = t; } g.setIndex(idx); g.computeVertexNormals(); }
-  return g;
+  // the broken ones faceted: each face flat, as fractured ice is
+  if (kind === 0) return g;
+  const f = g.toNonIndexed();
+  f.computeVertexNormals();
+  return f;
 }
 
 // bergs scattered over a field round centre c (radius R): clear of the track (by their own size over its slab) and of
