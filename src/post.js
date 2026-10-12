@@ -149,13 +149,24 @@ export class LayeredRenderPass extends Pass {
 // "the reflections flicker": a ray either hit or missed and its fixed steps landed on or off a thin ship or a lamp
 // from one frame to the next, and a lamp's 40x-HDR pixel came and went. Now the ray's start is jittered each frame,
 // a hit near the edge of the depth's thickness fades instead of switching, bright hits are compressed, and the result
-// is accumulated over frames: each deck pixel reprojected to where it was last frame (the deck does not move), the
-// history clamped to the current neighbourhood so nothing ghosts.
+// is accumulated over frames, the history clamped to the current neighbourhood so nothing ghosts.
+// "fix the reflections, kinda flicker sometimes": at race speed the camera moves ~5 m a frame and what the rays find
+// changes from frame to frame (an edge, a light strip, a gate's glowing arch) - measured as the reflection's own frame-
+// to-frame change, that was as large as the reflection. Now:
+//  - the history is fetched where the mirror image was last frame (as far behind the deck as the hit is in front of
+//    it; each pixel carries its ray's length in the alpha, the composite adds the colour only), not where the deck's
+//    point was - at 5 m a frame that warp's error is 60 % instead of 92 %
+//  - the history is clamped to the neighbourhood's mean +- 1.5 sigma (its min / max emptied a reflection whenever all
+//    its rays missed for one frame), and dropped on a cut (the fly-by camera's next shot, a respawn, another view)
+//  - bright hits are compressed harder (a light's reflection blooms less) and a last, wider blur pass spreads what is
+//    left: pixels jumping visibly from one frame to the next along a wall at race speed 3883 -> 652, under a gate
+//    1529 -> 467 (a satin deck's reflection is soft anyway)
 export class DeckSSRPass extends Pass {
   constructor(scene, camera, gtao, layer = 5) {
     super();
     Object.assign(this, { scene, camera, gtao, layer });
     this.strength = 1.0;
+    this.wide = 6;                                         // (the last blur's reach, texels of the half-size target)
     this.maskRT = new THREE.WebGLRenderTarget(1, 1, { depthTexture: new THREE.DepthTexture(1, 1) });
     const half = () => new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
     this.ssrRT = half();
@@ -222,8 +233,8 @@ export class DeckSSRPass extends Pass {
           float F = 0.04 + 0.96 * pow(1.0 - clamp(dot(-V, N), 0.0, 1.0), 5.0);
           float w = min(F, 0.45) * 0.35 * fade * conf;
           vec3 hc = texture2D(tColor, hit).rgb;
-          hc /= 1.0 + dot(hc, vec3(0.2126, 0.7152, 0.0722)) / 16.0;   // a lamp's core reflects, it doesn't sparkle
-          gl_FragColor = vec4(hc * w, w);
+          hc /= 1.0 + dot(hc, vec3(0.2126, 0.7152, 0.0722)) / 5.0;    // a lamp's core reflects, it doesn't sparkle (or bloom)
+          gl_FragColor = vec4(hc * w, w > 0.0 ? rayLen : 0.0);         // (alpha: the ray's length, for the history)
         }`,
     }));
     this.histA = half();
@@ -246,18 +257,28 @@ export class DeckSSRPass extends Pass {
           float d = texture2D(tDepth, vUv).x, md = texture2D(tMask, vUv).x;
           float vz = perspectiveDepthToViewZ(d, near, far);
           if (d >= 1.0 || md >= 1.0 || abs(perspectiveDepthToViewZ(md, near, far) - vz) > 0.25) { gl_FragColor = vec4(0.0); return; }
-          vec4 mn = cur, mx = cur;
+          // the neighbourhood: its mean and spread, and the length of its rays that hit
+          vec3 m1 = vec3(0.0), m2 = vec3(0.0);
+          float len = 0.0, nl = 0.0;
           for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
             vec4 c = texture2D(tCur, vUv + vec2(float(x), float(y)) * texel);
-            mn = min(mn, c); mx = max(mx, c);
+            m1 += c.rgb; m2 += c.rgb * c.rgb;
+            if (c.a > 0.0) { len += c.a; nl += 1.0; }
           }
+          m1 /= 9.0;
+          vec3 sg = sqrt(max(m2 / 9.0 - m1 * m1, 0.0));
+          len = nl > 0.0 ? len / nl : 0.0;
+          // the mirror image: down the view ray, the hit's distance beyond the deck
           vec4 v = invProj * vec4(vUv * 2.0 - 1.0, 0.0, 1.0);
           vec3 P = v.xyz / v.w;
           P *= vz / P.z;
-          vec4 pc = prevViewProj * (camWorld * vec4(P, 1.0));
+          vec3 Pw = (camWorld * vec4(P, 1.0)).xyz, Vw = Pw + normalize(Pw - camWorld[3].xyz) * len;
+          vec4 pc = prevViewProj * vec4(Vw, 1.0);
           vec2 puv = pc.xy / pc.w * 0.5 + 0.5;
           if (valid < 0.5 || pc.w <= 0.0 || puv.x < 0.0 || puv.x > 1.0 || puv.y < 0.0 || puv.y > 1.0) { gl_FragColor = cur; return; }
-          gl_FragColor = mix(cur, clamp(texture2D(tHist, puv), mn, mx), blend);
+          vec4 h = texture2D(tHist, puv);
+          h.rgb = clamp(h.rgb, m1 - 1.5 * sg, m1 + 1.5 * sg);
+          gl_FragColor = vec4(mix(cur.rgb, h.rgb, blend), cur.a);
         }`,
     }));
     this.blur = new FullScreenQuad(new THREE.ShaderMaterial({
@@ -318,6 +339,11 @@ export class DeckSSRPass extends Pass {
     r.prevViewProj.value.copy(this.prevViewProj);
     r.near.value = cam.near; r.far.value = cam.far;
     r.texel.value.set(1 / this.w, 1 / this.h);
+    // a cut (the fly-by camera's next shot, a respawn, another view): last frame's history is of somewhere else
+    const cp = cam.matrixWorld.elements, moved = this.lastCam ? Math.hypot(cp[12] - this.lastCam[0], cp[13] - this.lastCam[1], cp[14] - this.lastCam[2]) : 0;
+    const turned = this.lastCam ? cp[8] * this.lastCam[3] + cp[9] * this.lastCam[4] + cp[10] * this.lastCam[5] : 1;
+    if (moved > 30 || turned < 0.94) this.valid = false;
+    this.lastCam = [cp[12], cp[13], cp[14], cp[8], cp[9], cp[10]];
     r.valid.value = this.valid ? 1 : 0;
     renderer.setRenderTarget(this.histB);
     this.resolve.render(renderer);
@@ -333,6 +359,14 @@ export class DeckSSRPass extends Pass {
     renderer.setRenderTarget(this.blurRT); this.blur.render(renderer);
     b.tIn.value = this.blurRT.texture; b.dir.value.set(0, 2.5 / this.h);
     renderer.setRenderTarget(this.ssrRT); this.blur.render(renderer);
+    // and a wider one: a satin deck's reflection is soft, and what a fast camera's rays pick up differently from frame
+    // to frame (an edge, a lamp, a gate's arch) spreads out instead of flickering
+    for (const k of this.wide ? [this.wide] : []) {
+      b.tIn.value = this.ssrRT.texture; b.dir.value.set(k / this.w, 0);
+      renderer.setRenderTarget(this.blurRT); this.blur.render(renderer);
+      b.tIn.value = this.blurRT.texture; b.dir.value.set(0, k / this.h);
+      renderer.setRenderTarget(this.ssrRT); this.blur.render(renderer);
+    }
     const c = this.comp.material.uniforms;
     c.tColor.value = readBuffer.texture; c.tSSR.value = this.ssrRT.texture; c.strength.value = this.strength;
     renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
