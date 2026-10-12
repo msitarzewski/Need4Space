@@ -1,9 +1,10 @@
 // Effects: hover wash, exhaust ions, scrape sparks, the crash explosion (fireball, smoke column, sparks, flash,
 // shock ring) and speed streaks past the camera.
 import * as THREE from 'three';
+import { TRACK_W } from './track.js';
 import { mulberry32, smoothstep } from './noise.js';
 
-const TRACK_HALF = 22;                    // the walls' inner faces (TRACK_W / 2)
+const TRACK_HALF = TRACK_W / 2;           // the walls' inner faces
 
 function canvas(n, draw) {
   const c = document.createElement('canvas');

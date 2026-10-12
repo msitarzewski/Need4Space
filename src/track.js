@@ -9,7 +9,9 @@ import { bakeDeckMaps } from './deck.js';
 import { rockMaterial } from './rock.js';
 import { hullMaterial, hullBox, HULL_SIDE, HULL_UNDER, HULL_GIRDER } from './hull.js';
 
-export const TRACK_W = 44;           // between the walls (m): the Feather spans 10.3 m - three abreast
+// "the roads are a bit bigger in redout": 44 -> 56 m, room for five Feathers (10.3 m) abreast and a line through a
+// corner that is not the only one (deck.js bakes its plates for the same width)
+export const TRACK_W = 56;           // between the walls (m)
 const STEP = 2;                      // frame spacing (m)
 const DECK = 1.8;                    // deck thickness
 const WALL_H = 1.2, WALL_T = 0.7;    // solid wall

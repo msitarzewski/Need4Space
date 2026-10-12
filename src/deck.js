@@ -1,4 +1,4 @@
-// The track deck's maps, generated on the GPU once at load: colour, normal and roughness for the 44 m x 40 m plate
+// The track deck's maps, generated on the GPU once at load: colour, normal and roughness for the 56 m x 40 m plate
 // layout (4096 px: ~1 cm a texel) and a 4 m aggregate detail layer (2048 px: 2 mm). Everything is built from periodic
 // noise in metres - round pebbles, worn paint, plates with bevelled seams and rivets, polished racing lanes - so it
 // tiles without a seam. (The canvas version was square specks and a brushed grain of straight lines: "the road had
@@ -8,7 +8,8 @@ import { bakeLater, quadJob } from './bake.js';
 import { Q } from './quality.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
-const W = 44, L = 40;                 // the deck texture's footprint (m): TRACK_W across, 40 m along
+const W = 56, L = 40;                 // the deck texture's footprint (m): TRACK_W across, 40 m along
+const f1 = (x) => x.toFixed(2);
 const DETAIL = 4;                     // the detail layer's tile (m)
 
 const COMMON = /* glsl */`
@@ -53,25 +54,27 @@ const COMMON = /* glsl */`
 `;
 
 const MACRO = /* glsl */`
-  // ---- the plate layout: 11 m x 5 m plates, kerbs 1.6 m wide each side (red / white blocks every 4 m), white edge
-  // lines, a dashed centre line
+  // ---- the plate layout: quarter-width plates (14 m) x 5 m, kerbs 1.6 m wide each side (red / white blocks every
+  // 4 m), white edge lines, a dashed centre line
+  #define PW ${f1(W / 4)}
+  #define FAR ${f1(W)}
   float seamDist(vec2 m) {
     float dy = abs(m.y - 5.0 * floor(m.y / 5.0 + 0.5));
-    float dx = min(min(abs(m.x - 11.0), abs(m.x - 22.0)), abs(m.x - 33.0));
+    float dx = min(min(abs(m.x - PW), abs(m.x - 2.0 * PW)), abs(m.x - 3.0 * PW));
     return min(dx, dy);
   }
-  float kerbMask(vec2 m) { return max(1.0 - smoothstep(1.57, 1.6, m.x), smoothstep(42.4, 42.43, m.x)); }
+  float kerbMask(vec2 m) { return max(1.0 - smoothstep(1.57, 1.6, m.x), smoothstep(FAR - 1.6, FAR - 1.57, m.x)); }
   float rivet(vec2 m) {                       // dome height 0..1: rows 9 cm off each seam, every 50 cm
     float ry = abs(abs(m.y - 5.0 * floor(m.y / 5.0 + 0.5)) - 0.09), rx = (abs(fract(m.x / 0.5) - 0.5)) * 0.5;
-    float sx = 11.0 * floor(m.x / 11.0 + 0.5);
+    float sx = PW * floor(m.x / PW + 0.5);
     float cx = abs(abs(m.x - sx) - 0.09), cy = (abs(fract(m.y / 0.5) - 0.5)) * 0.5;
-    float d = min(length(vec2(rx, ry)), sx > 1.0 && sx < 43.0 ? length(vec2(cx, cy)) : 9.0);
+    float d = min(length(vec2(rx, ry)), sx > 1.0 && sx < FAR - 1.0 ? length(vec2(cx, cy)) : 9.0);
     float r = 0.012;
     return d < r ? sqrt(1.0 - (d / r) * (d / r)) : 0.0;
   }
   float paintMask(vec2 m) {
-    float e = max(1.0 - smoothstep(0.0, 0.006, abs(m.x - 1.9) - 0.15), 1.0 - smoothstep(0.0, 0.006, abs(m.x - 42.1) - 0.15));
-    float dash = (1.0 - smoothstep(0.0, 0.006, abs(m.x - 22.0) - 0.15)) * (mod(m.y, 20.0) < 10.0 ? 1.0 : 0.0);
+    float e = max(1.0 - smoothstep(0.0, 0.006, abs(m.x - 1.9) - 0.15), 1.0 - smoothstep(0.0, 0.006, abs(m.x - (FAR - 1.9)) - 0.15));
+    float dash = (1.0 - smoothstep(0.0, 0.006, abs(m.x - 2.0 * PW) - 0.15)) * (mod(m.y, 20.0) < 10.0 ? 1.0 : 0.0);
     float p = max(e, dash);
     float chip = smoothstep(0.64, 0.7, fbm(m, 18.0, 3, 3.0)) * (0.4 + 0.6 * fbm(m, 1.5, 2, 4.0));   // chipped in flecks
     return p * (1.0 - chip);
@@ -79,7 +82,7 @@ const MACRO = /* glsl */`
   float laneMask(vec2 m) {                    // the racing lanes, polished by the hulls' magnetic skids
     float l = 0.0;
     for (int k = 0; k < 4; k++) {
-      float c = k == 0 ? 8.5 : k == 1 ? 16.0 : k == 2 ? 28.0 : 35.5;
+      float c = (k == 0 ? 0.193 : k == 1 ? 0.364 : k == 2 ? 0.636 : 0.807) * FAR;
       l = max(l, 1.0 - smoothstep(1.4, 3.2, abs(m.x - c)));
     }
     return l * (0.55 + 0.45 * fbm(m, 0.6, 3, 5.0));
@@ -91,7 +94,7 @@ const MACRO = /* glsl */`
     h -= 5.0 * (1.0 - smoothstep(0.003, 0.014, sd)) * (1.0 - kerb);  // rounded seam grooves
     h += 1.6 * rivet(m) * (1.0 - kerb);
     // kerb blocks stand 8 mm proud, bevelled, with a gap every 4 m
-    float kb = smoothstep(0.0, 0.025, min(abs(m.x - 1.6), abs(m.x - 42.4)));
+    float kb = smoothstep(0.0, 0.025, min(abs(m.x - 1.6), abs(m.x - (FAR - 1.6))));
     float kg = 1.0 - smoothstep(0.004, 0.012, abs(m.y - 4.0 * floor(m.y / 4.0 + 0.5)));
     h += kerb * (8.0 * kb - 4.0 * kg);
     h += 0.35 * paintMask(m) * (1.0 - kerb);
@@ -99,7 +102,7 @@ const MACRO = /* glsl */`
   }
   vec3 albedo(vec2 m) {
     float kerb = kerbMask(m), sd = seamDist(m);
-    vec2 plate = vec2(floor(m.x / 11.0), floor(m.y / 5.0 + 0.5));
+    vec2 plate = vec2(floor(m.x / PW), floor(m.y / 5.0 + 0.5));
     float pid = h12(mod(plate, vec2(4.0, 8.0)) + 3.1);
     vec3 c = vec3(0.086, 0.097, 0.115) * (0.92 + 0.16 * pid) * mix(vec3(1.0), vec3(1.03, 1.0, 0.96), h12(plate + 9.2));
     float w = fbm(m, 0.3, 6, 2.0);
@@ -114,7 +117,7 @@ const MACRO = /* glsl */`
       float blk = mod(floor(m.y / 4.0), 2.0);
       vec3 kc = blk > 0.5 ? vec3(0.6, 0.6, 0.57) : vec3(0.40, 0.022, 0.027);
       // worn through in small flecks, more of them along the inner edge the hulls brush
-      float edgeWear = 1.0 - smoothstep(0.0, 0.35, min(abs(m.x - 1.6), abs(m.x - 42.4)));
+      float edgeWear = 1.0 - smoothstep(0.0, 0.35, min(abs(m.x - 1.6), abs(m.x - (FAR - 1.6))));
       float wear = smoothstep(0.66 - 0.12 * edgeWear, 0.74 - 0.12 * edgeWear, fbm(m, 14.0, 3, 4.0)) * 0.75;
       float kg = 1.0 - smoothstep(0.004, 0.014, abs(m.y - 4.0 * floor(m.y / 4.0 + 0.5)));
       kc = mix(kc * (0.88 + 0.12 * w), vec3(0.07, 0.075, 0.08), max(wear, kg));

@@ -385,7 +385,7 @@ export class Race {
 
   slot(k) {
     const row = Math.floor(k / 3), col = [0, -1, 1][k % 3];
-    return { back: 26 + row * 30 + (col ? 7 : 0), x: col * 13 };
+    return { back: 26 + row * 30 + (col ? 7 : 0), x: col * 16 };
   }
 
   reset() {
