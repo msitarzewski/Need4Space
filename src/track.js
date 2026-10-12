@@ -1609,12 +1609,13 @@ export const gripAt = (v) => 4.0 * (1 - 0.4 * smoothstep(100, 320, v));
 // sometimes, with skill" - "it was supposed to work after a brake and a fast A / D turn": the brake touched (held, or
 // let go of under 0.4 s ago) with the stick thrown hard over, on the deck from ~200 km/h. The side it starts on is
 // kept while the stick stays over (into the turn the tightest, against it wide) and the throttle or the brake is
-// held; let the stick go and it ends - with its kick. "make the drift stronger, so it can actually take turns": the nose snaps in and swings at up to 3.5x the
-// turn rate - tighter than the airbrakes (3.4x, at a far higher price in speed) - on 90 % grip, so the path follows
-// the nose round instead of sliding wide, keeping 90 % of the slide's speed; the brake only feathers. Held through
-// the bend in a real slide it charges; straighten up and the charge kicks the ship on - three steps (the sparks and
-// trails under it show which), lost to a wall knock. (A rival says when it drifts: inp.drift.)
-export const DRIFT = { v: 55, tap: 0.4, release: 0.2, rate: 3.5, grip: 0.9, keep: 0.9, brake: 0.1, tiers: [0.5, 1.1, 1.8], kick: [20, 34, 50], snap: 0.85, drag: 0.1 };
+// held; let the stick go and it ends - with its kick. "make the drift stronger, so it can actually take turns", then
+// "the drift is way too powerful": the nose swings in at up to 2.3x the turn rate (the airbrakes 3.4x, at a far
+// higher price in speed) on 90 % grip, so the path follows the nose round instead of sliding wide; the slide drags,
+// the brake only feathers. Held through the bend in a real slide it charges; straighten up and the charge kicks the
+// ship on - three steps (the sparks and trails under it show which), lost to a wall knock. (A rival says when it
+// drifts: inp.drift.)
+export const DRIFT = { v: 55, tap: 0.4, release: 0.2, rate: 2.3, grip: 0.9, keep: 0.9, brake: 0.1, tiers: [0.5, 1.1, 1.8], kick: [12, 22, 32], snap: 0.6, drag: 0.22 };
 const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck
 

@@ -281,7 +281,7 @@ class Driver {
     let steer = ff + (psiDes - r.psi) / (tRate * T.tauPsi);
     const need = Math.max(Math.abs(ff), Math.abs(steer) - T.airCorr), sgn = Math.sign(Math.abs(ff) > 0.5 ? ff : steer);
     // a drift, for a bend that asks most of what the airbrakes give (they cost far more speed): said outright
-    // (inp.drift), the throttle held, the stick set for the yaw the cascade wants (TrackRacer.driftQ: a share of 3.5 x
+    // (inp.drift), the throttle held, the stick set for the yaw the cascade wants (TrackRacer.driftQ: a share of 2.3 x
     // the turn rate), out of it as the bend eases - with the charge's kick
     const canDrift = TrackRacer.drifting && !jump && !loop && !air && v > DRIFT.v + 20 && esc < 0.5 && this.odo > 700;
     // (the side from the track's own bend just ahead: the line's swing out wide before a corner bends the other way)
