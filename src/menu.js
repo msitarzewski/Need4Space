@@ -140,7 +140,7 @@ export class Menu {
         <header><div class="m-kicker"><span class="k-keys">Keyboard, mouse, gamepad</span><span class="k-touch">Touch</span></div><h2 class="m-h2">Controls</h2></header>
         <div class="c-touch">
           <div class="c-row"><span class="c-keys"><kbd>Left stick</kbd></span><span>Steer (free flight: roll, pitch)</span></div>
-          <div class="c-row"><span class="c-keys"><kbd>Right stick</kbd></span><span>Up: throttle - down: brake - sideways: airbrakes</span></div>
+          <div class="c-row"><span class="c-keys"><kbd>Right stick</kbd></span><span>Up: throttle - down: brake - sideways: airbrakes - down and to a side: drift</span></div>
           <div class="c-row"><span class="c-keys"><kbd>Boost</kbd></span><span>Boost (orange pads on the track kick too)</span></div>
           <div class="c-row"><span class="c-keys"><kbd>Cam</kbd></span><span>Camera: chase, far, canopy, fly-by, orbit</span></div>
           <div class="c-row"><span class="c-keys"><kbd>Engines</kbd></span><span>Engines start / stop (free flight)</span></div>

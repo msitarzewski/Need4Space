@@ -1,6 +1,7 @@
 // Phones and tablets: two floating sticks and a few buttons over the game, read by Input like a gamepad.
 //  - left stick: steer (free flight: roll, and pitch up / down)
-//  - right stick: up throttle, down brake (the lever, as W / S), pushed sideways the airbrakes on that side
+//  - right stick: up throttle, down brake (the lever, as W / S), pushed sideways the airbrakes on that side, down and
+//    to a side a drift (brake and throttle at once)
 //  - Boost (held), Engines (free flight), pause, camera
 // A stick appears where the thumb lands in its half of the screen (a faint ring shows where it rests). The first tap
 // asks for full screen in landscape where the browser allows it; held upright, the page asks to be turned.

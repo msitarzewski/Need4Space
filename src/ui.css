@@ -150,6 +150,13 @@ body.lite .hp { background: linear-gradient(115deg, rgba(9, 13, 19, 0.86), rgba(
 #hud-speed.boost .bar.boost i { background: #c8e6ff; box-shadow: 0 0 0.8rem var(--boost); }
 #hud-speed.low .bar.boost { animation: low 0.7s steps(2) infinite; }
 .bar.thr { height: 0.3rem; }
+/* the drift's charge: there while drifting, its colour the step reached */
+.meter.drift { opacity: 0; transition: opacity 0.25s; }
+#hud-speed.drifting .meter.drift { opacity: 1; transition: opacity 0.08s; }
+.bar.drift i { background: rgba(200, 220, 255, 0.55); transition: background 0.15s; }
+.bar.drift i[data-t="1"] { background: #3d8cff; box-shadow: 0 0 0.6rem #3d8cff; }
+.bar.drift i[data-t="2"] { background: #ff8c22; box-shadow: 0 0 0.6rem #ff8c22; }
+.bar.drift i[data-t="3"] { background: #d25cff; box-shadow: 0 0 0.8rem #d25cff; }
 .bar.thr i { background: rgba(238, 242, 246, 0.72); }
 .minor { display: flex; gap: 1.3rem; margin-top: 0.65rem; font: 700 0.74rem var(--ui); letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); }
 .minor b { color: var(--text); font-weight: 700; letter-spacing: 0.05em; }

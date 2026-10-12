@@ -5,6 +5,8 @@ import { TRACK_W } from './track.js';
 import { mulberry32, smoothstep } from './noise.js';
 
 const TRACK_HALF = TRACK_W / 2;           // the walls' inner faces
+// a drift's sparks by the charge's step: building, then blue, orange, violet (linear, over 1 to glow)
+const DRIFT_COL = [new THREE.Color(1.1, 1.15, 1.3), new THREE.Color(0.35, 0.75, 2.4), new THREE.Color(2.4, 0.9, 0.18), new THREE.Color(1.9, 0.45, 2.4)];
 
 function canvas(n, draw) {
   const c = document.createElement('canvas');
@@ -378,6 +380,26 @@ export class FX {
   }
 
   get pools() { return [this.dust, this.smoke, this.fire, this.sparks, this.ions, this.glints, this.spray]; }
+
+  // a drift, every frame of it: the magnetic skids under the outer edge of the hull throw a fan of sparks onto the
+  // deck - white while it builds, then blue, orange, violet as the charge reaches each step
+  drift(ship, r, f, dt) {
+    const col = DRIFT_COL[r.driftTier], side = -(r.drift || 0), V = new THREE.Vector3(), P = new THREE.Vector3();
+    const plane = { P: f.P, N: f.U }, n = Math.min(24, Math.ceil(dt * (240 + 150 * r.driftTier)));
+    for (let i = 0; i < n; i++) {
+      P.set(side * ship.halfSpan * (0.35 + Math.random() * 0.3), -ship.bottom + 0.15, 1.5 + Math.random() * 4).applyMatrix4(ship.root.matrixWorld);
+      V.copy(r.vel).multiplyScalar(0.82 + Math.random() * 0.1).addScaledVector(f.R, side * (2 + Math.random() * 6)).addScaledVector(f.U, 0.5 + Math.random() * 3);
+      this.sparks.emit(P, V, col, { size: 0.08 + Math.random() * 0.08 + 0.03 * r.driftTier, life: 0.25 + Math.random() * 0.35, alpha: 2.2,
+        drag: 0.4, grav: 18, fadeIn: 0.01, stretch: 0.03, plane, bounce: 0.3 });
+    }
+  }
+
+  // a drift let go with its charge: a ring of the step's colour off the hull, and (the player) a kick for the camera
+  driftKick(at, basis, tier, player) {
+    const c = DRIFT_COL[tier];
+    this.wave(at, basis, new THREE.Color(c.r * 1.4, c.g * 1.4, c.b * 1.4), 8 + 3 * tier, 0.4);
+    if (player) this.kick = Math.max(this.kick, 0.4 + 0.2 * tier);
+  }
 
   // a ship through a curtain of falling water (at, its velocity v): the water bursts off its nose and over it - a
   // cloud of white spray left hanging in its wake, and drops flung out on arcs, falling

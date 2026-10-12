@@ -217,6 +217,13 @@ export class GameAudio {
     // airbrakes
     P.airG = this.sleeper(); P.airG.connect(P.bus);
     this.loop(this.white).connect(this.filt('highpass', 3000, 0.7)).connect(P.airG);
+    // a drift: the skids' hiss on the deck, and an electric whine that climbs with each step of the charge
+    P.driftG = this.sleeper(); P.driftG.connect(P.bus);
+    P.driftF = this.filt('bandpass', 1400, 1.6);
+    this.loop(this.pink).connect(P.driftF).connect(this.gain(0.8, P.driftG));
+    P.driftW = this.osc('sawtooth', 520);
+    P.driftWF = this.filt('bandpass', 1040, 8);
+    P.driftW.connect(P.driftWF).connect(this.gain(0.05, P.driftG));
     // wind and whistle, round the listener (no position)
     P.windF = this.filt('bandpass', 400, 0.7);
     P.windG = this.gain(0, this.sfxBus);
@@ -360,6 +367,14 @@ export class GameAudio {
       P.burnF.frequency.setTargetAtTime(500 + 900 * bo, t, 0.05);
       P.bw.frequency.setTargetAtTime(f * 2.6, t, 0.06);
       P.bwF.frequency.setTargetAtTime(f * 2.6, t, 0.06);
+    }
+    const dr = (ctl.driftS || 0) * (ctl.drift ? 1 : 0.6), tier = ctl.driftTier || 0;
+    this.level(P.driftG, 0.22 * dr * Math.min(1, v / 120), t, 0.04);
+    if (P.driftG.awake) {
+      P.driftF.frequency.setTargetAtTime(900 + 500 * tier + v * 2, t, 0.08);
+      const fw = 420 * Math.pow(1.3, tier) * (1 + 0.15 * Math.min(1, (ctl.driftCharge || 0) / 1.8));
+      P.driftW.frequency.setTargetAtTime(fw, t, 0.1);
+      P.driftWF.frequency.setTargetAtTime(fw * 2, t, 0.1);
     }
     const ab = ctl.airIn != null ? Math.abs(ctl.airIn) : (inp ? Math.max(inp.airL || 0, inp.airR || 0) : 0);
     this.level(P.airG, Math.min(1, ab) * Math.min(1, v / 120) * 0.2, t, 0.05);
@@ -637,6 +652,21 @@ export class GameAudio {
     g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(1, t + 0.18); g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
     s.connect(x).connect(g).connect(o);
     s.start(t, Math.random()); s.stop(t + 0.65);
+  }
+  // a drift let go with its charge: a rush like a pad's, higher with each step
+  driftKick(tier) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, o = this.out(null, 0, 0.5 + 0.2 * tier);
+    this.burst(t, 0.5, o, { f: 400 * tier, f1: 3000 + 800 * tier, q: 1.4, v: 0.4, buf: this.pink });
+    this.tone(t, 0.3, o, { type: 'sawtooth', f: 300 * tier, f1: 1200 * tier, v: 0.05, tau: 0.1, attack: 0.03 });
+  }
+  // a gravity flip: the field taking hold - a deep swell under a tone rising through the half turn
+  flip() {
+    if (!this.ctx || !this.gate('flip', 0.5)) return;
+    const t = this.ctx.currentTime, o = this.out(null, 0, 0.55);
+    this.tone(t, 1.2, o, { f: 48, f1: 30, v: 0.8, tau: 0.4, attack: 0.08 });
+    this.tone(t, 0.9, o, { type: 'triangle', f: 160, f1: 640, v: 0.12, tau: 0.35, attack: 0.15 });
+    this.burst(t, 1.0, o, { type: 'lowpass', f: 400, f1: 2400, v: 0.35, buf: this.pink });
   }
   // into the tunnel or the meteorite: the pressure of the air closing in
   whoomp() {

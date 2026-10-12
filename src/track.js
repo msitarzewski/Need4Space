@@ -68,7 +68,7 @@ const GATES = [['start', -60, 0x40c8ff], ['crest1', -90, 0xffb020], ['rollIn', -
 // The structure's light colours (linear, HDR) and growth: the space circuit's blue; a map can bring its own (theme)
 export const SPACE_THEME = { field: [0.15, 0.55, 1.0], fieldFlash: [0.7, 0.85, 1.0], strip: [0.03, 0.32, 1.0], stripCore: [0.75, 0.92, 1.0],
   lane: [0.04, 0.33, 1.0], laneCore: [0.75, 0.9, 1.0], spill: [0.06, 0.32, 1.0], stud: [0.7, 1.3, 2.6], trim: [0.08, 0.5, 1.3],
-  gantry: [1.0, 1.8, 3.2], lamp: [2.2, 2.6, 3.4], moss: false };
+  gantry: [1.0, 1.8, 3.2], lamp: [2.2, 2.6, 3.4], moss: false, flip: [0.62, 0.24, 1.0] };
 let TH = SPACE_THEME;
 const g3 = (c) => `vec3(${c.map((x) => x.toFixed(3)).join(', ')})`;
 // A circuit: its control points and named features (another map passes its own; `start` is near the grid's line,
@@ -76,11 +76,13 @@ const g3 = (c) => `vec3(${c.map((x) => x.toFixed(3)).join(', ')})`;
 // stretches)
 export const SPACE_LAYOUT = { ctrl: CTRL, at: AT, loops: LOOPS, gaps: GAPS, tunnels: TUNNELS, caves: CAVES, pads: PADS,
   gates: GATES, start: [0, 0, 430], towers: true, meteor: true, wrecks: WRECKS };
-// a layout's control points from a list of [x, y, z, bank, name?]
+// a layout's control points from a list of [x, y, z, bank, name?]. flips: [pointA, pointB] - a gravity flip between
+// two points in a row: the bank turns over by 180 between them (B's bank = A's +- 180) while the centre line climbs
+// 18-30 m to the next deck overhead (or drops to one underneath, coming back), 160-260 m on, fairly straight in plan
 export function layout(points, rest) {
   const ctrl = [], at = {};
   for (const [x, y, z, bank = 0, name = null] of points) { if (name) at[name] = ctrl.length; ctrl.push([x, y, z, bank]); }
-  return { ctrl, at, loops: [], gaps: [], tunnels: [], caves: [], pads: [], gates: [], towers: false, meteor: false, ...rest };
+  return { ctrl, at, loops: [], gaps: [], tunnels: [], caves: [], pads: [], gates: [], flips: [], towers: false, meteor: false, ...rest };
 }
 
 function mergeTwo(a, b) {
@@ -248,6 +250,12 @@ export class Track {
     }
     // the cuts in the deck: from / to arc length, a per-segment mask the meshes skip, and the lips
     this.gaps = GAPS.map(([a, f, t]) => [this.at(a, f), this.at(a, t)]);
+    // "add a new mechanic, like gravity rotates and the ship does a 180": the gravity flips. The deck stops, the bank
+    // turns over by half a turn and the next deck is overhead - the field carries the ships across onto its underside
+    // (TrackRacer). To the meshes, the lips and the rivals' plan a flip is a cut; it is listed apart for the physics
+    // and the field that shows it
+    this.flips = (L.flips || []).map(([a, b]) => [this.at(a), this.at(b)]);
+    this.gaps.push(...this.flips);
     this.solid = new Uint8Array(n).fill(1);
     for (const [s0, s1] of this.gaps) {
       for (let i = 0; i < n; i++) { const s = (i + 0.5) * this.step; if (this.inSpan(s, s0, s1)) this.solid[i] = 0; }
@@ -282,6 +290,9 @@ export class Track {
       this.kv[i] = dT.dot(this.U[i]);
       this.kh[i] = dT.dot(this.R[i]);
     }
+    // across a flip the field carries the ship along the centre line: no bend for it to answer (the roll folds the
+    // climb into a turn)
+    for (let i = 0; i < n; i++) if (this.inFlip(i * this.step, 4)) { this.kv[i] = 0; this.kh[i] = 0; }
     // minimap / HUD arrays (x, z)
     this.px = new Float32Array(n); this.pz = new Float32Array(n);
     for (let i = 0; i < n; i++) { this.px[i] = this.P[i].x; this.pz[i] = this.P[i].z; }
@@ -297,6 +308,17 @@ export class Track {
   inGap(s, pad = 0) {
     for (const [s0, s1] of this.gaps) if (this.inSpan(s, s0 - pad, s1 + pad)) return true;
     return false;
+  }
+
+  inFlip(s, pad = 0) {
+    for (const [s0, s1] of this.flips) if (this.inSpan(s, s0 - pad, s1 + pad)) return true;
+    return false;
+  }
+
+  // how far through a gravity flip s is (0 .. 1), or -1 outside one
+  flipAt(s) {
+    for (const [s0, s1] of this.flips) if (this.inSpan(s, s0, s1)) return this.wrap(s - s0) / this.wrap(s1 - s0);
+    return -1;
   }
 
   inLoop(s, pad = 0) {
@@ -599,6 +621,7 @@ float frN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
     out.trims = this.edgeTrims();
     out.pads = this.padMeshes();
     out.lips = this.gapLips(metal);
+    out.flips = this.flipFields(metal);
     out.tunnel = this.tunnel();
     out.gates = this.lightGates();
     out.towers = this.L.towers ? this.towers(metal) : [];
@@ -608,7 +631,7 @@ float frN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
     for (const m of [out.deck, out.under, ...out.walls]) { m.castShadow = false; m.receiveShadow = true; }
     for (const m of [out.deck, out.under, ...out.walls, ...out.strips, ...out.fields, ...out.gantries, ...out.pads,
       ...out.lanes, out.studs, ...out.girders, out.startLine, ...out.chevrons, ...out.lamps, ...out.trims,
-      ...out.lips, ...out.tunnel, ...out.gates, ...out.towers, ...out.cave]) scene.add(m);
+      ...out.lips, ...out.flips, ...out.tunnel, ...out.gates, ...out.towers, ...out.cave]) scene.add(m);
     this.parts = out;
     return out;
   }
@@ -651,22 +674,24 @@ float frN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
     const lightG = new THREE.BoxGeometry(0.5, 0.12, 0.25);
     const postG = hullBox(0.4, 9, 0.4).translate(0, 4.5 + WALL_H, 0);
     const beaconG = new THREE.BoxGeometry(0.9, 0.5, 0.9).translate(0, 9.3 + WALL_H, 0);
-    const ends = this.gaps.flatMap(([s0, s1]) => [{ s: s0, dir: 1 }, { s: s1, dir: -1 }]);
+    const ends = this.gaps.flatMap((g) => [{ s: g[0], dir: 1, flip: this.flips.includes(g) }, { s: g[1], dir: -1, flip: this.flips.includes(g) }]);
+    const jumps = ends.filter((e) => !e.flip).length;
     const caps = new THREE.InstancedMesh(capG, metal, ends.length);
     const bands = new THREE.InstancedMesh(bandG, new THREE.MeshStandardMaterial({ map: stripes, emissiveMap: stripes,
-      emissive: 0xffffff, emissiveIntensity: 0.25, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }), ends.length);
-    const lights = new THREE.InstancedMesh(lightG, new THREE.MeshBasicMaterial({ color: new THREE.Color(4.0, 1.8, 0.25) }), ends.length * 15);
-    const posts = new THREE.InstancedMesh(postG, metal, ends.length * 2);
+      emissive: 0xffffff, emissiveIntensity: 0.25, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }), jumps);
+    const lights = new THREE.InstancedMesh(lightG, new THREE.MeshBasicMaterial({ color: new THREE.Color(4.0, 1.8, 0.25) }), jumps * 15);
+    const posts = new THREE.InstancedMesh(postG, metal, jumps * 2);
     this.beaconMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(5, 2.2, 0.3) });
-    const beacons = new THREE.InstancedMesh(beaconG, this.beaconMat, ends.length * 2);
-    let li = 0, pi = 0;
-    ends.forEach(({ s, dir }, k) => {
+    const beacons = new THREE.InstancedMesh(beaconG, this.beaconMat, jumps * 2);
+    let li = 0, pi = 0, bi = 0;
+    ends.forEach(({ s, dir, flip }, k) => {
       this.frame(s, f);
       const B = f.T.clone().multiplyScalar(-dir);                              // the cap faces into the cut
       M.makeBasis(f.R.clone().multiplyScalar(dir), f.U, B).setPosition(f.P.clone().addScaledVector(f.T, -dir * 0.25));
       caps.setMatrixAt(k, M);
+      if (flip) return;
       M.makeBasis(f.R, f.U, f.T.clone().negate()).setPosition(f.P.clone().addScaledVector(f.T, -dir * 3).addScaledVector(f.U, 0.03));
-      bands.setMatrixAt(k, M);
+      bands.setMatrixAt(bi++, M);
       for (let j = 0; j < 15; j++) {
         M.makeBasis(f.R, f.U, f.T.clone().negate()).setPosition(f.P.clone().addScaledVector(f.R, -W + 1.5 + j * (2 * W - 3) / 14)
           .addScaledVector(f.U, 0.06).addScaledVector(f.T, -dir * 0.5));
@@ -679,6 +704,85 @@ float frN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
     });
     caps.receiveShadow = posts.castShadow = true;
     return [caps, bands, lights, posts, beacons];
+  }
+
+  // The gravity flips: where the deck stops, a ring of the hull's metal round the way on, held off the wall ends by two
+  // struts, its inner face lit; between the rings a tube of light the ships fly through - its stripes fixed to the
+  // deck's sides, so they twist through the half turn with it, waves running along it the way the ships go, brightest
+  // where it is seen edge on (looking down it, it is all but clear)
+  flipFields(metal) {
+    const out = [], f = {}, R = TRACK_W / 2 + 9, Y0 = 3, E = TRACK_W / 2 + WALL_T;
+    this.flipMats = [];
+    if (!this.flips.length) return out;
+    const col = new THREE.Color(...(TH.flip || SPACE_THEME.flip));
+    const sec = [];
+    for (let k = 0; k <= 64; k++) { const t = (k / 64) * Math.PI * 2; sec.push([R * Math.sin(t), Y0 + R * Math.cos(t), k / 64, -Math.sin(t), -Math.cos(t)]); }
+    const ringG = new THREE.TorusGeometry(R, 1.1, 10, 96), bandG = new THREE.TorusGeometry(R - 0.95, 0.32, 6, 96);
+    const strutG = hullBox(1.0, 1.0, 1.0);
+    const bandMat = new THREE.ShaderMaterial({
+      uniforms: { time: { value: 0 }, col: { value: col } },
+      vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: /* glsl */`uniform float time; uniform vec3 col; varying vec2 vUv;
+        void main() {
+          float run = pow(0.5 + 0.5 * sin(vUv.x * 6.2832 * 12.0 - time * 5.0), 4.0);
+          gl_FragColor = vec4(col * (1.6 + 3.0 * run) + vec3(1.0) * run * 0.6, 1.0);
+        }`,
+    });
+    this.flipMats.push(bandMat);
+    for (const [s0, s1] of this.flips) {
+      const len = this.wrap(s1 - s0) + 80;
+      const mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, side: THREE.DoubleSide,
+        blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+        uniforms: { time: { value: 0 }, col: { value: col }, len: { value: len } },
+        vertexShader: /* glsl */`varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+          void main() {
+            vUv = uv; vec4 w = modelMatrix * vec4(position, 1.0);
+            vN = normalize(mat3(modelMatrix) * normal); vV = normalize(cameraPosition - w.xyz);
+            gl_Position = projectionMatrix * viewMatrix * w;
+          }`,
+        fragmentShader: /* glsl */`uniform float time; uniform vec3 col; uniform float len; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+          void main() {
+            float m = vUv.y * len;                                     // metres along
+            float ends = smoothstep(0.0, 34.0, m) * smoothstep(len, len - 34.0, m);
+            float u = vUv.x * 12.0, aa = fwidth(u) * 1.2;
+            float stripe = 1.0 - smoothstep(0.03, 0.03 + aa + 0.03, abs(fract(u) - 0.5));
+            float wave = pow(0.5 + 0.5 * sin(m * 0.16 - time * 9.0), 10.0);
+            float edge = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.0);
+            float far = clamp(0.25 / max(fwidth(u), 0.25), 0.0, 1.0);   // the stripes thin to nothing far off (no shimmer)
+            float a = (stripe * (0.2 + 1.1 * wave) * far + 0.03 + 0.2 * wave) * (0.12 + 0.75 * edge) * ends;
+            gl_FragColor = vec4(col * a, 1.0);
+          }`,
+      });
+      this.flipMats.push(mat);
+      const tube = new THREE.Mesh(this.sweepSpan(sec, len, s0 - 40, s1 + 40), mat);
+      tube.renderOrder = 3;
+      tube.frustumCulled = false;
+      out.push(tube);
+      for (const [s, dir] of [[s0, 1], [s1, -1]]) {
+        this.frame(s, f);
+        const basis = new THREE.Matrix4().makeBasis(f.R, f.U, f.T.clone().negate());
+        const at = f.P.clone().addScaledVector(f.U, Y0).addScaledVector(f.T, dir * 2);
+        for (const [g, m] of [[ringG, metal], [bandG, bandMat]]) {
+          const o = new THREE.Mesh(g, m);
+          o.matrixAutoUpdate = false;
+          o.matrix.copy(basis).setPosition(at);
+          o.castShadow = m === metal;
+          out.push(o);
+        }
+        for (const sd of [-1, 1]) {                            // the struts: off each wall's end, out to the ring
+          const a = f.P.clone().addScaledVector(f.R, sd * (E - 0.3)).addScaledVector(f.U, 0.6).addScaledVector(f.T, dir * 2);
+          const b = at.clone().addScaledVector(f.R, sd * (R - 0.6));
+          const st = new THREE.Mesh(strutG, metal), mid = a.clone().add(b).multiplyScalar(0.5), d = b.clone().sub(a);
+          const x = d.clone().normalize(), z = f.T.clone(), y = new THREE.Vector3().crossVectors(z, x).normalize();
+          st.matrixAutoUpdate = false;
+          st.matrix.makeBasis(x, y, new THREE.Vector3().crossVectors(x, y)).scale(new THREE.Vector3(d.length() + 1.2, 1.4, 1.6)).setPosition(mid);
+          st.castShadow = true;
+          out.push(st);
+        }
+      }
+    }
+    return out;
   }
 
   // The tunnel: a glass tube over the climb - steel ribs every 16 m standing on the walls, a light band on each rib's
@@ -1444,6 +1548,7 @@ float frN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
     this.fieldMat.uniforms.time.value = t;
     if (this.tunnelMat) this.tunnelMat.uniforms.time.value = t;
     for (const m of this.gateMats || []) m.uniforms.time.value = t;
+    for (const m of this.flipMats || []) m.uniforms.time.value = t;
     if (this.beaconMat) this.beaconMat.color.setRGB(5, 2.2, 0.3).multiplyScalar(0.15 + 0.85 * (Math.sin(t * 6) > 0 ? 1 : 0));
     this.fieldMat.uniforms.shipPos.value.copy(shipPos);
     this.padMat.uniforms.time.value = t;
@@ -1469,6 +1574,15 @@ const PAD_KICK = 55, PAD_MAX = 380;
 // and the hull slides more (grip 4 -> 2.4); airbrakes still add 90 %
 export const turnRate = (v) => 1.6 * (1 - 0.5 * smoothstep(60, 320, v));
 export const gripAt = (v) => 4.0 * (1 - 0.4 * smoothstep(100, 320, v));
+// "add some kind of drifting at the corners, with brake and accelerate, so ships can take corners a bit easier
+// sometimes, with skill": brake and throttle held together while steering, on the deck, at speed. The side it was
+// steered to at the start is kept; the stick sets how hard (into the turn the tightest, centred about half, against
+// it wide). The nose swings in at up to 2.3x the turn rate, the hull slides on 60 % grip and keeps most of the
+// slide's speed, the brake only feathers. Held through the bend in a real slide it charges; let go of the brake and
+// the charge kicks the ship on - three steps (the sparks under it show which), lost to a wall knock.
+export const DRIFT = { v: 90, rate: 2.3, grip: 0.6, keep: 0.85, brake: 0.12, tiers: [0.5, 1.1, 1.8], kick: [16, 28, 40] };
+const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
+const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck
 
 const _H = new THREE.Vector3(), _R = new THREE.Vector3(), _B = new THREE.Vector3(), _F = new THREE.Vector3();
 const _M = new THREE.Matrix4(), _Q = new THREE.Quaternion();
@@ -1491,16 +1605,37 @@ export class TrackRacer {
     this.qAir = new THREE.Quaternion(); // the attitude in the air (pose)
     this.airT = 0;                      // 0 on the deck .. 1 well clear of it
     this.yawKick = 0;                   // heading turned in one step (a wall glance): the animation eases it in
+    this.drift = 0;                     // drifting: the side (+1 right), 0 not
+    this.driftCharge = 0; this.driftKick = 0; this.driftS = 0; this.slip = 0;
+    this.pitchIn = 0;
     this.place(track.start * track.step, false);
+  }
+
+  // the drift's step so far: 0 none, 1 - 3
+  get driftTier() { const c = this.driftCharge, T = DRIFT.tiers; return c >= T[2] ? 3 : c >= T[1] ? 2 : c >= T[0] ? 1 : 0; }
+
+  // the drift ends: let go on the deck, its charge kicks the ship on (paid over ~0.2 s)
+  endDrift(go) {
+    const tier = this.driftTier;
+    if (go && tier) {
+      this.driftKick += DRIFT.kick[tier - 1];
+      this.emit({ type: 'drift', tier, at: this.pos.clone() });
+    }
+    this.drift = 0;
+    this.driftCharge = 0;
   }
 
   place(s, hover) {
     this.s = s; this.x = 0; this.y = hover ? HOVER : 0.002; this.vy = 0; this.vs = 0; this.vx = 0; this.psi = 0; this.slow = 0;
     this.throttle = 0; this.steerS = 0; this.yawRate = 0; this.boosting = 0;
+    this.drift = 0; this.driftCharge = 0; this.driftKick = 0;
     this.pose(0);
   }
 
   emit(ev) { this.events.push(ev); this.onEvent?.(ev); }
+
+  static drifting = true;              // settings: "Drift (brake + throttle in a corner)"
+  static airPitch = true;              // settings: "Pitch in the air (nose down to land sooner)"
 
   // what the animation layer reads each frame (the landing impulse is consumed)
   animState() {
@@ -1508,7 +1643,7 @@ export class TrackRacer {
     this.landImp = 0;
     this.yawKick = 0;
     return { steer: this.steerS, lat: this.latS, accel: this.accS, vy: this.vy, airbrake: this.airIn, land, air: this.airT,
-      brake: this.brakeS || 0, yawKick, height: this.y };
+      brake: this.brakeS || 0, yawKick, height: this.y, drift: this.driftS * (this.drift || this.driftSide || 0), slip: this.slip };
   }
 
   get speed() { return Math.hypot(this.vs, this.vx, this.vy * 0.2); }
@@ -1522,21 +1657,31 @@ export class TrackRacer {
     // "make the break more powerful": S cuts the throttle and brakes at once (it used to wind the throttle lever down
     // for 1.4 s before any braking); W spools back up in under a second
     const braking = ship.ready && inp.throttleDown > 0.5;
+    const air = this.y > HOVER + 1.2, flipU = tr.flipAt(this.s);
+    const steer = clamp(inp.yaw + inp.roll, -1, 1), brakeL = inp.airL > 0.5 ? 1 : 0, brakeR = inp.airR > 0.5 ? 1 : 0;
+    // the drift: brake and throttle together, on the deck, at speed; started by steering, ended by letting go
+    const pressing = inp.throttleAxis != null ? inp.throttleAxis > 0.5 : inp.throttleUp > 0.5;
+    const canDrift = TrackRacer.drifting && ship.ready && braking && pressing && !air && !tr.inGap(this.s) && !tr.inLoop(this.s)
+      && Math.abs(this.vs) > DRIFT.v * (this.drift ? 0.7 : 1);
+    if (!this.drift && canDrift && Math.abs(steer) > 0.3) { this.drift = this.driftSide = Math.sign(steer); this.driftCharge = 0; }
+    else if (this.drift && !canDrift) this.endDrift(!air && !braking);
     if (ship.ready) this.throttle = inp.throttleAxis != null ? inp.throttleAxis
-      : clamp(this.throttle + (inp.throttleUp * 1.3 - inp.throttleDown * 3.0) * dt, 0, 1);
+      : clamp(this.throttle + (inp.throttleUp * 1.3 - (this.drift ? 0 : inp.throttleDown) * 3.0) * dt, 0, 1);
     else if (!ship.engineOn) this.throttle = Math.max(0, this.throttle - dt);
     this.brakeS = (this.brakeS || 0) + ((braking ? 1 : 0) - (this.brakeS || 0)) * damp(9, dt);
+    this.driftS += ((this.drift ? 1 : 0) - this.driftS) * damp(5, dt);
     const wantBoost = inp.boost && this.boostEnergy > 0.02 && ship.ready;
     this.boosting += ((wantBoost ? 1 : 0) - this.boosting) * damp(6, dt);
     this.boostEnergy = clamp(this.boostEnergy + (wantBoost ? -0.2 : 0.08) * dt, 0, 1);
-    const air = this.y > HOVER + 1.2;
-    // steering (A/D, arrows, mouse, stick), airbrakes (Z / X, bumpers): a sharper turn, more drag
-    const steer = clamp(inp.yaw + inp.roll, -1, 1), brakeL = inp.airL > 0.5 ? 1 : 0, brakeR = inp.airR > 0.5 ? 1 : 0;
-    this.steerS += (steer + (brakeR - brakeL) * 0.8 - this.steerS) * damp(8, dt);
+    // steering (A/D, arrows, mouse, stick), airbrakes (Z / X, bumpers): a sharper turn, more drag. Drifting: held to
+    // the side it started on, the stick setting how hard
+    const want = this.drift ? this.drift * (0.55 + 0.45 * clamp(steer * this.drift, -1, 1)) : steer + (brakeR - brakeL) * 0.8;
+    this.steerS += (want - this.steerS) * damp(8, dt);
     const grip = air ? 0.25 : 1;
-    this.yawRate = this.steerS * turnRate(Math.abs(this.vs)) * (brakeL || brakeR ? 1 + AIRBRAKE : 1) * grip * power;
+    const rateK = this.drift ? DRIFT.rate : brakeL || brakeR ? 1 + AIRBRAKE : 1;
+    this.yawRate = this.steerS * turnRate(Math.abs(this.vs)) * rateK * grip * power;
     this.psi += this.yawRate * dt;
-    if (this.assist && Math.abs(steer) < 0.1 && !air) this.psi -= this.psi * 1.1 * dt;   // eases back along the track
+    if (this.assist && Math.abs(steer) < 0.1 && !air && !this.drift) this.psi -= this.psi * 1.1 * dt;   // eases back along the track
     this.airIn = brakeR - brakeL;
     // the track turns under the ship: its heading and velocity rotate against the turn
     const turn = f.kh * this.vs * dt;
@@ -1559,14 +1704,23 @@ export class TrackRacer {
     const drag = DRAG_L + DRAG_Q * sp + (brakeL + brakeR) * 0.25;
     this.vs += (hs * thrust - this.vs * drag) * dt;
     this.vx += (hx * thrust - this.vx * drag) * dt;
-    // the brake: ~6 g plus a share of the speed (15 g at top speed), never into reverse
-    const bk = this.brakeS * (60 + 0.3 * Math.abs(this.vs)) * dt * power;
+    // the brake: ~6 g plus a share of the speed (15 g at top speed), never into reverse (drifting: a feather of it)
+    const bk = this.brakeS * (60 + 0.3 * Math.abs(this.vs)) * dt * power * (this.drift ? DRIFT.brake : 1);
     this.vs -= Math.sign(this.vs) * Math.min(Math.abs(this.vs), bk);
-    // grip: slip across the heading bleeds away (into the heading while on the deck)
+    // grip: slip across the heading bleeds away (into the heading while on the deck; drifting, less grip and most of
+    // the slide's speed kept)
     const along = this.vs * hs + this.vx * hx, across = -this.vs * hx + this.vx * hs;
-    const kept = across * Math.exp(-(air ? 0.4 : gripAt(sp)) * dt);
-    const al2 = along + (air ? 0 : Math.abs(across - kept) * 0.5 * Math.sign(along || 1));
+    const kept = across * Math.exp(-(air ? 0.4 : gripAt(sp) * (this.drift ? DRIFT.grip : 1)) * dt);
+    const al2 = along + (air ? 0 : Math.abs(across - kept) * (this.drift ? DRIFT.keep : 0.5) * Math.sign(along || 1));
     this.vs = al2 * hs - kept * hx; this.vx = al2 * hx + kept * hs;
+    this.slip = Math.atan2(kept, Math.max(1, Math.abs(al2)));          // the slide: the way it goes off the nose (rad)
+    if (this.drift) this.driftCharge += dt * smoothstep(0.1, 0.35, Math.abs(this.slip));
+    // a drift's kick, paid over ~0.2 s along the nose
+    if (this.driftKick > 0) {
+      const d = Math.min(this.driftKick, 180 * dt);
+      this.vs = Math.min(PAD_MAX, this.vs + hs * d); this.vx += hx * d;
+      this.driftKick -= d;
+    }
     // boost pads
     this.padT = Math.max(0, this.padT - dt);
     for (const p of tr.pads) {
@@ -1609,6 +1763,7 @@ export class TrackRacer {
         // "make the wall hits more punishing": a knock costs a share of the blow and, for a real blow, a share of
         // the speed too (a 20 m/s knock at 900 km/h: ~13 %); a graze costs little
         this.slow = (this.slow || 0) + 0.45 * hit + 0.13 * Math.abs(this.vs) * smoothstep(3, 24, hit);
+        if (hit > 4) this.driftCharge = 0;
         // one event per knock, not one per step of grinding (each fired the jolt, shield, shake and thud again)
         if (hit > 1.5 && this.wallCool <= 0) {
           this.wallCool = 0.25;
@@ -1624,6 +1779,10 @@ export class TrackRacer {
     const gap = tr.inGap(this.s);
     const hold = gap ? HOLD_GAP : HOLD + HOLD_V2 * this.vs * this.vs;
     let ay = -hold - f.kv * this.vs * this.vs;
+    // Redout's pitch: in the air the nose down pulls the hull back to the deck sooner (it lands its line and keeps its
+    // speed), the nose up stretches the flight
+    this.pitchIn += ((TrackRacer.airPitch && air && flipU < 0 ? clamp(inp.pitch || 0, -1, 1) : 0) - this.pitchIn) * damp(6, dt);
+    ay += this.pitchIn * PITCH_AIR * power;
     if (!gap && power > 0 && this.y < HOVER + 2.5) {
       const w = 1 - smoothstep(HOVER + 0.6, HOVER + 2.5, this.y);
       ay += (90 * (HOVER * power + hold / 90 - this.y) - 12 * this.vy) * w;
@@ -1641,13 +1800,20 @@ export class TrackRacer {
         if (this.vy < vMax) ay += (vMax - this.vy) * 30 * power;
       }
     }
+    // a gravity flip: the field carries the hull across - no floor, no fall; it floats a few metres off the deck it
+    // left and settles onto the next one's underside as the half roll completes
+    if (flipU >= 0) {
+      const yT = HOVER + FLIP_LIFT * Math.sin(Math.PI * flipU);
+      ay = 40 * (yT - this.y) - 12 * this.vy;
+      if (!this.flipping) { this.flipping = true; this.emit({ type: 'flip', at: this.pos.clone() }); }
+    } else this.flipping = false;
     const wasAir = this.y > HOVER + 0.8, vy0 = this.vy;
     this.vy += ay * dt;
     this.y += this.vy * dt;
     if (wasAir && this.y <= HOVER + 0.8 && vy0 < -2) this.landImp += -vy0;      // touchdown: the animation dips
     // too low in a cut, or reaching its far lip under the deck: a fall (back on the deck past the cut, slowed)
-    if ((gap && this.y < -14) || (this.wasGap && !gap && this.y < -0.8)) { this.wasGap = false; this.fall(); return; }
-    this.wasGap = gap;
+    if (flipU < 0 && ((gap && this.y < -14) || (this.wasGap && !gap && this.y < -0.8))) { this.wasGap = false; this.fall(); return; }
+    this.wasGap = gap && flipU < 0;
     if (!gap && this.y < 0) {
       if (this.vy < -7 && this.wallCool <= 0) { this.emit({ type: 'scrape', at: this.pos.clone(), v: -this.vy }); this.scrape = 1; this.wallCool = 0.25; }
       this.y = 0;
@@ -1688,7 +1854,7 @@ export class TrackRacer {
     if (this.airT > 0) {
       const along = this.vs * cp + this.vx * sp;
       if (dt > 0 && along > 5) {
-        const fw = _F.copy(H).multiplyScalar(along).addScaledVector(f.U, this.vy).normalize();
+        const fw = _F.copy(H).multiplyScalar(along).addScaledVector(f.U, this.vy + this.pitchIn * along * 0.2).normalize();
         const r = _R.crossVectors(fw, f.U).normalize(), u = _B.crossVectors(r, fw);
         _Q.setFromRotationMatrix(_M.makeBasis(r, u, fw.negate()));
         this.qAir.slerp(_Q, damp(7, dt));
@@ -1696,5 +1862,12 @@ export class TrackRacer {
       this.q.slerp(this.qAir, this.airT);
     } else this.qAir.copy(this.q);
     this.camQ.copy(this.q);
+    // drifting, the chase camera looks along the way the ship is going more than along its nose: the slide shows
+    if (this.driftS > 0.01) {
+      const pv = Math.atan2(this.vx, Math.max(1, this.vs)), pc = this.psi + (pv - this.psi) * 0.6;
+      const Hc = _H.copy(f.T).multiplyScalar(Math.cos(pc)).addScaledVector(f.R, Math.sin(pc));
+      _Q.setFromRotationMatrix(_M.makeBasis(_R.crossVectors(Hc, f.U), f.U, _B.copy(Hc).negate()));
+      this.camQ.slerp(_Q, this.driftS * (1 - this.airT));
+    }
   }
 }

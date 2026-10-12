@@ -91,10 +91,13 @@ export class Input {
     if (t) {
       s.roll += t.lx;
       s.pitch -= t.ly;                          // pushed up: as the up arrow
-      if (t.ry < -0.35) s.throttleUp = 1;
-      if (t.ry > 0.35) s.throttleDown = 1;
-      if (t.rx < -0.55) s.airL = 1;
-      if (t.rx > 0.55) s.airR = 1;
+      if (t.ry > 0.35 && Math.abs(t.rx) > 0.35) { s.throttleUp = 1; s.throttleDown = 1; }    // down and to a side: drift
+      else {
+        if (t.ry < -0.35) s.throttleUp = 1;
+        if (t.ry > 0.35) s.throttleDown = 1;
+        if (t.rx < -0.55) s.airL = 1;
+        if (t.rx > 0.55) s.airR = 1;
+      }
       s.boost = s.boost || t.boost;
     }
     if (this.invert) s.pitch = -s.pitch;

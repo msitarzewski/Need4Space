@@ -291,6 +291,8 @@ async function boot() {
     lens.allowed = v.lensWater !== false;
     world.setOptions?.(v);                           // (a world's own effects: the ice planet's weather, its aurora)
     world.wreck?.setEffects(v.wreckFx !== false);       // the derelict's sparks, flickering lamps, drifting debris
+    TrackRacer.drifting = v.drift !== false;
+    TrackRacer.airPitch = v.airPitch !== false;
     bloom.enabled = v.bloom;
     blurOn = v.blur;
     Ship.brakeLights = v.brakeLights;
@@ -581,6 +583,17 @@ async function boot() {
             ship.clearTrails();
             rig.snap(ctl);
           }
+        } else if (e.type === 'drift') {
+          const mine = e.player && mode === 'race';
+          if (camera.position.distanceTo(e.at) < 300) { const f = track.frame(e.s); fx.driftKick(e.at, new THREE.Matrix4().makeBasis(f.R, f.U, f.T.clone().negate()), e.tier, mine); }
+          if (mine) {
+            audio.driftKick(e.tier);
+            ship.boostKick = Math.max(ship.boostKick, 0.4 + 0.2 * e.tier);
+            rig.shake = Math.max(rig.shake, 0.15 + 0.08 * e.tier);
+            hud.flash(['', 'rgba(60,140,255,0.3)', 'rgba(255,140,40,0.32)', 'rgba(210,90,255,0.36)'][e.tier], 0.35);
+          }
+        } else if (e.type === 'flip') {
+          if (e.player && mode === 'race') { audio.flip(); hud.flash('rgba(150,70,255,0.22)', 0.6); }
         } else if (e.type === 'go') { hud.message('GO!', 1.2); audio.go(); }
         else if (e.type === 'lap') { audio.lap(); hud.message(`Lap ${e.lap}: ${e.time.toFixed(2)} s${e.clean ? '  -  clean lap +5' : ''}`, 3); }
         else if (e.type === 'finish') { audio.finish(); hud.message(`Finished P${e.pos}!`, 3); }
@@ -713,6 +726,7 @@ async function boot() {
     const f = ctl.forward;
     hud.update(dt, { speed: ctl.speed, agl: MAP !== 'meadow' && mode === 'free' ? NaN : ctl.agl, throttle: ctl.throttle,
       boostEnergy: ctl.boostEnergy, boosting: ctl.boosting, state, stateClass: cls, camera: rig.name, assist: ctl.assist,
+      drifting: mode === 'race' && !!ctl.drift, driftCharge: ctl.driftCharge, driftTier: ctl.driftTier || 0,
       invert: input.invert, lapTime: lap.started ? lap.time : NaN, lastLap: lap.last, bestLap: lap.best, lap: lap.lap,
       x: ctl.pos.x, z: ctl.pos.z, fx: f.x, fz: f.z, race: race ? race.hud() : null, mode });
     audio.update(dt, { camera, ship, ctl, race, track, mode, inp, world });
