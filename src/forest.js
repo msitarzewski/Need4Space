@@ -1,7 +1,8 @@
 // The forest moon: the circuit floats in the sky of a jungle world, ~1.3 km over an endless canopy, threading a
 // field of floating islands - under an arch of falling water, across a jump between the Twins, through a canyon of
-// rock pillars hung with vines, down a spiral round the trunk of a colossal tree, through a cave in a hollow island
-// and out over the abyss through a waterfall. The gas giant the space circuit floats over hangs in its sky.
+// rock pillars hung with vines, down a spiral round the trunk of a colossal tree, through a waterfall into the cave of
+// a hollow hill and 2 km through it, out over the way in, through a skull, home upside down. The gas giant the space
+// circuit floats over hangs in its sky.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { Track, TRACK_W, layout } from './track.js';
@@ -13,10 +14,10 @@ import { mulberry32 } from './noise.js';
 import { SUN_DIR, SUN_E, SUN_COL, GIANT_DIR, skyDome } from './atmo.js';
 import { Abyss, groundHeight } from './abyss.js';
 import { islandShape, islandMaps, islandMaterial, trackClearance } from './islands.js';
-import { Flora, leafCards, barkTube } from './flora.js';
+import { Flora, leafCards, barkTube, barkMaterial } from './flora.js';
 import { trackVines, gantryIvy, vineCanopy, canyonBridges } from './overgrowth.js';
 import { Waters } from './water.js';
-import { hollowIsland, caveGlow } from './cave.js';
+import { hollowCave, caveDressing, caveRock } from './cave.js';
 import { greatTree } from './greattree.js';
 import { skeleton, boneMaterial } from './skeleton.js';
 import { Creatures } from './creatures.js';
@@ -51,8 +52,40 @@ for (let k = 0; k <= 8; k++) {
   pt(Math.round(TREE_C.x - TREE_R * Math.sin(a)), Math.round(-100 - 125 * k / 8), Math.round(TREE_C.z + TREE_R * Math.cos(a)),
     k > 0 && k < 8 ? 30 : 22, k === 0 ? 'treeIn' : k === 8 ? 'treeOut' : null);
 }
-// through the Hollow island, out of its cave over the abyss through a waterfall (the second jump), the loop
-pt(60, -228, 1480, 0, 'caveIn'); pt(-170, -226, 1475); pt(-400, -214, 1462, 0, 'caveOut'); pt(-560, -228, 1452); pt(-660, -216, 1450, 0, 'preLoop');
+// Into the Hollow, a hill of rock floating over the abyss, under its own way out: through a waterfall into a cave in
+// its north cliff, a loop through it (down into a cavern over a lake, a jump over a chasm, crystal, a hall of
+// stalactites, the roots of the jungle overhead, fungi, a river, a fissure), out of a mouth higher up and over a cut in
+// the deck, the way in below; then the loop. Its plan: arcs ([radius, degrees], + to the left) and straights ([0, m])
+// walked on from the tree's foot - a point every 45 m, the heights from the slopes (%), eased from stretch to stretch
+export const HOLLOW_PLAN = [[0, 315], [300, 45], [0, 163.87], [260, 45], [0, 120], [260, 40], [450, -16], [380, 16], [260, 185],
+  [0, 267.12], [500, 15], [500, -15], [0, 140], [300, 45], [0, 100]];
+{
+  const SLOPES = [[0, -1], [315, -4], [625, -3], [790, -27], [850, -26], [950, 5], [1060, -10], [1130, -12], [1220, -2], [1300, 0],
+    [1452, 3], [1730, 14], [1990, 11], [2300, 10], [2600, 10], [2754, 6], [2814, 0], [2864, -8], [2960, -9], [3070, -6], [3196, -2], [3296, 0]];
+  const BANKS = [[0, 0], [315, 0], [430, -14], [551, -4], [714, -6], [919, -4], [1000, -4], [1039, -8], [1120, -16], [1220, -4], [1283, 8],
+    [1346, -2], [1400, -8], [1452, -12], [1530, -18], [2200, -18], [2291, -4], [2559, -2], [2620, -5], [2690, 0], [2750, 5], [2820, 0],
+    [2900, 0], [2990, -10], [3080, -14], [3196, -4], [3296, 0]];
+  const NAMES = { caveIn: 670, chasm: 987, caveOut: 2754, jump: 2814 }, EVERY = 45, Y1 = -216, FIX = 2864;
+  const knot = (k, q) => { let i = 0; while (i < k.length - 2 && q > k[i + 1][0]) i++; const t = Math.min(1, Math.max(0, (q - k[i][0]) / (k[i + 1][0] - k[i][0]))); return k[i][1] + (k[i + 1][1] - k[i][1]) * t; };
+  let [x, y, z] = P.at(-1), hx = -1, hz = 0, s = 0;
+  const path = [[x, y, z, 0]];
+  for (const [r, a] of HOLLOW_PLAN) {
+    const len = r ? Math.abs(a) * Math.PI / 180 * r : a, n = Math.ceil(len), ds = len / n;
+    for (let i = 0; i < n; i++) {
+      if (r) { const th = Math.sign(a) * ds / r, c = Math.cos(th), sn = Math.sin(th); [hx, hz] = [hx * c + hz * sn, -hx * sn + hz * c]; }
+      y += knot(SLOPES, s + ds / 2) / 100 * ds; x += hx * ds; z += hz * ds; s += ds;
+      path.push([x, y, z, s]);
+    }
+  }
+  const err = Y1 - y, at = (q) => path[Math.min(path.length - 1, path.findIndex((p) => p[3] >= q))];
+  const named = Object.entries(NAMES), qs = [];
+  for (let q = EVERY; q < s - 50; q += EVERY) if (named.every(([, v]) => Math.abs(v - q) > EVERY * 0.45)) qs.push(q);
+  for (const [nm, q] of [...named.map(([k, v]) => [k, v]), ...qs.map((q) => [null, q])].sort((a, b) => a[1] - b[1])) {
+    const [px, py, pz] = at(q);
+    pt(+px.toFixed(1), +(py + err * Math.max(0, (q - FIX) / (s - FIX))).toFixed(1), +pz.toFixed(1), Math.round(knot(BANKS, q)), nm);
+  }
+}
+pt(-660, -216, 1450, 0, 'preLoop');
 for (let k = 0; k <= 12; k++) {
   const a = (k / 12) * Math.PI * 2;
   pt(-790 - 80 * Math.sin(a), -136 - 80 * Math.cos(a), 1450 - 80 * k / 12, 0, k === 0 ? 'loopIn' : k === 12 ? 'loopOut' : null);
@@ -62,16 +95,20 @@ for (let k = 0; k <= 12; k++) {
 pt(-930, -214, 1392, -20); pt(-1005, -210, 1560, -6);
 pt(-1018, -206, 1760, 0, 'skullRun'); pt(-1022, -202, 1955, 0, 'skullIn'); pt(-1024, -200, 2140, 0, 'skull'); pt(-1026, -197, 2325, 0, 'skullOut');
 pt(-1032, -206, 2470, 14); pt(-1080, -201, 2590, 30); pt(-1180, -192, 2655, 34); pt(-1295, -182, 2625, 30); pt(-1355, -172, 2505, 20);
-pt(-1375, -160, 2300, 6); pt(-1368, -145, 2080, 0, 'skullView');
-pt(-1340, -124, 1830, -4); pt(-1290, -100, 1580, -8); pt(-1232, -78, 1340, -8); pt(-1188, -55, 1110, -4);
+// the climb home upside down: the gravity turns over (the next deck overhead), the jungle for a sky, the skeleton's neck
+// hanging into it beside the way; turned back over before the run to the line
+pt(-1375, -144, 2300, 0, 'flipA'); pt(-1370, -120, 2090, 180, 'flipB');
+pt(-1350, -95, 1855, 180, 'skullView'); pt(-1300, -68, 1620, 180, 'flipC');
+pt(-1258, -90, 1415, 0, 'flipD'); pt(-1205, -62, 1160, -4);
 
 export const FOREST_LAYOUT = layout(P, {
   start: [-1150, 0, 400],
   loops: [['loopIn', 'loopOut']],
-  gaps: [['crest1', 35, 105], ['caveOut', 14, 86], ['skullOut', 26, 92]],
+  gaps: [['crest1', 35, 105], ['chasm', 14, 80], ['jump', 14, 86], ['skullOut', 26, 92]],
+  flips: [['flipA', 'flipB'], ['flipC', 'flipD']],
   // the skull over the deck (no gantry, lamp or board inside it)
   covers: [['skullIn', -240, 'skullOut', 20]],
-  caves: [['caveIn', -30, 'caveOut', 12]],
+  caves: [['caveIn', -10, 'caveOut', 10]],
   pads: [['start', 330, 0], ['fallsIn', -170, -10], ['fallsIn', -170, 10], ['under', 60, 0], ['canyonOut', 120, 0],
     ['treeIn', -170, 0], ['caveIn', -110, 10], ['preLoop', 30, 0], ['loopOut', 260, -10], ['skullRun', -40, 0], ['skullView', 60, -10], ['skullView', 60, 10]],
   gates: [['start', -60, 0x60ffb0], ['crest1', -90, 0xffb020], ['canyonIn', -40, 0x9cff40], ['treeIn', -60, 0x40d8ff],
@@ -90,8 +127,9 @@ const HERO = [
   // (east of the start straight: the afternoon sun is north-west - west of it, its shadow lay over the whole grid)
   { name: 'Mother', x: -850, z: 380, top: 62, rx: 190, rz: 320, rot: 0.05, cliff: 95, depth: 420, seed: 11, hill: 10, lobes: 4, res: 224 },
   { name: 'Cascade', x: -380, z: -800, top: 230, rx: 310, rz: 150, rot: 0.03, cliff: 130, depth: 430, seed: 12, hill: 6, lobes: 4, res: 224 },
-  // the island the track bores through (its middle and long axis come from the bore: cave.js)
-  { name: 'Hollow', x: -170, z: 1470, top: -105, rx: 270, rz: 210, cliff: 200, depth: 520, seed: 31, hill: 8, taper: 1.3, hollow: true },
+  // the hill the cave runs through (its middle and outline come from the cave: cave.js; these for the rest to keep clear)
+  { name: 'Hollow', x: -100, z: 1990, top: -75, rx: 470, rz: 470, cliff: 560, depth: 820, seed: 31, hill: 8, taper: 0.9, lobes: 3, crag: 0.55,
+    baseVar: 0.04, hollow: true },
   // the rock the Great Tree's roots grip, far under the spiral
   { name: 'Roots', x: 300, z: 1290, top: -470, rx: 150, rz: 140, rot: 0.3, cliff: 60, depth: 260, seed: 41, hill: 4, lobes: 3, taper: 1.0, res: 160 },
   { name: 'Lantern', x: 225, z: -560, top: 235, rx: 150, rz: 175, rot: 0.4, cliff: 70, depth: 150, seed: 13, hill: 8, lobes: 2, taper: 0.7, settle: 'up', res: 192 },
@@ -206,13 +244,20 @@ export class ForestWorld {
     lap('sky');
     this.track = new Track(FOREST_LAYOUT);
     this.trackGrid();
+    // the hollow hill and its cave (before any material: its dark is written into the shaders)
+    this.hollow = hollowCave(this.track, HERO.find((h) => h.hollow));
+    {
+      const tr = this.track, base = tr.caveLight.bind(tr), H = this.hollow;
+      tr.caveLines = [];
+      tr.caveLight = (p, ...rest) => Math.min(base(p, ...rest), H.light(p));
+    }
     // the skeleton's bones (where they stand: the islands and the fliers keep clear of them)
     this.skel = skeleton(this.track, { dens: this.dens });
     rockMaps(renderer);
     hullMaps(renderer);
     // the cave's dark, and the shade under the tunnels of vines (their centre lines: overgrowth.js)
     this.canopy = vineCanopy(this.track, (list) => leafCards(list, 'A', 17));
-    setCave(this.track.caveLines, 40, 45, { lines: this.canopy.lines, R: 27, mouth: 22, amb: 0.3 });
+    setCave([], 40, 45, { lines: this.canopy.lines, R: 27, mouth: 22, amb: 0.3 }, { glsl: this.hollow.glsl });
     this.track.meshes(scene);
     this.track.bakeDeck(renderer);
     this.noAO = [];
@@ -226,6 +271,10 @@ export class ForestWorld {
     this.flora = new Flora(scene);
     this.plant();
     lap('planting');
+    // what glows in the cave, its stalactites, roots, falls and lake, the river, the beams down the sinkholes
+    this.glow = caveDressing(scene, this.hollow, this.track, { rock: this.caveMat, bark: barkMaterial({ lamps: true }) }, this.dens);
+    this.noAO.push(...this.glow.noAO);
+    lap('cave');
     this.growTree(scene);
     lap('tree');
     this.raiseSkeleton(scene);
@@ -285,20 +334,25 @@ export class ForestWorld {
   }
 
   buildIslands(scene) {
-    const rnd = mulberry32(4711), list = [...HERO, ...scatterIslands(this.track, rnd, this.dens, this.skel.avoid)];
+    const Hl = this.hollow, hill = { ...HERO.find((h) => h.hollow), x: Hl.I.x, z: Hl.I.z, rx: Hl.I.rx, rz: Hl.I.rz };
+    const rnd = mulberry32(4711), list = [...HERO.map((h) => (h.hollow ? hill : h)), ...scatterIslands(this.track, rnd, this.dens, [...this.skel.avoid, hill])];
     const mat = islandMaterial(), near = [], far = [];
     this.islands = [];
     let pushed = 0;
     for (const I of list) {
       if (I.hollow) {
-        // (built round the bore: no clearance to settle)
-        const h = (this.hollow = hollowIsland(this.track, I));
-        const shell = new THREE.Mesh(h.shell, mat), bore = new THREE.Mesh(h.boreGeo, islandMaterial({ key: 'island-bore', side: THREE.DoubleSide, lamps: true }));
-        shell.castShadow = shell.receiveShadow = bore.receiveShadow = true;
+        // (built round its cave: no clearance to settle) the hill, the cave's chunks, the sinkholes' shafts
+        const h = this.hollow, shell = new THREE.Mesh(h.shape.geometry, mat);
+        shell.castShadow = shell.receiveShadow = true;
         shell.layers.set(2); shell.layers.enable(6);
-        shell.name = 'Hollow'; bore.name = 'Hollow-bore';
-        scene.add(shell, bore);
-        this.islands.push({ geometry: h.shell, I: h.I, topInfo: h.topInfo, topHeight: h.topHeight, rimAt: h.rimAt, mesh: shell });
+        shell.name = 'Hollow';
+        this.caveMat = caveRock();
+        const parts = [shell, ...h.chunks.map((g, k) => Object.assign(new THREE.Mesh(g, this.caveMat), { name: 'Hollow-cave-' + k })),
+          ...h.shaftGeo.map((g, k) => Object.assign(new THREE.Mesh(g, this.caveMat), { name: 'Hollow-shaft-' + k }))];
+        for (const m of parts.slice(1)) m.receiveShadow = true;
+        for (const m of parts.slice(1 + h.chunks.length)) { m.castShadow = true; m.layers.enable(6); }
+        scene.add(...parts);
+        this.islands.push({ geometry: h.shape.geometry, I: h.I, topInfo: h.topInfo, topHeight: (x, z) => h.topInfo(x, z)?.y ?? null, rimAt: h.rimAt, mesh: shell });
         continue;
       }
       let isl = islandShape(I);
@@ -317,7 +371,6 @@ export class ForestWorld {
       this.islands.push(isl);
       (I.far ? far : near).push(isl);
     }
-    this.glow = caveGlow(scene, this.hollow, this.track);
     // the near ones merged by 700 m cells (a draw a cell, not one an island; each still culled as a cell)
     const cells = new Map();
     for (const isl of near) {
@@ -520,16 +573,16 @@ export class ForestWorld {
       const s = tr.at('falls'), f = tr.frame(s), C = isl('Cascade'), r = nearestRim(C, f.P);
       const lip = r.p.clone().addScaledVector(r.out, 1.0).add(new THREE.Vector3(0, -1.0, 0));
       const out = f.P.clone().sub(lip).setY(0).normalize();
-      const dFar = f.P.clone().sub(lip).setY(0).length() + 24 + 8, h = lip.y - f.P.y;
+      const dFar = f.P.clone().sub(lip).setY(0).length() + TRACK_W_HALF + 10, h = lip.y - f.P.y;
       const v = Math.max(10, 1.12 * dFar / Math.sqrt((2 * Math.max(h - 12, 5)) / G));
       this.archFall = W.add({ lip, out, width: 54, v, drop: 1100, seed: 11, name: 'cascade' });
       console.info(`cascade fall: lip ${h.toFixed(0)} m over the deck, ${v.toFixed(1)} m/s - clears the far edge at ${(h - 0.5 * G * (dFar / v) ** 2).toFixed(0)} m`);
     }
-    // the Hollow's: off the cliff over the cave's west mouth, down across the jump
+    // the Hollow's river: off its cliff over the cave's way in, a curtain the track goes in through
     {
-      const H = this.hollow, r = H.rimAt(0);
-      const lip = r.p.clone().addScaledVector(H.hz, 1.0).add(new THREE.Vector3(0, -1.0, 0));
-      this.caveFall = W.add({ lip, out: H.hz, width: 62, v: 3.2, drop: 1100, seed: 13, name: 'hollow' });
+      const H = this.hollow, m = H.mouthIn, r = H.rimAt(Math.atan2(m.z - H.C.z, m.x - H.C.x));
+      const lip = r.p.clone().addScaledVector(r.out, 1.0).add(new THREE.Vector3(0, -1.0, 0));
+      this.caveFall = W.add({ lip, out: r.out, width: 76, v: 2.6, drop: 1100, seed: 13, name: 'hollow' });
     }
     // the others: islands big enough, high enough to be seen
     const cands = this.islands.filter((i) => !i.I.far && !/Pillar|Cascade|Lantern|Hollow/.test(i.I.name) && (i.I.rx + i.I.rz) / 2 > 80 && i.I.top > -200);
@@ -725,6 +778,11 @@ float rN(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
     const tr = this.track, i = tr.nearestIndex(p), d = p.clone().sub(tr.P[i]);
     const x = d.dot(tr.R[i]), y = d.dot(tr.U[i]);
     if (Math.abs(x) < TRACK_W_HALF + 4 && y > -6 && y < 6.5) p.addScaledVector(tr.U[i], 6.5 - y);
+  }
+
+  // the settings' own switches: the cave's beams of daylight, the spray over its lake, its glowworms and their lights
+  setOptions(v) {
+    for (const m of this.glow.fx) m.visible = v.caveFx !== false;
   }
 
   surface() { return -1e9; }

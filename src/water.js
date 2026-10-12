@@ -11,7 +11,7 @@ export const WATER_U = { waterTime: { value: 0 } };
 const G = 9.8;
 
 // the sheet: rows in time since the lip (finer near it), columns across
-function sheet({ lip, out, width, v, tEnd, seed }) {
+export function sheet({ lip, out, width, v, tEnd, seed }) {
   const across = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), out).normalize();
   const rnd = mulberry32(seed), NR = 46, NC = 14, pos = [], nrm = [], uv = [], aux = [], idx = [];
   const ph = rnd() * 10;
@@ -43,7 +43,7 @@ function sheet({ lip, out, width, v, tEnd, seed }) {
   return g;
 }
 
-const NOISE = /* glsl */`
+export const NOISE = /* glsl */`
   float wH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
   float wN(vec2 p) { vec2 i = floor(p), u = fract(p); u = u * u * (3.0 - 2.0 * u);
     return mix(mix(wH(i), wH(i + vec2(1, 0)), u.x), mix(wH(i + vec2(0, 1)), wH(i + vec2(1, 1)), u.x), u.y); }`;

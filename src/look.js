@@ -35,19 +35,23 @@ function polyK(name, lines, R, mouth) {
   return fn + '\treturn k;\n}\n';
 }
 
-export function setCave(lines, R, mouth, shade = null) {
+// extra: a map's own dark besides the lines (the forest's hill: GLSL defining caveExtra( w ), per vertex, and
+// cavePixel( w, k ), per pixel - light let in where the per-vertex dark is too coarse: a beam down a shaft)
+export function setCave(lines, R, mouth, shade = null, extra = null) {
   const C = THREE.ShaderChunk;
-  if (C.common.includes('vCaveW') || !lines.length) return;
+  if (C.common.includes('vCaveW') || (!lines.length && !extra)) return;
   const fn = polyK('caveLight', lines, R, mouth) + (shade?.lines.length ? polyK('shadeK0', shade.lines, shade.R, shade.mouth)
-    + `float shadeLight( vec3 w ) { return mix( ${shade.amb.toFixed(3)}, 1.0, shadeK0( w ) ); }\n` : 'float shadeLight( vec3 w ) { return 1.0; }\n');
+    + `float shadeLight( vec3 w ) { return mix( ${shade.amb.toFixed(3)}, 1.0, shadeK0( w ) ); }\n` : 'float shadeLight( vec3 w ) { return 1.0; }\n')
+    + (extra ? extra.glsl : 'float caveExtra( vec3 w ) { return 1.0; }\nfloat cavePixel( vec3 w, float k ) { return 0.0; }\n');
   // (worked out per vertex - it changes over metres, and per pixel it was a loop over the line for every lit pixel
   // near the cave or a tunnel; vCaveW stays for whoever reads it)
   C.common += '\nvarying vec3 vCaveW;\nvarying vec2 vCaveK;\n' + fn;
-  C.project_vertex += '\n\tvCaveW = ( vec4( mvPosition.xyz - viewMatrix[ 3 ].xyz, 0.0 ) * viewMatrix ).xyz;\n\tvCaveK = vec2( caveLight( vCaveW ), shadeLight( vCaveW ) );\n';
+  C.project_vertex += '\n\tvCaveW = ( vec4( mvPosition.xyz - viewMatrix[ 3 ].xyz, 0.0 ) * viewMatrix ).xyz;\n\tvCaveK = vec2( min( caveLight( vCaveW ), caveExtra( vCaveW ) ), shadeLight( vCaveW ) );\n';
   const L = C.lights_fragment_begin;
   const a = 'getDirectionalLightInfo( directionalLight, directLight );';
   if (!L.includes(a)) throw new Error('lights chunk changed: cave patch not applied');
-  C.lights_fragment_begin = 'float caveK = vCaveK.x;\n' + L.replace(a, a + '\n\t\tdirectLight.color *= caveK;');
+  C.lights_fragment_begin = (extra ? 'float caveK = max( vCaveK.x, cavePixel( vCaveW, vCaveK.x ) );\n' : 'float caveK = vCaveK.x;\n')
+    + L.replace(a, a + '\n\t\tdirectLight.color *= caveK;');
   C.lights_fragment_end = `{
 	float caveAmb = mix( 0.012, 1.0, caveK ) * vCaveK.y;
 	irradiance *= caveAmb;

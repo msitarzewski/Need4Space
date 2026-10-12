@@ -12,6 +12,7 @@ import { fbm3 } from './islands.js';
 import { groundHeight } from './abyss.js';
 import { sunOnly } from './look.js';
 import { Q } from './quality.js';
+import { TRACK_W } from './track.js';
 
 const v = (x, y, z) => new THREE.Vector3(x, y, z);
 const UP = v(0, 1, 0);
@@ -277,9 +278,10 @@ export function skeleton(track, { dens = 1 } = {}) {
   const rnd = mulberry32(1313);
   const i0 = Math.round(track.at('skull') / track.step) % track.n;
   const O = track.P[i0].clone(), Tt = track.T[i0].clone(), Uu = UP.clone();
-  // its frame: facing back up the track (the ships come at its open jaws), level
-  const Zs = Tt.clone().setY(0).normalize().negate(), Xs = new THREE.Vector3().crossVectors(Uu, Zs).normalize();
-  const M = new THREE.Matrix4().makeBasis(Xs, Uu, Zs).setPosition(O);
+  // its frame: facing back up the track (the ships come at its open jaws), level; drawn round a 44 m road, scaled to
+  // the road's width (its teeth and cheeks as far off the walls), the back of its skull kept over the cut
+  const Zs = Tt.clone().setY(0).normalize().negate(), Xs = new THREE.Vector3().crossVectors(Uu, Zs).normalize(), SC = TRACK_W / 44;
+  const M = new THREE.Matrix4().makeBasis(Xs, Uu, Zs).scale(new THREE.Vector3(SC, SC, SC)).setPosition(O.clone().addScaledVector(Zs, 193 * (SC - 1)));
   const toW = (p) => p.clone().applyMatrix4(M);
   const spots = { top: [], bottom: [] };
   const sk = skull(spots);
@@ -372,7 +374,7 @@ export function skeleton(track, { dens = 1 } = {}) {
   }
   // where it stands: for the scenery and the fliers to keep clear of
   const centre = toW(v(0, 40, -20));
-  const avoid = [{ x: centre.x, z: centre.z, rx: 260, rz: 260, top: centre.y + 320, depth: 520 }];
+  const avoid = [{ x: centre.x, z: centre.z, rx: 260 * SC, rz: 260 * SC, top: centre.y + 320 * SC, depth: 520 * SC }];
   for (let t = 0.1; t <= 1; t += 0.15) { const p = neckCurve.getPointAt(t); avoid.push({ x: p.x, z: p.z, rx: 160, rz: 160, top: p.y + 120, depth: 260 }); }
   const mid = P3.clone().addScaledVector(dir, 800);
   avoid.push({ x: mid.x, z: mid.z, rx: 700, rz: 700, top: mid.y + 380, depth: 500 });
