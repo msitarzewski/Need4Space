@@ -280,9 +280,9 @@ class Driver {
     const ff = (v * cFF) / tRate;
     let steer = ff + (psiDes - r.psi) / (tRate * T.tauPsi);
     const need = Math.max(Math.abs(ff), Math.abs(steer) - T.airCorr), sgn = Math.sign(Math.abs(ff) > 0.5 ? ff : steer);
-    // a drift, for a bend that asks most of what the airbrakes give (they cost far more speed): brake and throttle
-    // held, the stick set for the yaw the cascade wants (the drift turns at side x (0.6 + 0.4 k) x 3.5 x the turn
-    // rate), out of it as the bend eases - with the charge's kick
+    // a drift, for a bend that asks most of what the airbrakes give (they cost far more speed): said outright
+    // (inp.drift), the throttle held, the stick set for the yaw the cascade wants (TrackRacer.driftQ: a share of 3.5 x
+    // the turn rate), out of it as the bend eases - with the charge's kick
     const canDrift = TrackRacer.drifting && !jump && !loop && !air && v > DRIFT.v + 20 && esc < 0.5 && this.odo > 700;
     // (the side from the track's own bend just ahead: the line's swing out wide before a corner bends the other way)
     let cT = 0;
@@ -312,8 +312,7 @@ class Driver {
     if (jump || loop || air || this.drifting || this.postDrift > 0) air1 = 0;
     if (air1 !== this.airOn) { this.airHold = air1 ? T.airMinOn : T.airMinOff; this.airOn = air1; }
     if (this.drifting) {
-      // (into it with the stick hard over: the racer takes the drift's side from the stick as it starts)
-      this.inp.yaw = r.drift ? this.drifting * clamp((steer * this.drifting / DRIFT.rate - 0.6) / 0.4, -1, 1) : this.drifting;
+      this.inp.yaw = this.drifting * TrackRacer.driftU(steer * this.drifting / DRIFT.rate);
       this.inp.airL = this.inp.airR = 0;
     } else {
       if (this.airOn) steer = steer / 1.9 - 0.8 * this.airOn;
@@ -330,7 +329,8 @@ class Driver {
     if (jump) vF = Math.max(vF, r.vs + 50);
     this.inp.throttleAxis = r.vs < vF ? 1 : clamp(1 - (r.vs - vF) * 0.15, 0, 1);
     this.inp.throttleDown = r.vs > vF + 8 ? 1 : 0;
-    if (this.drifting) { this.inp.throttleAxis = 1; this.inp.throttleDown = 1; }
+    this.inp.drift = this.drifting;
+    if (this.drifting) { this.inp.throttleAxis = 1; this.inp.throttleDown = 0; }
     // boost: where the lap ahead has room for the speed (never into a bend it would brake for), the tank never left
     // full; at once to finish a pass or to get back up to speed after a knock
     const E = r.boostEnergy;

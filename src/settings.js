@@ -11,7 +11,7 @@ const LAPTOP = { scale: 1, aa: 'smaa1', ao: false, reflections: false, shadows: 
 // (AI difficulty: the rivals, race.js AI_LEVELS - Normal a fair fight, Hard close to a flawless lap, Brutal at it)
 const ROWS = [
   ['ai', 'AI difficulty', [['normal', 'Normal'], ['hard', 'Hard'], ['brutal', 'Brutal']]],
-  ['drift', 'Drift (brake + throttle in a corner)', [[true, 'On'], [false, 'Off']]],
+  ['drift', 'Drift (touch the brake, turn hard)', [[true, 'On'], [false, 'Off']]],
   ['airPitch', 'Nose control in the air', [[true, 'On'], [false, 'Off']]],
   ['music', 'Music', [['off', 'Off'], ['low', 'Low'], ['mid', 'Medium'], ['high', 'High']]],
   ['sfx', 'Sound effects', [['low', 'Low'], ['mid', 'Medium'], ['high', 'High']]],
