@@ -716,9 +716,10 @@ class Zones {
   }
   topY(H, z) { const pl = H.taper > 0 && z < H.taper ? H.planes[8] : H.planes[0]; return (pl.d - pl.n.z * z) / pl.n.y; }
 
-  // ---- the trench along the back: walls of armour either side of the way (slabs 36-76 m long, 20-30 m high, with
-  // gaps), turrets beyond them on their barbettes (a third wrecked), the way bolted down to the back on short
-  // columns; running lights on the walls. The walls and turrets throw shadows (the cascades): across the deck
+  // ---- the trench along the back: walls of armour either side of the way (slabs 36-76 m long, 32-56 m high - over
+  // the deck - with gaps), turrets beyond them high on their barbettes (a third wrecked), the way bolted down to the
+  // back on short columns; running lights on the walls. The walls and turrets throw shadows (the cascades): across the
+  // deck
   trench() {
     const w = this.w, tr = this.tr, R = this.R, s0 = tr.at('trench') + 150, s1 = tr.at('tower') - 210;
     w.module('turret', (M) => turret(w, M, false), 4000, true);
@@ -735,7 +736,7 @@ class Zones {
       for (let s = s0 + R() * 40; s < s1;) {
         const L = 36 + R() * 40, gap = 10 + R() * 28, at = this.topAt(s + L / 2, 60);
         if (at) {
-          const { H, t } = at, hx = 7 + R() * 5, hy = 10 + R() * 5, off = 40 + hx + R() * 6;
+          const { H, t } = at, hx = 7 + R() * 5, hy = 16 + R() * 12, off = 40 + hx + R() * 6;
           const c = t.p.clone().addScaledVector(t.R, sd * off), top = this.topY(H, c.z);
           const fz = c.z, pl = H.taper > 0 && fz < H.taper ? H.planes[8] : H.planes[0], ny = pl.n.clone();
           const az = t.T.clone().addScaledVector(ny, -t.T.dot(ny)).normalize(), ax = new THREE.Vector3().crossVectors(ny, az);
@@ -759,13 +760,17 @@ class Zones {
       if (!at) continue;
       const { H, t } = at, off = 100 + R() * 35, c = t.p.clone().addScaledVector(t.R, side * off);
       const pl = H.taper > 0 && c.z < H.taper ? H.planes[8] : H.planes[0], ny = pl.n.clone();
-      c.y = this.topY(H, c.z) - 0.5;
       if (Math.abs(c.x) > (H.HW - H.sec.ct) * H.k(c.z) - 24) continue;
+      // its barbette's tower, up past the walls: the guns over them
+      const top = this.topY(H, c.z), up = 20 + R() * 10;
+      w.cyl(H, V(c.x, top - 0.5, c.z), V(c.x, top + up, c.z), 19, { kind: K_HULL, paint: PAINT_HULL, sky: 1, segs: 28, layer: 'cast' });
+      for (const y of [top + up * 0.3, top + up * 0.7]) w.cyl(H, V(c.x, y - 0.8, c.z), V(c.x, y + 0.8, c.z), 19.8, { kind: K_FRAME, paint: PAINT_FRAME, sky: 1, segs: 28, layer: 'main' });
+      c.y = top + up - 0.5;
       const yaw = -side * (0.4 + R() * 1.0), along = t.T.clone().addScaledVector(ny, -t.T.dot(ny)).normalize();
       const az = along.applyAxisAngle(ny, yaw), ax = new THREE.Vector3().crossVectors(ny, az);
       const wrecked = R() < 0.35;
       w.place(wrecked ? 'turretW' : 'turret', H, F(c, ax, ny, az), 1, null, 600);
-      H.boxes.push({ c: c.clone().addScaledVector(ny, 13), ax, ay: ny, az, h: [13, 6, 17] });
+      // (their shadows: the cascades' - no blocks in the sun test, every lit pixel would pay for each)
       const u = this.faceU(H, 0, c.x, c.z);
       this.mark(H, 0, u - 30 / (2 * (H.HW - H.sec.ct)), u + 30 / (2 * (H.HW - H.sec.ct)), c.z - 30, c.z + 30);
     }

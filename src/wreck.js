@@ -511,6 +511,7 @@ float wRelief( vec2 uv, float kind, float fp, float W, out vec2 id, out vec3 fea
 	}`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 	if ( wKind > 5.5 ) { totalEmissiveRadiance += vWC * 6.0; diffuseColor.rgb = vec3( 0.05 ); }`)
+      .replace('#include <shadowmap_pars_fragment>', () => '#include <shadowmap_pars_fragment>\n' + WRECK_CASCADE)
       .replace('#include <lights_fragment_begin>', () => lightsBegin())
       // (the sky's reflections and light not looked up where the sky is not seen: deep inside)
       .replace('#include <lights_fragment_maps>', 'if ( vWA.y > 0.06 ) {\n#include <lights_fragment_maps>\n}')
@@ -554,8 +555,34 @@ function lightsBegin() {
   if (p0 < 0 || p1 < 0 || i0 < p1 || i1 < 0) return '#include <lights_fragment_begin>';
   const dir = L.slice(i0, i1).replace(/RE_Direct\( directLight[^;]*;/, (m) => `#if UNROLLED_LOOP_INDEX != 1 && UNROLLED_LOOP_INDEX != 2\n\t\t${m}\n\t\t#endif`);
   L = L.slice(0, i0) + dir + L.slice(i1);
-  return L.slice(0, p0) + L.slice(p1 + '#endif'.length);
+  return (L.slice(0, p0) + L.slice(p1 + '#endif'.length)).replace('cascadeShadow()', 'wreckCascade()');
 }
+// The sun's cascades on the wreck: four bilinear taps in the finest map that covers the point, no blocker search (the
+// PCSS of the ships and the deck, look.js, costs ~5x that a pixel - and the wreck is most of the screen)
+const WRECK_CASCADE = /* glsl */`
+#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS >= 3
+float wreckLevel( sampler2D map, vec2 size, vec4 coord, float bias, out float inside ) {
+	vec3 sc = coord.xyz / coord.w;
+	sc.z += bias;
+	float border = min( min( sc.x, 1.0 - sc.x ), min( sc.y, 1.0 - sc.y ) );
+	inside = ( sc.z <= 1.0 ) ? smoothstep( 0.0, 0.1, border ) : 0.0;
+	if ( inside <= 0.0 ) return 1.0;
+	vec2 t = vec2( 1.2 / size.x, 0.0 );
+	return 0.25 * ( pcssLerp( map, size, sc.xy + t.xx, sc.z ) + pcssLerp( map, size, sc.xy - t.xx, sc.z ) + pcssLerp( map, size, sc.xy + vec2( t.x, -t.x ), sc.z ) + pcssLerp( map, size, sc.xy + vec2( -t.x, t.x ), sc.z ) );
+}
+float wreckCascade() {
+	float in0, in1, in2;
+	float s0 = wreckLevel( directionalShadowMap[ 0 ], directionalLightShadows[ 0 ].shadowMapSize, vDirectionalShadowCoord[ 0 ], directionalLightShadows[ 0 ].shadowBias, in0 );
+	if ( in0 >= 0.999 ) return s0;
+	float s1 = wreckLevel( directionalShadowMap[ 1 ], directionalLightShadows[ 1 ].shadowMapSize, vDirectionalShadowCoord[ 1 ], directionalLightShadows[ 1 ].shadowBias, in1 );
+	if ( in1 >= 0.999 ) return mix( s1, s0, in0 );
+	float s2 = wreckLevel( directionalShadowMap[ 2 ], directionalLightShadows[ 2 ].shadowMapSize, vDirectionalShadowCoord[ 2 ], directionalLightShadows[ 2 ].shadowBias, in2 );
+	return mix( mix( mix( 1.0, s2, in2 ), s1, in1 ), s0, in0 );
+}
+#else
+float wreckCascade() { return 1.0; }
+#endif
+`;
 
 // ---------------------------------------------------------------- the build
 const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _n = new THREE.Vector3(), _t = new THREE.Vector3();
@@ -586,9 +613,10 @@ export class Wreck {
     this.buildMeshes();
     this.debris();
     this.sparks = new Sparks(this.sparkSites());
-    // the asteroids and towers keep clear of it (spheres along each piece)
+    // the asteroids and towers keep clear of it (spheres along each piece; the great ship's a wide berth: round it only
+    // what broke off it)
     for (const H of this.hulls) {
-      const r = Math.hypot(H.HW, H.HH) + 60, n = Math.max(1, Math.round(H.len / r));
+      const r = Math.hypot(H.HW, H.HH) + (H.HW > 100 ? 500 : 60), n = Math.max(1, Math.round(H.len / r));
       for (let k = 0; k < n; k++) track.keepOut.push({ c: H.toWorld(new THREE.Vector3(0, 0, (k + 0.5) * H.len / n)), r: Math.hypot(r, H.len / n / 2) });
     }
   }
