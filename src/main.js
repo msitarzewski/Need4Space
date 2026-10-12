@@ -280,6 +280,7 @@ async function boot() {
     streaks.enabled = v.streaks;
     shafts.enabled = !!world.lightShafts && v.shafts !== false;
     lens.allowed = v.lensWater !== false;
+    world.wreck?.setEffects(v.wreckFx !== false);       // the derelict's sparks, flickering lamps, drifting debris
     bloom.enabled = v.bloom;
     blurOn = v.blur;
     Ship.brakeLights = v.brakeLights;

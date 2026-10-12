@@ -39,7 +39,14 @@ for (let k = 0; k <= 12; k++) {                                      // R 80 m, 
 }
 pt(3160, -240, 525); pt(3420, -225, 620, 20); pt(3560, -210, 850, 28); pt(3600, -195, 1050, 10);
 pt(3605, -195, 1150); pt(3610, -180, 1245, 0, 'crest2'); pt(3615, -195, 1340);   // the second jump
-pt(3610, -190, 1700, 0, 'back'); pt(3480, -150, 2000, 25); pt(3150, -90, 2200, 30); pt(2600, -20, 2250, 10);
+pt(3610, -190, 1700, 0, 'back');
+// the derelict (wreck.js): out past its bow, round the nose, along its flank and in through the breach; down the
+// hangar and the spine to where it broke in two, across the gap, through the engine room and out of the hole its
+// main engine left
+pt(3790, -185, 1990, 8); pt(4090, -178, 2120, 14); pt(4316, -172, 2228, 22); pt(4420, -166, 2450, 28);
+pt(4316, -160, 2672, 26); pt(4080, -154, 2736, 18); pt(3880, -149, 2650, -4); pt(3720, -144, 2530, 0, 'wreckIn');
+pt(3520, -136, 2462); pt(3150, -120, 2440, 0, 'wreckBrk'); pt(2900, -110, 2432); pt(2700, -100, 2425, 0, 'wreckOut');
+pt(2540, -60, 2345, 4);
 pt(2050, 60, 2150, 6, 'caveIn'); pt(1500, 160, 1950, 12, 'caveOut');      // the meteorite tunnel
 pt(1010, 220, 1770, 0, 'west'); pt(520, 200, 1730, 18); pt(240, 135, 1350, 0);
 pt(180, 100, 1150, 120); pt(120, 65, 960, 240); pt(60, 30, 800, 0, 'cork');     // the corkscrew home
@@ -47,6 +54,9 @@ const LOOPS = [['loopIn', 'loopOut']];
 const GAPS = [['crest1', 35, 105], ['crest2', 35, 108]];             // (after point, from m, to m)
 const TUNNELS = [['tunIn', 'tunOut']];
 const CAVES = [['caveIn', -40, 'caveOut', 40]];                     // (from point, m, to point, m)
+// the derelict's dark stretches (from point, m, to point, m): its fore half from the breach to where it broke, its
+// aft half from the torn end to the engine block (no sky light; the sun only where its holes let it in - wreck.js)
+const WRECKS = [['wreckIn', -10, 'wreckBrk', -10], ['wreckBrk', 125, 'wreckOut', 10]];
 // boost pads: (point, metres after it, lateral x)
 const PADS = [['start', 360, 0], ['tunIn', -160, -10], ['tunIn', -160, 10], ['north', 120, 0], ['dive', -260, 12],
   ['preLoop', 30, 0], ['back', 90, -12], ['west', -300, 10], ['west', 260, -10]];
@@ -60,9 +70,10 @@ export const SPACE_THEME = { field: [0.15, 0.55, 1.0], fieldFlash: [0.7, 0.85, 1
 let TH = SPACE_THEME;
 const g3 = (c) => `vec3(${c.map((x) => x.toFixed(3)).join(', ')})`;
 // A circuit: its control points and named features (another map passes its own; `start` is near the grid's line,
-// towers: the space map's towers on truss arms, meteor: its meteorite round the cave)
+// towers: the space map's towers on truss arms, meteor: its meteorite round the cave, wrecks: the derelict's dark
+// stretches)
 export const SPACE_LAYOUT = { ctrl: CTRL, at: AT, loops: LOOPS, gaps: GAPS, tunnels: TUNNELS, caves: CAVES, pads: PADS,
-  gates: GATES, start: [0, 0, 430], towers: true, meteor: true };
+  gates: GATES, start: [0, 0, 430], towers: true, meteor: true, wrecks: WRECKS };
 // a layout's control points from a list of [x, y, z, bank, name?]
 export function layout(points, rest) {
   const ctrl = [], at = {};
@@ -164,6 +175,7 @@ function fieldMaterial() {
 }
 
 export const CAVE_R = 40, CAVE_MOUTH = 45;            // the cave's reach round its centre line, its mouths' light fade (m)
+export const WRECK_R = 46, WRECK_MOUTH = 30;          // the same for the derelict's dark stretches (round the deck only)
 const _cv = new THREE.Vector3(), _cw = new THREE.Vector3();
 
 export class Track {
@@ -243,14 +255,22 @@ export class Track {
     // covered stretches (the forest's tunnels of vines): no gantry, lamp post, board or gate inside one
     this.canopies = (L.canopies || []).map(([a, fa, b, fb]) => [this.at(a, fa), this.at(b, fb)]);
     // the cave's centre line (a polyline the shaders test every pixel against: inside it, no sun and no sky light)
-    this.caveLines = this.caves.map(([s0, s1]) => {
+    const centreLine = ([s0, s1]) => {
       const len = this.wrap(s1 - s0), pts = [];
       for (let k = 0; k <= 15; k++) {                    // (the raw samples: frame() needs the curvature, not made yet)
         const i = Math.round(this.wrap(s0 + (len * k) / 15) / this.step) % n;
         pts.push(this.P[i].clone().addScaledVector(this.U[i], 5));
       }
       return { pts, len };
-    });
+    };
+    this.caveLines = this.caves.map(centreLine);
+    // the derelict's dark stretches: no sky light round the deck there (look.js shade lines), and the ships' lights on;
+    // they count as caves for what stands on the track (no gantries, lamps or towers) and for the echo
+    this.meteorCaves = this.caves;
+    this.wrecks = (L.wrecks || []).map(([a, fa, b, fb]) => [this.at(a, fa), this.at(b, fb)]);
+    this.wreckLines = this.wrecks.map(centreLine);
+    this.caves = [...this.caves, ...this.wrecks];
+    this.keepOut = [];                                   // spheres the asteroids and towers stay out of ({ c, r })
     // curvature in the deck's own frame: kv > 0 where it dips (presses the ship down), kh > 0 turning right
     this.kv = new Float32Array(n); this.kh = new Float32Array(n);
     for (let i = 0; i < n; i++) {
@@ -285,10 +305,11 @@ export class Track {
     return false;
   }
 
-  // how much daylight reaches p (1 out in the open .. 0 deep in the cave) - the same test the shaders make
+  // how much daylight reaches p (1 out in the open .. 0 deep in the cave or the derelict) - the same test the shaders
+  // make
   caveLight(p, R = CAVE_R, mouth = CAVE_MOUTH) {
     let k = 1;
-    for (const { pts, len } of this.caveLines) {
+    const line = ({ pts, len }, R, mouth) => {
       let dmin = 1e9, t = 0;
       for (let i = 0; i < pts.length - 1; i++) {
         const a = pts[i], ab = _cv.subVectors(pts[i + 1], a), h = clamp(_cw.subVectors(p, a).dot(ab) / ab.lengthSq(), 0, 1);
@@ -297,7 +318,9 @@ export class Track {
       }
       const inside = 1 - smoothstep(R - 4, R + 2, dmin), ends = smoothstep(0, mouth, Math.min(t, 1 - t) * len);
       k = Math.min(k, 1 - inside * ends);
-    }
+    };
+    for (const l of this.caveLines) line(l, R, mouth);
+    for (const l of this.wreckLines) line(l, WRECK_R, WRECK_MOUTH);
     return k;
   }
 
@@ -698,7 +721,7 @@ export class Track {
     const boulderMat = rockMaterial({ big: 60, small: 9, key: 'boulder', shadow: true });
     // vertex colours are tints round 1 (the rock's albedo is the material's): no blotches
     const c = new THREE.Color(), tint = (t) => c.setRGB(t * 1.015, t, t * 0.975);
-    for (const [s0, s1] of this.caves) {
+    for (const [s0, s1] of this.meteorCaves) {
       // the bore
       const len = this.wrap(s1 - s0), nk = Math.ceil(len / 3), nj = 64, pos = [], col = [], idx = [], f = {};
       for (let k = 0; k <= nk; k++) {
@@ -949,7 +972,10 @@ export class Track {
     const list = [];
     for (let s = 300; s < this.length - 200; s += 760 + rnd() * 380) {
       if (this.inGap(s, 60) || this.inLoop(s, 120) || this.inTunnel(s, 40) || this.inCave(s, 250)) continue;
-      list.push({ i: Math.floor(s / this.step), side: rnd() < 0.5 ? -1 : 1, off: 62 + rnd() * 30, h: 70 + rnd() * 90 });
+      const t = { i: Math.floor(s / this.step), side: rnd() < 0.5 ? -1 : 1, off: 62 + rnd() * 30, h: 70 + rnd() * 90 };
+      const at = this.P[t.i].clone().addScaledVector(this.R[t.i], t.side * t.off);
+      if (this.keepOut.some((k) => k.c.distanceTo(at) < k.r + t.h)) continue;     // (clear of the derelict)
+      list.push(t);
     }
     const box = (w, h, d, x, y, z = 0) => new THREE.BoxGeometry(w, h, d).translate(x, y, z).toNonIndexed();
     const merge = (gs) => { const g = new THREE.BufferGeometry(), n = gs.reduce((a, x) => a + x.attributes.position.count, 0);
@@ -1363,6 +1389,7 @@ export class Track {
       let dmin = 1e9;
       for (const p of coarse) { const d = p.distanceTo(X); if (d < dmin) dmin = d; }
       if (dmin < size * 1.5 + 160 || dmin > 1800) continue;
+      if (this.keepOut.some((k) => k.c.distanceTo(X) < k.r + size * 1.5 + 60)) continue;
       E.set(rnd() * 6.3, rnd() * 6.3, rnd() * 6.3);
       M.compose(X, Q.setFromEuler(E), S.set(size, size, size));
       const kind = size > 30 ? (rnd() < 0.5 ? 0 : 1) : 2 + Math.floor(rnd() * 4);

@@ -4,7 +4,8 @@ import * as THREE from 'three';
 import { bakeLater } from './bake.js';
 import { Q } from './quality.js';
 import { mulberry32 } from './noise.js';
-import { Track, TRACK_W, CAVE_R, CAVE_MOUTH } from './track.js';
+import { Track, TRACK_W, CAVE_R, CAVE_MOUTH, WRECK_R, WRECK_MOUTH } from './track.js';
+import { Wreck } from './wreck.js';
 import { setCave } from './look.js';
 import { rockMaps, bakeRockShadow } from './rock.js';
 import { hullMaps } from './hull.js';
@@ -203,10 +204,16 @@ export class SpaceWorld {
     this.track = new Track();
     rockMaps(renderer);                                            // every rock's maps, before the first frame
     hullMaps(renderer);                                            // the structure's grime noise
-    setCave(this.track.caveLines, CAVE_R, CAVE_MOUTH);              // before any lit material compiles
+    // the derelict the track threads (wreck.js): built before the track's towers and the asteroids (they keep clear)
+    this.wreck = this.track.wrecks.length ? new Wreck(this.track, SUN_DIR) : null;
+    // before any lit material compiles: the meteorite's dark, the derelict's (no sky light round the deck inside it;
+    // the sun only through its holes)
+    setCave(this.track.caveLines, CAVE_R, CAVE_MOUTH, this.wreck ? { lines: this.track.wreckLines, R: WRECK_R, mouth: WRECK_MOUTH, amb: 0.02 } : null);
+    this.wreck?.patchShaders();
     this.track.meshes(scene);
+    if (this.wreck) for (const m of [...this.wreck.meshes, ...this.wreck.debrisMeshes, this.wreck.sparks.mesh]) scene.add(m);
     this.scenery = new Scenery(scene, this.sky, SUN_DIR, renderer);
-    this.noAO = [this.scenery.gate.userData.fieldMesh];
+    this.noAO = [this.scenery.gate.userData.fieldMesh, ...(this.wreck ? [this.wreck.sparks.mesh] : [])];
     this.track.bakeDeck(renderer);
     // the meteorite's own shadow from the sun, once (crater rims, boulders - at any distance)
     if (this.track.meteor) bakeRockShadow(renderer, [this.track.meteor.mesh, ...this.track.meteor.boulders], SUN_DIR);
@@ -280,6 +287,7 @@ export class SpaceWorld {
     this.dust.material.uniforms.pr.value = renderer.getPixelRatio() * (this.renderScale || 1);
     this.dust.material.uniforms.cam.value.copy(camera.position);
     this.track.update(t, shipPos, Math.max(0, t - (this.lastT ?? t)));
+    this.wreck?.update(t, camera);
     this.scenery.update(t, Math.max(0, t - (this.lastT ?? t)));
     this.sunG.userData.surf.material.uniforms.time.value = t;
     const cu = this.sunG.userData.corona.material.uniforms;
@@ -287,14 +295,26 @@ export class SpaceWorld {
     // now and then the sun throws off a plume of matter (every 25-50 s, somewhere round the limb)
     if (t > (this.nextEruption ??= 8)) { cu.eruA.value = Math.random() * Math.PI * 2; cu.eruT.value = t; this.nextEruption = t + 25 + Math.random() * 25; }
     this.lastT = t;
-    // lamps on the three gantries nearest the ship (by track distance, either side); the start gantry's is red
+    // lamps on the three gantries nearest the ship (by track distance, either side); the start gantry's is red. Inside
+    // the derelict (no gantries there) they are its emergency lamps nearest the ship, flickering with them
     const tr = this.track, gi = tr.gantryIdx, sIdx = Math.floor(s / tr.step);
+    if (this.wreck && tr.wrecks.some(([a, b]) => tr.inSpan(s, a - 90, b + 40))) {
+      this.wreck.nearLamps(shipPos, 3).forEach(({ L }, k) => {
+        const l = this.lamps[k];
+        l.position.copy(L.p);
+        l.color.setRGB(L.col[0], L.col[1], L.col[2]);
+        l.intensity = (L.big ? 2600 : 900) * L.f;
+        l.distance = L.big ? 110 : 75;
+      });
+      return;
+    }
     gi.map((i) => ({ i, d: Math.min((i - sIdx + tr.n) % tr.n, (sIdx - i + tr.n) % tr.n) }))
       .sort((p, q) => p.d - q.d).slice(0, 3).forEach(({ i }, k) => {
         const l = this.lamps[k];
         l.position.copy(tr.P[i]).addScaledVector(tr.U[i], 12.9);
         l.color.set(i === gi[0] ? 0xff6a55 : 0xc4ddff);
         l.intensity = i === gi[0] ? 260 : 420;
+        l.distance = 70;
       });
   }
 }
