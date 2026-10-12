@@ -35,8 +35,9 @@ const stats = (L) => [
 const MAIN = [['race', 'Race'], ['free', 'Free flight'], ['circuit', 'Circuit'], ['settings', 'Settings'], ['controls', 'Controls'], ['support', 'Support']];
 // the circuits (main.js loads the one chosen: the page reloads into it)
 export const CIRCUITS = [['space', 'Space', 'The orbital circuit over the ringed gas giant: a broken derelict to thread, a meteorite to fly through, a glass tunnel, a loop'],
-  ['forest', 'Forest moon', 'High over a jungle moon: floating islands, a river arching over the track, a colossal tree, a glowworm cave, a giant\'s skull to fly through'],
-  ['ice', 'Ice planet', 'Over a frozen sea at dusk: aurora, a crescent ice giant, giant crystals, a glacier to fly through, two rifts to jump']];
+  ['forest', 'Forest moon', 'High over a jungle moon: floating islands, a river arching over the track, a colossal tree, two kilometres of caverns, a giant\'s skull, home upside down'],
+  ['ice', 'Ice planet', 'Over a frozen sea at dusk, a storm in the east: a crevasse down an ice shelf, a glacier to fly through, two rifts to jump, upside down over the floes'],
+  ['desert', 'Desert planet', 'Dunes at sunset: a half-buried city, a sandstorm, a sandstone gorge under natural bridges, a banked wall, a gravity flip']];
 // donations (the author's Revolut)
 const DONATE_URL = 'https://revolut.me/alexan_vic', DONATE_HANDLE = '@alexan_vic';
 const donate = () => window.open(DONATE_URL, '_blank', 'noopener');
@@ -140,7 +141,7 @@ export class Menu {
         <header><div class="m-kicker"><span class="k-keys">Keyboard, mouse, gamepad</span><span class="k-touch">Touch</span></div><h2 class="m-h2">Controls</h2></header>
         <div class="c-touch">
           <div class="c-row"><span class="c-keys"><kbd>Left stick</kbd></span><span>Steer (free flight: roll, pitch)</span></div>
-          <div class="c-row"><span class="c-keys"><kbd>Right stick</kbd></span><span>Up: throttle - down: brake - sideways: airbrakes - down and to a side: drift</span></div>
+          <div class="c-row"><span class="c-keys"><kbd>Right stick</kbd></span><span>Up: throttle - down: brake - sideways: airbrakes. Drift: brake with the left stick hard over</span></div>
           <div class="c-row"><span class="c-keys"><kbd>Boost</kbd></span><span>Boost (orange pads on the track kick too)</span></div>
           <div class="c-row"><span class="c-keys"><kbd>Cam</kbd></span><span>Camera: chase, far, canopy, fly-by, orbit</span></div>
           <div class="c-row"><span class="c-keys"><kbd>Engines</kbd></span><span>Engines start / stop (free flight)</span></div>
@@ -330,7 +331,7 @@ export class Menu {
       settings: 'Picture, effects, audio and performance',
       controls: 'Keyboard, mouse and gamepad',
       support: 'Donate to keep Need4Space flying',
-      circuit: 'Space, the forest moon or the ice planet',
+      circuit: 'Space, the forest moon, the ice planet or the desert planet',
       ...Object.fromEntries(CIRCUITS.map(([id, , d]) => ['map:' + id, d])),
       resume: free ? 'Back to free flight' : 'Back to the race',
       restart: free ? 'Back over the start line' : 'Back to the grid and the lights',

@@ -9,6 +9,8 @@ import { MeadowWorld, SUN_DIR as MEADOW_SUN, SUN_FOG } from './world.js';
 import { SpaceWorld, SUN_DIR as SPACE_SUN, SHADOW_HALF, SHADOW_NEAR, SHADOW_FAR, MID_HALF, MID_NEAR, MID_FAR, FAR_HALF, FAR_NEAR, FAR_FAR } from './space.js';
 import { ForestWorld, SUN_DIR as FOREST_SUN } from './forest.js';
 import { IceWorld, SUN_DIR as ICE_SUN } from './ice.js';
+import { DesertWorld, SUN_DIR as DESERT_SUN } from './desert.js';
+import { DUST_GLSL, DUST_FOG_CHUNK } from './haze.js';
 import { ICE_GLSL, ICE_FOG_CHUNK } from './frost.js';
 import { ATMO_GLSL, ATMO_FOG_CHUNK } from './atmo.js';
 import { TrackRacer, TRACK_W } from './track.js';
@@ -29,8 +31,8 @@ import { Menu } from './menu.js';
 import { compileAll, deferBakes, runBakes, gpuIdle } from './bake.js';
 import { Q, setLite, integratedGPU, liteFiltering, memoryTier } from './quality.js';
 
-// the map: the circuit chosen in the menu (saved), or ?map=space / forest / ice / meadow (the meadow: the old test range)
-const MAP = { meadow: 'meadow', forest: 'forest', space: 'space', ice: 'ice' }[new URLSearchParams(location.search).get('map') || savedSettings().map] || 'space';
+// the map: the circuit chosen in the menu (saved), or ?map=space / forest / ice / desert / meadow (the meadow: the old test range)
+const MAP = { meadow: 'meadow', forest: 'forest', space: 'space', ice: 'ice', desert: 'desert' }[new URLSearchParams(location.search).get('map') || savedSettings().map] || 'space';
 const SHIP_URL = { high: 'assets/racer_web.glb', mid: 'assets/racer_web_4k.glb', low: 'assets/racer_web_2k.glb' };   // (by memory tier)
 const LUTS = ['assets/agx_punchy_lut65.bin', 'assets/agx_mhc_lut65.bin'];   // Blender's AgX looks: Punchy, Medium High Contrast
 const status = (t) => (document.getElementById('loadtext').textContent = t);
@@ -50,13 +52,14 @@ const progress = (step, f = 0) => {
 const nextFrame = () => new Promise((r) => { requestAnimationFrame(() => r()); setTimeout(r, 50); });
 async function boot() {
   if (new URLSearchParams(location.search).has('bootprof')) (await import('./profile.js')).bootProfile();
-  const sunDir = { space: SPACE_SUN, forest: FOREST_SUN, ice: ICE_SUN, meadow: MEADOW_SUN }[MAP];
+  const sunDir = { space: SPACE_SUN, forest: FOREST_SUN, ice: ICE_SUN, desert: DESERT_SUN, meadow: MEADOW_SUN }[MAP];
   // (the forest uses the space map's cascades - the same boxes - and its own air for fog: atmo.js)
   patchShaders({ sunDir, sunFog: SUN_FOG, shadowHalf: MAP !== 'meadow' ? FAR_HALF : 22, shadowDepth: 200,
     cascades: MAP !== 'meadow' ? [{ half: SHADOW_HALF, depth: SHADOW_FAR - SHADOW_NEAR }, { half: MID_HALF, depth: MID_FAR - MID_NEAR },
       { half: FAR_HALF, depth: FAR_FAR - FAR_NEAR }] : null,
     ...(MAP === 'forest' ? { fogChunk: ATMO_FOG_CHUNK, fogPars: ATMO_GLSL, worldOnly: true } : {}),
-    ...(MAP === 'ice' ? { fogChunk: ICE_FOG_CHUNK, fogPars: ICE_GLSL, worldOnly: true } : {}) });
+    ...(MAP === 'ice' ? { fogChunk: ICE_FOG_CHUNK, fogPars: ICE_GLSL, worldOnly: true } : {}),
+    ...(MAP === 'desert' ? { fogChunk: DUST_FOG_CHUNK, fogPars: DUST_GLSL, worldOnly: true } : {}) });
   const canvas = document.getElementById('view');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
   // the GPU driver reset (too long a job for a slow GPU, or out of memory): say so rather than a frozen screen
@@ -100,7 +103,7 @@ async function boot() {
   await nextFrame();
   deferBakes(true);
   const world = MAP === 'space' ? new SpaceWorld(scene, renderer, camera) : MAP === 'forest' ? new ForestWorld(scene, renderer, camera)
-    : MAP === 'ice' ? new IceWorld(scene, renderer, camera) : new MeadowWorld(scene, renderer);
+    : MAP === 'ice' ? new IceWorld(scene, renderer, camera) : MAP === 'desert' ? new DesertWorld(scene, renderer, camera) : new MeadowWorld(scene, renderer);
   deferBakes(false);
   progress('circuit', 1);
   await runBakes(renderer, (what, k, n) => { status(`${what}  ${k} / ${n}`); progress(/Painting/.test(what) ? 'paint' : 'bakes', k / n); });
@@ -208,8 +211,8 @@ async function boot() {
   let aoHalf = false;
   gtao.setSize = (w, h) => { gtao.fullSize = [w, h]; gtaoSetSize(aoHalf ? Math.max(1, w >> 1) : w, aoHalf ? Math.max(1, h >> 1) : h); };
   const tp = track ? track.parts : null;
-  const noAO = () => [...(world.noAO || []), ...ship.fxObjects(), ...fx.pools.map((p) => p.points), fx.streaks.lines, fx.ring, fx.marks.mesh,
-    ...(tp ? [...tp.fields, ...tp.pads, ...tp.lanes, ...tp.gates.filter((m) => m.material.isShaderMaterial), tp.tunnel[0]].filter(Boolean) : []), ...(race ? race.noAO() : []), ...fx.waves,
+  const noAO = () => [...(world.noAO || []), ...ship.fxObjects(), ...fx.pools.map((p) => p.points), fx.streaks.lines, fx.ring, fx.marks.mesh, fx.trails.mesh,
+    ...(tp ? [...tp.fields, ...tp.pads, ...tp.lanes, ...tp.gates.filter((m) => m.material.isShaderMaterial), ...(tp.flips || []).filter((m) => m.material.transparent), tp.tunnel[0]].filter(Boolean) : []), ...(race ? race.noAO() : []), ...fx.waves,
     ...(world.dust ? [world.dust] : [])];
   gtao.render = (...a) => {        // glows, plumes, trails, particles, fields and decals must not occlude anything
     const hide = noAO().filter((o) => o.visible);
@@ -235,6 +238,8 @@ async function boot() {
   composer.addPass(streaks);
   const blur = speedBlurPass();
   composer.addPass(blur);
+  // a map's own pass over the picture (the desert's heat shimmer)
+  if (world.heat) { world.heat.camera = camera; composer.addPass(world.heat); }
   // the map's own grade (a map under a bright sky: its contrast and colour back)
   const grade = new GradePass();
   Object.assign(grade, world.grade || {});
@@ -589,10 +594,17 @@ async function boot() {
           if (camera.position.distanceTo(e.at) < 300) { const f = track.frame(e.s); fx.driftKick(e.at, new THREE.Matrix4().makeBasis(f.R, f.U, f.T.clone().negate()), e.tier, mine); }
           if (mine) {
             audio.driftKick(e.tier);
+            hud.pulse('bst');
             ship.boostKick = Math.max(ship.boostKick, 0.4 + 0.2 * e.tier);
             rig.shake = Math.max(rig.shake, 0.15 + 0.08 * e.tier);
             hud.flash(['', 'rgba(60,140,255,0.3)', 'rgba(255,140,40,0.32)', 'rgba(210,90,255,0.36)'][e.tier], 0.35);
           }
+        } else if (e.type === 'driftTier') {
+          if (camera.position.distanceTo(e.at) < 220) fx.driftTier(e.entry.ship, e.entry.racer, track.frame(e.s), e.tier);
+          if (e.player && mode === 'race') { audio.driftTier(e.tier); hud.pulse('dft'); }
+        } else if (e.type === 'driftChain') {
+          if (camera.position.distanceTo(e.at) < 220) fx.driftChain(e.entry.ship, e.entry.racer, track.frame(e.s), e.tier);
+          if (e.player && mode === 'race') { audio.driftChain(e.tier); hud.pulse('dft'); rig.shake = Math.max(rig.shake, 0.12); }
         } else if (e.type === 'flip') {
           if (e.player && mode === 'race') { audio.flip(); hud.flash('rgba(150,70,255,0.22)', 0.6); }
         } else if (e.type === 'go') { hud.message('GO!', 1.2); audio.go(); }
@@ -727,7 +739,7 @@ async function boot() {
     const f = ctl.forward;
     hud.update(dt, { speed: ctl.speed, agl: MAP !== 'meadow' && mode === 'free' ? NaN : ctl.agl, throttle: ctl.throttle,
       boostEnergy: ctl.boostEnergy, boosting: ctl.boosting, state, stateClass: cls, camera: rig.name, assist: ctl.assist,
-      drifting: mode === 'race' && !!ctl.drift, driftCharge: ctl.driftCharge, driftTier: ctl.driftTier || 0,
+      drifting: mode === 'race' && !!ctl.drift, driftCharge: ctl.driftCharge, driftTier: ctl.driftTier || 0, driftChain: ctl.chain || 0,
       invert: input.invert, lapTime: lap.started ? lap.time : NaN, lastLap: lap.last, bestLap: lap.best, lap: lap.lap,
       x: ctl.pos.x, z: ctl.pos.z, fx: f.x, fz: f.z, race: race ? race.hud() : null, mode });
     audio.update(dt, { camera, ship, ctl, race, track, mode, inp, world });

@@ -5,8 +5,9 @@ import { TRACK_W } from './track.js';
 import { mulberry32, smoothstep } from './noise.js';
 
 const TRACK_HALF = TRACK_W / 2;           // the walls' inner faces
-// a drift's sparks by the charge's step: building, then blue, orange, violet (linear, over 1 to glow)
+// a drift's sparks, trails and glow by the charge's step: building, then blue, orange, violet (linear, over 1 to glow)
 const DRIFT_COL = [new THREE.Color(1.1, 1.15, 1.3), new THREE.Color(0.35, 0.75, 2.4), new THREE.Color(2.4, 0.9, 0.18), new THREE.Color(1.9, 0.45, 2.4)];
+const VAPOUR = new THREE.Color(0.85, 0.88, 0.95), CHAIN_COL = new THREE.Color(2.4, 2.0, 1.1), _c = new THREE.Color(), _v = new THREE.Vector3();
 
 function canvas(n, draw) {
   const c = document.createElement('canvas');
@@ -294,6 +295,73 @@ class WallMarks {
   update(dt) { this.t += dt; this.mesh.material.uniforms.time.value = this.t; }
 }
 
+// A drift's burn on the deck: where the skids under a drifting hull ride the field the deck glows - a ribbon behind
+// each skid, white-hot at the hull, cooling through the charge's colour to nothing in ~1.8 s (faint while it builds)
+const TRAIL_LIFE = 1.8;
+class DeckTrails {
+  constructor(scene, n = 1600) {
+    this.n = n;
+    this.i = 0;
+    this.t = 0;
+    const g = new THREE.InstancedBufferGeometry().copy(new THREE.PlaneGeometry(1, 1));
+    g.instanceCount = n;
+    this.born = new Float32Array(n).fill(-99);
+    this.col = new Float32Array(n * 3);
+    g.setAttribute('iBorn', new THREE.InstancedBufferAttribute(this.born, 1));
+    g.setAttribute('iCol', new THREE.InstancedBufferAttribute(this.col, 3));
+    this.mesh = new THREE.InstancedMesh(g, new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+      polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
+      uniforms: { time: { value: 0 } },
+      vertexShader: /* glsl */`
+        attribute float iBorn; attribute vec3 iCol; uniform float time; varying vec2 vUv; varying float vAge; varying vec3 vCol;
+        void main() {
+          vUv = uv; vAge = time - iBorn; vCol = iCol;
+          gl_Position = vAge < ${TRAIL_LIFE.toFixed(2)} ? projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0) : vec4(0.0, 0.0, -2.0, 1.0);
+        }`,
+      fragmentShader: /* glsl */`
+        varying vec2 vUv; varying float vAge; varying vec3 vCol;
+        void main() {
+          float f = clamp(vAge / ${TRAIL_LIFE.toFixed(2)}, 0.0, 1.0), across = abs(vUv.y - 0.5) * 2.0;
+          float core = exp(-across * across * 22.0), body = exp(-across * across * 3.5);
+          vec3 c = mix(vec3(2.6, 2.5, 2.4), vCol, smoothstep(0.0, 0.1, f));
+          gl_FragColor = vec4((c * core * 1.4 + vCol * body * 0.65) * pow(1.0 - f, 1.6), 1.0);
+        }`,
+    }), n);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 3;
+    const M = new THREE.Matrix4().makeScale(0, 0, 0);
+    for (let k = 0; k < n; k++) this.mesh.setMatrixAt(k, M);
+    scene.add(this.mesh);
+    this.M = new THREE.Matrix4();
+    this.X = new THREE.Vector3(); this.Y = new THREE.Vector3(); this.C = new THREE.Vector3(); this.S = new THREE.Vector3();
+  }
+
+  // a stretch of ribbon from a to b on the deck (N: its up), width w (m), colour col
+  add(a, b, N, w, col) {
+    const k = this.i++ % this.n, X = this.X.subVectors(b, a), len = X.length();
+    if (len < 0.05) return;
+    X.divideScalar(len);
+    this.Y.crossVectors(N, X);
+    this.M.makeBasis(X, this.Y, N).scale(this.S.set(len + 0.25, w, 1)).setPosition(this.C.addVectors(a, b).multiplyScalar(0.5));
+    this.mesh.setMatrixAt(k, this.M);
+    this.born[k] = this.t;
+    this.col[k * 3] = col.r; this.col[k * 3 + 1] = col.g; this.col[k * 3 + 2] = col.b;
+    this.dirty = true;
+  }
+
+  update(dt) {
+    this.t += dt;
+    this.mesh.material.uniforms.time.value = this.t;
+    if (!this.dirty) return;
+    this.dirty = false;
+    this.mesh.instanceMatrix.needsUpdate = true;
+    const a = this.mesh.geometry.attributes;
+    a.iBorn.needsUpdate = a.iCol.needsUpdate = true;
+  }
+}
+
 export class FX {
   constructor(scene, camera) {
     const glow = glowTex(), puff = puffTex();
@@ -306,6 +374,7 @@ export class FX {
     this.glints = new Pool(scene, 64, { additive: true, map: glow, order: 6 });
     this.spray = new Pool(scene, 900, { map: glow, order: 4, stretch: true });         // water: drops on arcs, not lights
     this.marks = new WallMarks(scene);
+    this.trails = new DeckTrails(scene);
     this.track = null;                        // set by main: sparks fall to its deck and bounce
     this.streaks = new Streaks(camera);
     this.acc = 0;
@@ -381,17 +450,76 @@ export class FX {
 
   get pools() { return [this.dust, this.smoke, this.fire, this.sparks, this.ions, this.glints, this.spray]; }
 
-  // a drift, every frame of it: the magnetic skids under the outer edge of the hull throw a fan of sparks onto the
-  // deck - white while it builds, then blue, orange, violet as the charge reaches each step
-  drift(ship, r, f, dt) {
-    const col = DRIFT_COL[r.driftTier], side = -(r.drift || 0), V = new THREE.Vector3(), P = new THREE.Vector3();
-    const plane = { P: f.P, N: f.U }, n = Math.min(24, Math.ceil(dt * (240 + 150 * r.driftTier)));
-    for (let i = 0; i < n; i++) {
-      P.set(side * ship.halfSpan * (0.35 + Math.random() * 0.3), -ship.bottom + 0.15, 1.5 + Math.random() * 4).applyMatrix4(ship.root.matrixWorld);
-      V.copy(r.vel).multiplyScalar(0.82 + Math.random() * 0.1).addScaledVector(f.R, side * (2 + Math.random() * 6)).addScaledVector(f.U, 0.5 + Math.random() * 3);
-      this.sparks.emit(P, V, col, { size: 0.08 + Math.random() * 0.08 + 0.03 * r.driftTier, life: 0.25 + Math.random() * 0.35, alpha: 2.2,
-        drag: 0.4, grav: 18, fadeIn: 0.01, stretch: 0.03, plane, bounce: 0.3 });
+  // a drift, every frame of it: the two skids under the hull burn ribbons into the deck (the outer one wider and
+  // hotter), the outer throws a fan of sparks and a wisp of vapour, and the field crackles between hull and deck -
+  // all white while the charge builds, then blue, orange, violet as it reaches each step. The player's hull lights
+  // the deck under it in the same colour (glow).
+  drift(ship, r, f, dt, player = false) {
+    const tier = r.driftTier, col = DRIFT_COL[tier], side = -(r.drift || 0), V = new THREE.Vector3(), P = new THREE.Vector3();
+    const ch = 1 + 0.35 * (r.chain || 0);              // a chained drift: wider, hotter, more of everything
+    const plane = { P: f.P, N: f.U }, M = ship.root.matrixWorld, sk = (r.skids ||= { on: false, p: [new THREE.Vector3(), new THREE.Vector3()] });
+    // the ribbons: each skid's point dropped onto the deck, joined to where it was last frame
+    for (let k = 0; k < 2; k++) {
+      const sd = k === 0 ? side : -side;
+      P.set(sd * ship.halfSpan * 0.42, -ship.bottom, 2.2).applyMatrix4(M);
+      P.addScaledVector(f.U, 0.04 - P.clone().sub(f.P).dot(f.U));
+      const last = sk.p[k];
+      if (sk.on && last.distanceToSquared(P) < 3600) this.trails.add(last, P, f.U, (k === 0 ? 0.8 : 0.5) * ch, _c.copy(col).multiplyScalar((k === 0 ? 1 : 0.6) * (tier ? 1 : 0.35) * ch));
+      last.copy(P);
     }
+    sk.on = true;
+    // sparks off the outer skid, thrown back and out, skipping along the deck
+    const n = Math.min(40, Math.ceil(dt * (300 + 180 * tier) * ch));
+    for (let i = 0; i < n; i++) {
+      P.set(side * ship.halfSpan * (0.3 + Math.random() * 0.25), -ship.bottom + 0.1, 1.5 + Math.random() * 3).applyMatrix4(M);
+      V.copy(r.vel).multiplyScalar(0.8 + Math.random() * 0.12).addScaledVector(f.R, side * (3 + Math.random() * 9)).addScaledVector(f.U, 1 + Math.random() * 4);
+      this.sparks.emit(P, V, col, { size: 0.09 + Math.random() * 0.09 + 0.035 * tier, life: 0.25 + Math.random() * 0.4, alpha: 2.4,
+        drag: 0.4, grav: 18, fadeIn: 0.01, stretch: 0.035, plane, bounce: 0.35 });
+    }
+    // vapour torn off the outer skid, left hanging in the wake
+    this.vapAcc = (this.vapAcc || 0) + dt * (player ? 70 : 30);
+    for (; this.vapAcc >= 1; this.vapAcc--) {
+      P.set(side * ship.halfSpan * 0.45, -ship.bottom + 0.3, 3).applyMatrix4(M);
+      V.copy(r.vel).multiplyScalar(0.6 + Math.random() * 0.2).addScaledVector(f.R, side * (2 + Math.random() * 4)).addScaledVector(f.U, 1 + Math.random() * 2);
+      this.smoke.emit(P, V, _c.copy(col).lerp(VAPOUR, 0.65).multiplyScalar(0.55), { size: 0.8 + Math.random(), grow: 5, life: 0.45 + Math.random() * 0.4,
+        alpha: 0.22, drag: 3, grav: 0, spin: (Math.random() - 0.5) * 2, fadeIn: 0.05 });
+    }
+    // the field crackling: short bright strokes from the hull's underside down to the deck
+    if (tier > 0 || player) {
+      for (let i = 0; i < (player ? 2 : 1); i++) {
+        if (Math.random() > 0.7) continue;
+        P.set((Math.random() - 0.5) * ship.halfSpan * 1.2, -ship.bottom + 0.6, (Math.random() - 0.3) * 6).applyMatrix4(M);
+        V.copy(r.vel).addScaledVector(f.U, -(60 + Math.random() * 40)).addScaledVector(f.R, (Math.random() - 0.5) * 30);
+        this.sparks.emit(P, V, col, { size: 0.05 + 0.02 * tier, life: 0.025 + Math.random() * 0.02, alpha: 3, drag: 0, grav: 0, fadeIn: 0, stretch: 0.02 });
+      }
+    }
+    if (player) this.glow = { at: P.set(0, -ship.bottom + 0.4, 0.5).applyMatrix4(M), tier, k: Math.min(1, r.driftS * 1.5) };
+  }
+
+  // a drift chained (a step bigger): a white-gold burst off both skids, a ring on the deck growing with the chain
+  driftChain(ship, r, f, chain) {
+    const V = new THREE.Vector3(), P = new THREE.Vector3();
+    for (let i = 0; i < 50 + 30 * chain; i++) {
+      P.set((Math.random() < 0.5 ? -1 : 1) * ship.halfSpan * 0.42, -ship.bottom + 0.2, 2).applyMatrix4(ship.root.matrixWorld);
+      V.set(Math.random() - 0.5, Math.random() * 0.9, Math.random() - 0.5).normalize().multiplyScalar(8 + Math.random() * 18).add(_v.copy(r.vel).multiplyScalar(0.85));
+      this.sparks.emit(P, V, CHAIN_COL, { size: 0.1 + Math.random() * 0.12, life: 0.3 + Math.random() * 0.4, alpha: 2.8, drag: 1.2, grav: 10, fadeIn: 0.01,
+        stretch: 0.03, plane: { P: f.P, N: f.U }, bounce: 0.3 });
+    }
+    this.wave(_v.copy(ship.root.position).addScaledVector(f.U, -ship.bottom + 0.1), new THREE.Matrix4().makeBasis(f.R, f.U, f.T.clone().negate()),
+      CHAIN_COL, 7 + 3 * chain, 0.35);
+  }
+
+  // the drift's charge reaching a step: a burst of its colour off both skids and a small ring on the deck
+  driftTier(ship, r, f, tier) {
+    const c = DRIFT_COL[tier], V = new THREE.Vector3(), P = new THREE.Vector3();
+    for (let i = 0; i < 70; i++) {
+      P.set((Math.random() < 0.5 ? -1 : 1) * ship.halfSpan * 0.42, -ship.bottom + 0.2, 2).applyMatrix4(ship.root.matrixWorld);
+      V.set(Math.random() - 0.5, Math.random() * 0.8, Math.random() - 0.5).normalize().multiplyScalar(6 + Math.random() * 16).add(_v.copy(r.vel).multiplyScalar(0.85));
+      this.sparks.emit(P, V, c, { size: 0.1 + Math.random() * 0.1, life: 0.3 + Math.random() * 0.4, alpha: 2.6, drag: 1.2, grav: 10, fadeIn: 0.01,
+        stretch: 0.03, plane: { P: f.P, N: f.U }, bounce: 0.3 });
+    }
+    this.wave(_v.copy(ship.root.position).addScaledVector(f.U, -ship.bottom + 0.1), new THREE.Matrix4().makeBasis(f.R, f.U, f.T.clone().negate()),
+      _c.copy(c).multiplyScalar(0.8), 5 + 2 * tier, 0.3);
   }
 
   // a drift let go with its charge: a ring of the step's colour off the hull, and (the player) a kick for the camera
@@ -514,6 +642,7 @@ export class FX {
         alpha: 1.6, drag: 0.35, grav: 9.8, fadeIn: 0.01, stretch: 0.03 });
     }
     this.flash.position.copy(at).add(new THREE.Vector3(0, 2, 0));
+    this.flash.color.set(0xff9a4a);
     this.flashT = 1;
     this.ring.position.copy(at);
     this.ring.visible = true;
@@ -526,6 +655,7 @@ export class FX {
     if (CAM_VEL.lengthSq() > 1e6) CAM_VEL.set(0, 0, 0);       // a cut: no blur
     for (const p of this.pools) p.update(dt);
     this.marks.update(dt);
+    this.trails.update(dt);
     this.kick = Math.max(0, this.kick - dt * 1.2);
     this.streaks.update(dt, flight.speed, Math.min(1, flight.boosting + this.kick));
     for (const m of this.waves) {
@@ -539,6 +669,14 @@ export class FX {
     }
     this.flashT = Math.max(0, this.flashT - dt * 1.6);
     this.flash.intensity = 5000 * this.flashT * this.flashT;
+    this.glowT = (this.glowT || 0) + dt;
+    if (this.glow && this.flashT < 0.02) {
+      const g = this.glow;
+      this.flash.position.copy(g.at);
+      this.flash.color.copy(DRIFT_COL[g.tier]).multiplyScalar(1 / 2.4);
+      this.flash.intensity = (260 + 160 * g.tier) * g.k * (0.8 + 0.2 * Math.sin(this.glowT * 47) * Math.sin(this.glowT * 31));
+    }
+    this.glow = null;
     if (this.ring.visible) {
       this.ringT += dt / 0.7;
       const s = 2 + 38 * Math.sqrt(this.ringT);

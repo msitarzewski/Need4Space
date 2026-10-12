@@ -13,7 +13,8 @@ export const ordinal = (n) => n + ((n % 100 > 10 && n % 100 < 14) ? 'th' : ['th'
 export const CONTROLS = [
   ['Flight', [
     [['W', 'S'], 'Throttle up / down (S at zero: brake)'],
-    [['W', 'S'], 'Both held while steering: drift - let go of S to kick out of it'],
+    [['S', 'A', 'D'], 'Drift: touch S and turn hard at speed; steer the slide with A / D (and W), catch it straight to kick out'],
+    [['S', 'S'], 'Drift again soon after a kick, or tap S again mid-drift: a bigger drift (up to three steps)'],
     [['A', 'D'], 'Steer (race), yaw (free flight)'],
     [['←', '→', '↑', '↓'], 'Steer (race; in the air ↓ nose down, ↑ up), pitch and roll (free)'],
     [['Shift'], 'Boost (orange pads on the track kick too)'],
@@ -38,9 +39,9 @@ export const CONTROLS = [
     [['Esc'], 'Pause menu'],
   ]],
 ];
-export const GAMEPAD = 'Left stick steer / fly (in the air: nose up / down), right stick yaw, RT / LT throttle (both held while ' +
-  'steering: drift), A boost, Y engines, X canopy, B camera, LB / RB airbrakes (race) or lift (free). In the menus: d-pad, A select, ' +
-  'B back; View pauses.';
+export const GAMEPAD = 'Left stick steer / fly (in the air: nose up / down), right stick yaw, RT / LT throttle (touch LT and throw ' +
+  'the stick over: drift; steer the slide, catch it straight to kick out), A boost, Y engines, X canopy, B camera, LB / RB airbrakes (race) or lift (free). ' +
+  'In the menus: d-pad, A select, B back; View pauses.';
 
 export const controlsHTML = () => CONTROLS.map(([group, rows]) => `<div class="c-group"><div class="c-title">${group}</div>${rows.map(([keys, what]) =>
   `<div class="c-row"><span class="c-keys">${keys.map((k) => `<kbd>${k}</kbd>`).join('')}</span><span>${what}</span></div>`).join('')}</div>`).join('');
@@ -154,6 +155,9 @@ export class HUD {
   hideHelp() { $('help').classList.add('hidden'); }
 
   // a glow round the screen's edge (boost pad: orange, wall hit: blue), fading out
+  // a short pulse on an element (the drift meter reaching a step)
+  pulse(id) { retrigger($(id).parentElement, 'pulse'); }
+
   flash(colour, secs = 0.7) {
     const el = $('edgeflash');
     el.style.transition = 'none';
@@ -219,6 +223,8 @@ export class HUD {
     const lit = Math.round(Math.min(1, s.speed / 360) * SEGS);
     if (lit !== this.lit) { this.segs.forEach((e, i) => e.classList.toggle('on', i < lit)); this.lit = lit; }
     $('bst').style.transform = `scaleX(${Math.max(0, Math.min(1, s.boostEnergy))})`;
+    const over = Math.max(0, Math.min(1, (s.boostEnergy - 1) / 0.5));
+    if (over !== this.over) { $('bstx').style.transform = `scaleX(${over})`; this.over = over; }
     $('thr').style.transform = `scaleX(${Math.max(0, Math.min(1, s.throttle))})`;
     // the drift's charge: shown while drifting, coloured by the step it has reached
     const dr = !!s.drifting;
@@ -226,6 +232,7 @@ export class HUD {
     if (dr) {
       $('dft').style.transform = `scaleX(${Math.min(1, (s.driftCharge || 0) / 1.8)})`;
       if (s.driftTier !== this.driftTier) { $('dft').dataset.t = s.driftTier; this.driftTier = s.driftTier; }
+      if (s.driftChain !== this.driftChain) { $('dchain').dataset.c = s.driftChain; this.driftChain = s.driftChain; }
     }
     const sp = $('hud-speed'), boosting = s.boosting > 0.5, low = s.boostEnergy < 0.2;
     if (boosting !== this.boosting) { sp.classList.toggle('boost', boosting); this.boosting = boosting; }

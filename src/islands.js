@@ -9,6 +9,7 @@ import { bakeLater, quadJob } from './bake.js';
 import { Q } from './quality.js';
 import { sunOnly } from './look.js';
 import { mulberry32, fbm, smoothstep, clamp } from './noise.js';
+import { TRACK_W } from './track.js';
 
 const TAU = Math.PI * 2;
 
@@ -34,12 +35,15 @@ export function fbm3(x, y, z, oct = 4) {
 }
 
 // ---------------------------------------------------------------- the shape
-// I: { x, z, top, rx, rz, rot, cliff, depth, seed, hill = 8, crag = 1, taper = 1.2, lobes = 3, res = 160 }
+// I: { x, z, top, rx, rz, rot, cliff, depth, seed, hill = 8, crag = 1, taper = 1.2, lobes = 3, res = 160 }; a shape
+// given from outside (the Hollow's, cave.js): outline (its radius per column, in rx / rz), baseVar (how much the
+// cliffs' height varies), rows (the top's), underAt(x, z, rho) (the underside's depth under the cliffs' foot), cragAt(x,
+// y, z) (how craggy the rock is there, 0..1)
 // Returns { geometry, top(x, z) -> height of the top surface or null, rim(θ) -> world point on the rim, ... }
 export function islandShape(I) {
   const rnd = mulberry32(I.seed);
   const coarse = I.far ? 2.2 : 1;                 // (far ones: rows ~20 m apart, not 9)
-  const NU = I.res || 160, NT = I.far ? 6 : 12, NRIM = I.far ? 3 : 6, NC = Math.max(I.far ? 3 : 6, Math.round(I.cliff / 9 / coarse)),
+  const NU = I.res || 160, NT = I.rows || (I.far ? 6 : 12), NRIM = I.far ? 3 : 6, NC = Math.max(I.far ? 3 : 6, Math.round(I.cliff / 9 / coarse)),
     NB = Math.max(I.far ? 8 : 18, Math.round((I.depth - I.cliff) / 9 / coarse));
   const rx = I.rx, rz = I.rz, cr = Math.cos(I.rot || 0), sr = Math.sin(I.rot || 0), avgR = (rx + rz) / 2;
   const hill = I.hill ?? 8, crag = I.crag ?? 1, taper = I.taper ?? 1.2;
@@ -48,8 +52,8 @@ export function islandShape(I) {
   const R = new Float32Array(NU), base = new Float32Array(NU);
   for (let j = 0; j < NU; j++) {
     const th = (j / NU) * TAU, c = Math.cos(th), s = Math.sin(th);
-    R[j] = 1 + (fbm(c * 1.2 + s1, s * 1.2 + s2, 4) - 0.5) * 0.7 + (fbm(c * 3.5 + s2, s * 3.5 - s1, 3) - 0.5) * 0.18;
-    base[j] = I.cliff * (0.75 + 0.5 * fbm(c * 1.6 - s1, s * 1.6 + s2, 3));     // the cliff's height there
+    R[j] = I.outline ? I.outline[j] : 1 + (fbm(c * 1.2 + s1, s * 1.2 + s2, 4) - 0.5) * 0.7 + (fbm(c * 3.5 + s2, s * 3.5 - s1, 3) - 0.5) * 0.18;
+    base[j] = I.cliff * (1 + (I.baseVar ?? 0.25) * (2 * fbm(c * 1.6 - s1, s * 1.6 + s2, 3) - 1));     // the cliff's height there
   }
   const toWorld = (u, w, y) => [I.x + u * rx * cr - w * rz * sr, y, I.z + u * rx * sr + w * rz * cr];
   // the top: gentle hills, flattening toward the rim
@@ -62,7 +66,7 @@ export function islandShape(I) {
     const a = rnd() * TAU, r = 0.25 + rnd() * 0.45;
     return { u: Math.cos(a) * r, w: Math.sin(a) * r, d: 0.55 + rnd() * 0.45, s: 0.18 + rnd() * 0.22 };
   });
-  const under = (u, w, rho) => {
+  const under = I.underAt ? (u, w, rho) => { const [x, , z] = toWorld(u, w, 0); return I.underAt(x, z, rho); } : (u, w, rho) => {
     let h = Math.pow(Math.max(0, 1 - rho), taper);
     for (const L of lobes) h = Math.max(h, L.d * Math.exp(-((u - L.u) ** 2 + (w - L.w) ** 2) / (L.s * L.s)) * smoothstep(1.0, 0.75, rho));
     return h * (I.depth - I.cliff);
@@ -116,7 +120,7 @@ export function islandShape(I) {
   const put = (u, w, y, grass, deep, out) => {
     let [x, yy, z] = toWorld(u, w, y);
     if (out) {                                   // craggy rock: pushed in and out along the outward direction
-      const f = 1 / (avgR * 0.22), amp = avgR * 0.045 * crag;
+      const f = 1 / (avgR * 0.22), amp = avgR * 0.045 * crag * (I.cragAt ? I.cragAt(x, yy, z) : 1);
       const d = (fbm3(x * f, yy * f * 1.4, z * f, I.far ? 2 : 4) - 0.5) * 2 * amp + (I.far ? 0 : (n3(x * f * 4, yy * f * 0.6, z * f * 4) - 0.5) * amp * 0.5);
       x += out[0] * d; yy += out[1] * d; z += out[2] * d;
     }
@@ -172,7 +176,7 @@ export function islandShape(I) {
     const ox = Math.cos(a) * rx * cr - Math.sin(a) * rz * sr, oz = Math.cos(a) * rx * sr + Math.sin(a) * rz * cr, l = Math.hypot(ox, oz);
     return { p: new THREE.Vector3(...p), out: new THREE.Vector3(ox / l, 0, oz / l), y: rimY[j] };
   };
-  return { geometry: g, I, topHeight, topInfo, rimAt, R, NU, rows: rows.length, bottom: tipY };
+  return { geometry: g, I, topHeight, topInfo, rimAt, R, NU, rows: rows.length, bottom: tipY, base };
 }
 
 // ---------------------------------------------------------------- the rock tile
@@ -388,9 +392,9 @@ void iProj(vec2 p, float rot, out vec4 c, out vec2 g) {
 }
 
 // ---------------------------------------------------------------- clearance
-// any vertex of these geometries inside the track's slab (|x| < half + 6, -9 < y < 22 over the deck): a list of them
+// any vertex of these geometries inside the track's slab (|x| < half the road + 7, -9 < y < 22 over the deck): a list of them
 // (nearest(p): the nearest track sample's index, or -1 if none is within reach - a grid lookup)
-export function trackClearance(track, geometries, { half = 23 + 6, below = -9, above = 22, nearest = null } = {}) {
+export function trackClearance(track, geometries, { half = TRACK_W / 2 + 7, below = -9, above = 22, nearest = null } = {}) {
   const bad = [], v = new THREE.Vector3(), d = new THREE.Vector3();
   const coarse = [];
   for (let i = 0; i < track.n; i += 4) coarse.push(i);

@@ -2,7 +2,7 @@
 // a score and a results table. Rivals are clones of the player's ship in their own paint, driven by AI on the same
 // track physics.
 import * as THREE from 'three';
-import { TrackRacer, TRACK_W, turnRate, gripAt, DRIFT } from './track.js';
+import { TrackRacer, TRACK_W, turnRate, gripAt } from './track.js';
 import { Ship } from './ship.js';
 import { clamp, damp, mulberry32, smoothstep } from './noise.js';
 
@@ -124,8 +124,7 @@ class Driver {
   // tunables (searched by simulating laps: a lone ship's lap time and wall touches, then whole races)
   static tune = { lead: 0, tauE: 0.6, tauTh: 0.18, tauPsi: 0.2, ffLag: 0.3, airOn: 1.0, airOff: 0.8, lineM: 3, A: 1.8,
     brakeD: 110, boostRoom: 2.0, boostHi: 0.35, boostLo: 0.04, boostVmax: 400, wallEdge: 2.0, horizon: 0.45, aimRate: 5,
-    airCorr: 0.7, airMinOn: 0.12, airMinOff: 0.08, driftOn: 9, driftOff: 0.8, driftLong: 1.1 };
-  // (driftOn 9: the rivals never drift - through these circuits' bends their slides cost time and wall knocks)
+    airCorr: 0.7, airMinOn: 0.12, airMinOff: 0.08 };
 
   constructor(entry, race, rnd, slot) {
     this.e = entry;
@@ -142,7 +141,7 @@ class Driver {
   // a new race: no pass, defence, burst or pad choice carried over
   reset() {
     Object.assign(this, { passSide: 0, passT: 0, passWho: null, defT: 0, defCool: 0, defX: null, airOn: 0, airHold: 0, boostOn: false,
-      boostT: 0, burstT: 0, knockT: 0, offS: 0, odo: 0, gridX: this.e.racer.x, drifting: 0 });
+      boostT: 0, burstT: 0, knockT: 0, offS: 0, odo: 0, gridX: this.e.racer.x });
     this.padPick.clear();
   }
 
@@ -268,7 +267,7 @@ class Driver {
     // velocity follows the nose at the grip's rate (a heading that turns it there in ~tauTh, plus the slip the bend
     // needs), the nose follows the steering at the turn rate (in ~tauPsi, slower than the 0.12 s the stick takes to
     // answer); the bend ahead is fed forward. Gains fixed in steer units over-steered slowly and under-damped fast.
-    const tRate = turnRate(v), g = gripAt(v) * (this.drifting ? DRIFT.grip : 1), slope = plan.slope[iA];
+    const tRate = turnRate(v), g = gripAt(v), slope = plan.slope[iA];
     const slip = clamp((v * cFF) / g, -0.3, 0.3), th = Math.atan2(r.vx, v);
     const thD = Math.atan(slope) - clamp((r.x - xT) / (v * T.tauE), -0.3, 0.3);
     let psiDes = clamp(th + (thD - th) / (g * T.tauTh) + slip, -0.45, 0.45);
@@ -280,10 +279,10 @@ class Driver {
     if (jump) psiDes = clamp(-r.vx / v - r.x * 0.004, -0.06, 0.06);          // nose dead straight over a cut
     const ff = (v * cFF) / tRate;
     let steer = ff + (psiDes - r.psi) / (tRate * T.tauPsi);
+    const need = Math.max(Math.abs(ff), Math.abs(steer) - T.airCorr), sgn = Math.sign(Math.abs(ff) > 0.5 ? ff : steer);
     // airbrakes: for a bend that asks more than the hull alone turns (they add 90 % rate and 0.8 of a turn, and drag)
     // - set by the bend ahead, not by every correction (switched on and off each step they kicked the nose about),
     // held at least 0.12 s and rested 0.08 s (flicked for a step or two they twitched the hull)
-    const need = Math.max(Math.abs(ff), Math.abs(steer) - T.airCorr), sgn = Math.sign(Math.abs(ff) > 0.5 ? ff : steer);
     let air1 = this.airOn;
     if (this.airOn ? need < T.airOff : need > T.airOn) air1 = this.airOn ? 0 : sgn;
     else if (this.airOn && sgn !== this.airOn && need > T.airOn) air1 = sgn;
@@ -292,27 +291,10 @@ class Driver {
     if (esc > 0.6) air1 = -Math.sign(xp);
     if (jump || loop || air) air1 = 0;
     if (air1 !== this.airOn) { this.airHold = air1 ? T.airMinOn : T.airMinOff; this.airOn = air1; }
-    // a drift instead, for a bend that asks most of what the airbrakes give (they cost far more speed): brake and
-    // throttle held, the stick set for the yaw the cascade wants (the drift turns at side x (0.55 + 0.45 k) x 2.3 x the
-    // turn rate), out of it as the bend eases - with the charge's kick
-    const canDrift = TrackRacer.drifting && !jump && !loop && !air && v > DRIFT.v + 20 && esc < 0.5;
-    if (this.drifting && (!canDrift || need < T.driftOff || Math.sign(ff) === -this.drifting)) this.drifting = 0;
-    else if (!this.drifting && canDrift && Math.abs(ff) > T.driftOn) {
-      // only into a bend long enough to charge the slide (a short one it takes on the airbrakes)
-      let long = true;
-      for (let d = 15; d < v * T.driftLong; d += 15) if (Math.abs(plan.c[at(d)]) * v / tRate < T.driftOn * 0.7 || Math.sign(plan.c[at(d)]) !== Math.sign(ff)) { long = false; break; }
-      if (long) this.drifting = Math.sign(ff);
-    }
-    if (this.drifting) {
-      this.airOn = 0;
-      this.inp.yaw = this.drifting * clamp((steer * this.drifting / DRIFT.rate - 0.55) / 0.45, -1, 1);
-      this.inp.airL = this.inp.airR = 0;
-    } else {
-      if (this.airOn) steer = steer / 1.9 - 0.8 * this.airOn;
-      this.inp.yaw = clamp(steer, -1, 1);
-      this.inp.airL = this.airOn < 0 ? 1 : 0;
-      this.inp.airR = this.airOn > 0 ? 1 : 0;
-    }
+    if (this.airOn) steer = steer / 1.9 - 0.8 * this.airOn;
+    this.inp.yaw = clamp(steer, -1, 1);
+    this.inp.airL = this.airOn < 0 ? 1 : 0;
+    this.inp.airR = this.airOn > 0 ? 1 : 0;
     // speed: the line's limit just ahead (braking already folded in), traffic; flat out over a cut
     let vT = Infinity;
     for (let d = 0; d <= v * 0.3; d += 8) vT = Math.min(vT, plan.vlim[at(d)]);
@@ -322,7 +304,7 @@ class Driver {
     if (jump) vF = Math.max(vF, r.vs + 50);
     this.inp.throttleAxis = r.vs < vF ? 1 : clamp(1 - (r.vs - vF) * 0.15, 0, 1);
     this.inp.throttleDown = r.vs > vF + 8 ? 1 : 0;
-    if (this.drifting) { this.inp.throttleAxis = 1; this.inp.throttleDown = 1; }
+    this.inp.drift = 0;                                  // (the drift is the player's: rivals never start one)
     // boost: where the lap ahead has room for the speed (never into a bend it would brake for), the tank never left
     // full; at once to finish a pass or to get back up to speed after a knock
     const E = r.boostEnergy;
@@ -412,6 +394,7 @@ export class Race {
     for (const e of this.entries) {
       const p = this.slot(e.slot);
       e.racer.place(s0 - p.back, e.ship.engineOn);
+      e.racer.boostEnergy = 1;                      // (a drift's top-up past full doesn't carry onto the grid)
       e.racer.x = p.x;
       e.racer.locked = true;
       e.racer.pose(0);
@@ -429,8 +412,10 @@ export class Race {
   onRacerEvent(e, ev) {
     if (ev.type === 'pad') this.events.push({ type: 'padfx', i: ev.i, at: ev.at, player: e.player });
     if (ev.type === 'fall') { this.events.push({ type: 'fall', at: ev.at, player: e.player }); if (this.stats) this.stats.falls++; }
-    if (ev.type === 'drift' || ev.type === 'flip') {
-      this.events.push({ type: ev.type, tier: ev.tier, at: ev.at, s: e.racer.s, player: e.player });
+    if (ev.type === 'drift') e.ship.boostKick = Math.max(e.ship.boostKick || 0, 0.4 + 0.2 * ev.tier);
+    if (ev.type === 'driftStart') e.ship.driftHop = 1;
+    if (ev.type === 'drift' || ev.type === 'flip' || ev.type === 'driftTier' || ev.type === 'driftChain') {
+      this.events.push({ type: ev.type, tier: ev.tier, at: ev.at, s: e.racer.s, player: e.player, entry: e });
       if (this.stats && ev.type === 'drift') this.stats.drifts = (this.stats.drifts || 0) + 1;
     }
     if (ev.type === 'scrape' && ev.wall) {
@@ -646,7 +631,8 @@ export class Race {
     for (const e of this.entries) {
       const r = e.racer;
       if (camera.position.distanceToSquared(r.pos) > 220 * 220) continue;
-      if (r.drift) fx.drift(e.ship, r, this.track.frame(r.s), dt);
+      if (r.drift) fx.drift(e.ship, r, this.track.frame(r.s), dt, e.player);
+      else if (r.skids) r.skids.on = false;
       if (!(r.grind > 0)) continue;
       const f = this.track.frame(r.s);
       fx.grind(f.P.clone().addScaledVector(f.R, r.grindSide * TRACK_W / 2).addScaledVector(f.U, 1.0).addScaledVector(f.T, -2), r.vel, r.grindSide, dt, f);

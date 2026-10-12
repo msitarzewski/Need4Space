@@ -390,8 +390,9 @@ export function leafMaterial() {
   return mat;
 }
 
-// bark: vertical fissures (palms: rings), lighter grey on the old giants; moss up the shady side
-export function barkMaterial() {
+// bark: vertical fissures (palms: rings), lighter grey on the old giants; moss up the shady side (lamps: lit by the
+// ships' lights too - the roots in the cave)
+export function barkMaterial({ lamps = false } = {}) {
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0 });
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, FLORA_U);
@@ -418,9 +419,9 @@ float bN(vec2 p) { vec2 i = floor(p), u = fract(p); u = u * u * (3.0 - 2.0 * u);
   float mossB = smoothstep(0.45, 0.7, bN(vBW.xz * 0.3 + vBW.y * 0.2) + 0.25 * (1.0 - normalize(vNormal).y));
   vec3 barkC = diffuseColor.rgb * vec3(0.24, 0.21, 0.17) * barkV;
   diffuseColor.rgb = mix(barkC, vec3(0.05, 0.085, 0.02), mossB * 0.55);`);
-    sh.fragmentShader = sunOnly(sh.fragmentShader);
+    if (!lamps) sh.fragmentShader = sunOnly(sh.fragmentShader);
   };
-  mat.customProgramCacheKey = () => 'forest-bark';
+  mat.customProgramCacheKey = () => (lamps ? 'forest-bark-lamps' : 'forest-bark');
   return mat;
 }
 

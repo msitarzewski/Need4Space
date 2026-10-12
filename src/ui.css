@@ -147,6 +147,10 @@ body.lite .hp { background: linear-gradient(115deg, rgba(9, 13, 19, 0.86), rgba(
 .bar { height: 0.5rem; background: rgba(255, 255, 255, 0.09); overflow: hidden; transform: skewX(-20deg); }
 .bar i { display: block; height: 100%; transform-origin: left; transform: scaleX(0); background: var(--text); }
 .bar.boost i { background: linear-gradient(90deg, #2c78d8, var(--boost)); }
+/* over full (a drift's top-up): gold filling over the full bar, bleeding back */
+.bar.boost { position: relative; }
+.bar.boost i.over { position: absolute; left: 0; top: 0; width: 100%; background: linear-gradient(90deg, #ffb428, #ffe79a); box-shadow: 0 0 0.7rem #ffb428; }
+.bar.boost.pulse { animation: driftPulse 0.35s ease-out; }
 #hud-speed.boost .bar.boost i { background: #c8e6ff; box-shadow: 0 0 0.8rem var(--boost); }
 #hud-speed.low .bar.boost { animation: low 0.7s steps(2) infinite; }
 .bar.thr { height: 0.3rem; }
@@ -157,6 +161,12 @@ body.lite .hp { background: linear-gradient(115deg, rgba(9, 13, 19, 0.86), rgba(
 .bar.drift i[data-t="1"] { background: #3d8cff; box-shadow: 0 0 0.6rem #3d8cff; }
 .bar.drift i[data-t="2"] { background: #ff8c22; box-shadow: 0 0 0.6rem #ff8c22; }
 .bar.drift i[data-t="3"] { background: #d25cff; box-shadow: 0 0 0.8rem #d25cff; }
+.bar.drift.pulse { animation: driftPulse 0.35s ease-out; }
+/* the chain: a pip lit for each step */
+.chain { display: inline-flex; gap: 0.18rem; margin-left: 0.35rem; vertical-align: middle; }
+.chain i { width: 0.4rem; height: 0.4rem; transform: rotate(45deg); background: rgba(255, 255, 255, 0.14); transition: background 0.15s, box-shadow 0.15s; }
+.chain[data-c="1"] i:nth-child(-n+1), .chain[data-c="2"] i:nth-child(-n+2), .chain[data-c="3"] i:nth-child(-n+3) { background: #ffd27a; box-shadow: 0 0 0.45rem #ffb840; }
+@keyframes driftPulse { 0% { transform: skewX(-20deg) scaleY(2.6); filter: brightness(2.2); } 100% { transform: skewX(-20deg) scaleY(1); filter: none; } }
 .bar.thr i { background: rgba(238, 242, 246, 0.72); }
 .minor { display: flex; gap: 1.3rem; margin-top: 0.65rem; font: 700 0.74rem var(--ui); letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); }
 .minor b { color: var(--text); font-weight: 700; letter-spacing: 0.05em; }

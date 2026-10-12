@@ -1131,9 +1131,11 @@ export class Ship {
     const steer = c.steer || 0, air = c.airbrake || 0, P = this.power;
     const flying = clamp(c.air || 0, 0, 1);             // 0 on the deck .. 1 in the air (TrackRacer.airT)
     const lat = clamp((c.lat || 0) / 45, -1, 1), acc = clamp((c.accel || 0) / 40, -1, 1);
-    // drifting: it leans harder into the slide
-    spring('lean', -(steer * 0.2 + lat * 0.12 + air * 0.1 + (c.drift || 0) * 0.1) * P, 34, 0.55);
-    spring('yaw', -(steer * 0.06 + air * 0.04) * P, 28, 0.6);
+    // drifting: a small hop into it; the slide's angle is the physics' own, the lean no more than a turn's
+    if (this.driftHop) { a.liftV += 1.6; a.pitchV += 0.25; this.driftHop = 0; }
+    const dr = Math.abs(c.drift || 0);
+    spring('lean', -((steer * 0.2 + lat * 0.12) * (1 - 0.4 * dr) + air * 0.1) * P, 34, 0.55);
+    spring('yaw', -(steer * 0.06 * (1 - dr) + air * 0.04) * P, 28, 0.6);
     spring('sway', -lat * 0.35 * P, 20, 0.6);
     // braking dips the nose hard; a launch (throttle opening, strong acceleration) squats the tail; boost lifts the nose;
     // the hover's climb rate tips it on the deck (in the air the racer's attitude already follows the flight path)
