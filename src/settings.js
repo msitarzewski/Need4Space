@@ -31,6 +31,11 @@ const ROWS = [
 // the headings the rows fall under (in the menu's Settings screen)
 const GROUPS = { ai: 'Race', music: 'Audio', touch: 'Controls', tonemap: 'Picture', ao: 'Effects', laptop: 'Performance' };
 
+// the saved settings as they are (main.js reads Laptop mode before the ship loads)
+export function savedSettings() {
+  try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; }
+}
+
 export class Settings {
   // integrated: the GPU looks built-in (quality.js) - a first visit starts in Laptop mode
   constructor(apply, integrated = false) {

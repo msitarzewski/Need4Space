@@ -108,7 +108,8 @@ let maps = null;
 export function rockMaps(renderer) {
   if (maps) return maps;
   const bake = (mode) => {
-    const rt = new THREE.WebGLRenderTarget(2048, 2048, { depthBuffer: false, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter,
+    const S = Q.tier === 'low' ? 1024 : 2048;                     // (a phone: 1024)
+    const rt = new THREE.WebGLRenderTarget(S, S, { depthBuffer: false, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter,
       magFilter: THREE.LinearFilter, wrapS: THREE.RepeatWrapping, wrapT: THREE.RepeatWrapping, colorSpace: THREE.NoColorSpace });
     rt.texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
     const quad = new FullScreenQuad(new THREE.ShaderMaterial({ uniforms: { mode: { value: mode } },
@@ -117,7 +118,7 @@ export function rockMaps(renderer) {
     for (let k = 0; k < 4; k++) {
       bakeLater(k ? [] : [quadJob(quad)], () => {
         const prev = renderer.getRenderTarget();
-        rt.scissor.set(0, k * 512, 2048, 512); rt.scissorTest = true;
+        rt.scissor.set(0, k * S / 4, S, S / 4); rt.scissorTest = true;
         rt.texture.generateMipmaps = k === 3;
         renderer.setRenderTarget(rt); quad.render(renderer);
         rt.scissorTest = false;
@@ -134,7 +135,7 @@ export function rockMaps(renderer) {
 
 // The sun's shadow of the given (static) meshes, rendered once into a depth map from the sun - an orthographic box
 // round them all. Materials made with { shadow: true } read it.
-export function bakeRockShadow(renderer, meshes, sunDir, res = 4096) {
+export function bakeRockShadow(renderer, meshes, sunDir, res = Q.tier === 'low' ? 2048 : 4096) {
   const box = new THREE.Box3();
   for (const m of meshes) box.expandByObject(m);
   const sph = box.getBoundingSphere(new THREE.Sphere()), R = sph.radius;

@@ -3,6 +3,7 @@
 // (static: no cost per frame beyond a lookup); the sun's surface boils live (granulation, spots) inside a corona.
 import * as THREE from 'three';
 import { bakeLater, quadJob } from './bake.js';
+import { Q } from './quality.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 const NOISE = /* glsl */`
@@ -179,7 +180,8 @@ const SEAM = /* glsl */`
 `;
 
 export function giantMaterial(renderer, shared) {
-  shared.cloudTex = { value: halve(renderer, bake(renderer, GIANT, 8192, 4096, true), true) };
+  const cw = Q.tier === 'low' ? 4096 : 8192;                       // (a phone: half - 170 MB of target at 8K)
+  shared.cloudTex = { value: halve(renderer, bake(renderer, GIANT, cw, cw / 2, true), true) };
   return new THREE.ShaderMaterial({
     uniforms: shared,
     vertexShader: /* glsl */`varying vec3 vN; varying vec3 vW;

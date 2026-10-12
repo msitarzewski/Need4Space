@@ -19,14 +19,14 @@ import { FX } from './fx.js';
 import { HUD } from './hud.js';
 import { GameAudio } from './audio.js';
 import { agxPass, speedBlurPass, LayeredRenderPass, DeckSSRPass, StreakPass, BloomPass, ResamplePass } from './post.js';
-import { Settings } from './settings.js';
+import { Settings, savedSettings } from './settings.js';
 import { Race, Driver } from './race.js';
 import { Menu } from './menu.js';
 import { compileAll, deferBakes, runBakes, gpuIdle } from './bake.js';
-import { Q, setLite, integratedGPU, liteFiltering } from './quality.js';
+import { Q, setLite, integratedGPU, liteFiltering, memoryTier } from './quality.js';
 
 const MAP = new URLSearchParams(location.search).get('map') === 'meadow' ? 'meadow' : 'space';
-const SHIP_URL = 'assets/racer_web.glb';
+const SHIP_URL = { high: 'assets/racer_web.glb', mid: 'assets/racer_web_4k.glb', low: 'assets/racer_web_2k.glb' };   // (by memory tier)
 const LUTS = ['assets/agx_punchy_lut65.bin', 'assets/agx_mhc_lut65.bin'];   // Blender's AgX looks: Punchy, Medium High Contrast
 const status = (t) => (document.getElementById('loadtext').textContent = t);
 // let the loading text paint between steps (a timer too: a hidden tab never gets an animation frame)
@@ -46,6 +46,13 @@ async function boot() {
     document.getElementById('loading').classList.add('error');
   });
   const agxLoad = agxPass(LUTS);                           // (the colour transform's tables load meanwhile)
+  const gpuName = (() => {
+    const gl = renderer.getContext(), e = gl.getExtension('WEBGL_debug_renderer_info');
+    return String(e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+  })();
+  // what the device can hold: the ship's maps and the bakes' sizes (quality.js)
+  Q.tier = memoryTier(renderer, gpuName, isTouch(), !!savedSettings().laptop);
+  console.info(`GPU: ${gpuName} - memory tier ${Q.tier}${integratedGPU(gpuName) ? ' (integrated: Laptop mode on a first visit)' : ''}`);
   agxLoad.catch(() => {});
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setSize(innerWidth, innerHeight);
@@ -65,7 +72,7 @@ async function boot() {
   const world = MAP === 'space' ? new SpaceWorld(scene, renderer, camera) : new MeadowWorld(scene, renderer);
   deferBakes(false);
   let baking = true, got = '';
-  const shipLoad = loadShip(SHIP_URL, (e) => {
+  const shipLoad = loadShip(SHIP_URL[Q.tier], (e) => {
     if (!e.total) return;
     got = `  ${(e.loaded / 1e6).toFixed(1)} / ${(e.total / 1e6).toFixed(1)} MB`;
     if (!baking) status('Loading the Feather S1' + got);
@@ -228,11 +235,6 @@ async function boot() {
   addEventListener('resize', resize);
   const fpsEl = document.getElementById('fps');
   const sunLights = world.sun ? [world.sun, world.sunMid, world.sunFar] : [world.sunL.sun];
-  const gpuName = (() => {
-    const gl = renderer.getContext(), e = gl.getExtension('WEBGL_debug_renderer_info');
-    return String(e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
-  })();
-  console.info(`GPU: ${gpuName}${integratedGPU(gpuName) ? ' (integrated: Laptop mode on a first visit)' : ''}`);
   const settings = new Settings((v) => {
     agx.enabled = v.tonemap !== 'aces';
     agx.setLook(v.tonemap === 'agx' ? 1 : 0);
@@ -653,6 +655,9 @@ async function boot() {
 
 boot().catch((e) => {
   console.error(e);
-  status(`Failed to start: ${e.message || e}`);
+  const gl = document.getElementById('view').getContext('webgl2');
+  if (gl?.isContextLost?.() || /WebGLShader|WebGLProgram|context/i.test(String(e.message)))
+    status('The graphics ran out of memory loading the game - close other tabs and reload (Settings > Laptop mode helps)');
+  else status(`Failed to start: ${e.message || e}`);
   document.getElementById('loading').classList.add('error');
 });

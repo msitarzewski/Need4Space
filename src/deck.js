@@ -5,6 +5,7 @@
 // like a lot of straight lines, kinda looks off".)
 import * as THREE from 'three';
 import { bakeLater, quadJob } from './bake.js';
+import { Q } from './quality.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 const W = 44, L = 40;                 // the deck texture's footprint (m): TRACK_W across, 40 m along
@@ -192,7 +193,8 @@ function bake(renderer, body, metres, res, mode, srgb) {
   return rt.texture;
 }
 
-export function bakeDeckMaps(renderer, res = 4096, detailRes = 2048) {
+// (a phone: half each way - the five maps were ~230 MB with their mips)
+export function bakeDeckMaps(renderer, res = Q.tier === 'low' ? 2048 : 4096, detailRes = Q.tier === 'low' ? 1024 : 2048) {
   return {
     map: bake(renderer, MACRO, [W, L], res, 0, true),
     normal: bake(renderer, MACRO, [W, L], res, 1, false),

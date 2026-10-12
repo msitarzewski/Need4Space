@@ -2,6 +2,7 @@
 // camera (huge distances, its own depth range), then the circuit. One hard sun, a faint warm planet-shine, starlight.
 import * as THREE from 'three';
 import { bakeLater } from './bake.js';
+import { Q } from './quality.js';
 import { mulberry32 } from './noise.js';
 import { Track, TRACK_W, CAVE_R, CAVE_MOUTH } from './track.js';
 import { setCave } from './look.js';
@@ -126,7 +127,7 @@ function sunGroup() {
 
 // The nebula never changes: its four six-octave noise fields are drawn once into a cube map at load, and the sky
 // samples that (the fields cost ~0.4 ms of every 1440p frame). 1024 a face holds its finest dust lanes.
-function bakedNebula(renderer, nebula, size = 1024) {
+function bakedNebula(renderer, nebula, size = Q.tier === 'low' ? 512 : 1024) {
   const rt = new THREE.WebGLCubeRenderTarget(size, { type: THREE.HalfFloatType, generateMipmaps: true,
     minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
   // (drawn from a stand-in with the live material: the nebula itself shows the cube from now on)

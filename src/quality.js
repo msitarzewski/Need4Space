@@ -5,7 +5,18 @@
 // ships without clear coat - fewer lights, 4x texture filtering, no blur behind the HUD (settings.js sets the rest:
 // 100 % scale, SMAA only, effects off).
 // Shaders read Q.lite as they compile and key their programs by it.
-export const Q = { lite: false };
+export const Q = { lite: false, tier: 'high' };
+
+// How much the device can hold, decided once before anything loads: 'low' a phone or tablet (or a browser reporting
+// <= 4 GB), 'mid' an integrated GPU or Laptop mode, else 'high'. It picks the ship's maps (8K / 4K / 2K: ~1 GB, 256 MB,
+// 64 MB on the GPU) and, 'low', the size of what is baked at load (clouds, deck, rocks, the meteorite's shadow, the
+// nebula). A phone lost its WebGL context loading everything at full size.
+export function memoryTier(renderer, gpuName, touch, laptop) {
+  const max = renderer.capabilities.maxTextureSize, mem = navigator.deviceMemory;
+  if (touch || (mem && mem <= 4) || max < 4096) return 'low';
+  if (integratedGPU(gpuName) || laptop || max < 8192) return 'mid';
+  return 'high';
+}
 
 // switch it: every material of the roots recompiled where its program depends on it (the rest come from the cache)
 export function setLite(on, roots) {
