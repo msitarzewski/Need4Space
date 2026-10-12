@@ -32,10 +32,13 @@ const HOLD = { throttleUp: 0, throttleDown: 0, throttleAxis: 0, boost: 0, yaw: 0
 export const AI_LEVELS = {
   // "add an easy setting ... and the enemies are also slower": a tenth less engine than Normal, careful in the bends,
   // pads and boost left to chance, wide of the line, never blocking, easing off more when well ahead of the player
-  easy: { pace: [0.85, 0.004, 0.02], corner: 0.9, pads: 0.3, boost: 'random', lane: 10, wander: 7, band: [0.03, 0.08], defend: 0, aggression: 0.35 },
-  normal: { pace: [0.955, 0.004, 0.02], corner: 0.95, pads: 0.45, boost: 'random', lane: 8, wander: 5, band: [0.04, 0.04], defend: 0, aggression: 0.5 },
-  hard: { pace: [0.994, 0.0025, 0.008], corner: 1, pads: 1, boost: 'plan', lane: 3, wander: 0, band: [0.05, 0.015], defend: 0.6, aggression: 0.8 },
-  brutal: { pace: [1.012, 0.0015, 0.004], corner: 1, pads: 1, boost: 'plan', lane: 2, wander: 0, band: [0.08, 0], defend: 1, aggression: 1 },
+  easy: { pace: [0.85, 0.004, 0.02], corner: 0.9, pads: 0.3, boost: 'random', lane: 10, wander: 7, band: [0.03, 0.08], defend: 0, aggression: 0.35, speed: 0.25 },
+  // "make normal, hard and brutal a bit easier, like 30 % easier overall": each one's lap a third of the way back
+  // toward Easy's (median laps on the ice: Normal 47.0 -> 48.2 s, Hard 44.9 -> 46.4, Brutal 44.6 -> 46.2, Easy 50.2),
+  // its aggression and defence 30 % of the way too. speed: the menu's bar for their pace (the laps, not the engine)
+  normal: { pace: [0.9235, 0.004, 0.02], corner: 0.95, pads: 0.45, boost: 'random', lane: 8, wander: 5, band: [0.04, 0.04], defend: 0, aggression: 0.45, speed: 0.5 },
+  hard: { pace: [0.89, 0.0025, 0.008], corner: 1, pads: 1, boost: 'plan', lane: 3, wander: 0, band: [0.05, 0.015], defend: 0.42, aggression: 0.67, speed: 0.78 },
+  brutal: { pace: [0.905, 0.0015, 0.004], corner: 1, pads: 1, boost: 'plan', lane: 2, wander: 0, band: [0.08, 0], defend: 0.7, aggression: 0.8, speed: 0.88 },
 };
 
 // The rivals' plan of the lap, made once per track. In this physics a ship has to yaw at v x (the track's curvature +

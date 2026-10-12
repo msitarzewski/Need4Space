@@ -20,14 +20,14 @@ const LEVELS = [
     desc: 'Slower rivals that give you room. Wall knocks cost you a fifth of the speed, and drifts pay out extra boost.' },
   { id: 'normal', name: 'Normal', tag: 'A fair fight',
     desc: 'Rivals miss about half the boost pads, fire their boost at random and drift off the line. They never block you.' },
-  { id: 'hard', name: 'Hard', tag: 'A percent off perfect',
-    desc: 'Every pad, boost spent where it pays, the fast line: within about a percent of a flawless lap. They cover your way past.' },
+  { id: 'hard', name: 'Hard', tag: 'Sharp racecraft',
+    desc: 'Every pad, boost spent where it pays, the fast line. They cover your way past.' },
   { id: 'brutal', name: 'Brutal', tag: 'Flawless',
-    desc: 'Flawless laps: the ideal line, every pad, perfect boost. They pass close, give way late and block you on every straight.' },
+    desc: 'The ideal line, every pad, perfect boost. They pass close, give way late and block you on every straight.' },
 ];
 const IDS = LEVELS.map((l) => l.id);
 const stats = (L) => [
-  ['Rival pace', clamp01((L.pace[0] - 0.93) / 0.09)],
+  ['Rival pace', L.speed],
   ['Aggression', L.aggression],
   ['Defence', L.defend],
   ['Pad use', L.pads],
