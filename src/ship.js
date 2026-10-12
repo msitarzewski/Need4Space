@@ -181,9 +181,9 @@ class Trail {
   }
 
   update(p, strength, cam) {
-    this.pts.unshift({ p: p.clone(), s: strength });
-    if (this.pts.length > this.n) this.pts.pop();
-    const side = new THREE.Vector3(), tan = new THREE.Vector3(), to = new THREE.Vector3();
+    const old = this.pts.length >= this.n ? this.pts.pop() : null;          // the oldest point, reused
+    this.pts.unshift(old ? (old.p.copy(p), old.s = strength, old) : { p: p.clone(), s: strength });
+    const side = this._side || (this._side = new THREE.Vector3()), tan = this._tan || (this._tan = new THREE.Vector3()), to = this._to || (this._to = new THREE.Vector3());
     for (let i = 0; i < this.n; i++) {
       const q = this.pts[Math.min(i, this.pts.length - 1)];
       const nb = this.pts[Math.min(i + 1, this.pts.length - 1)];
@@ -246,9 +246,11 @@ class EngineTrail {
   update(p, t, strength, width, life, cam) {
     const head = this.pts[0];
     if (head && head.p.distanceToSquared(p) > 900) this.pts.length = 0;           // a respawn: no streak across the map
-    if (!this.pts.length || this.pts[0].p.distanceToSquared(this.pts[1] ? this.pts[1].p : p) > 2.0) this.pts.unshift({ p: p.clone(), t });
-    else { this.pts[0].p.copy(p); this.pts[0].t = t; }
-    while (this.pts.length > this.n || (this.pts.length > 2 && t - this.pts[this.pts.length - 1].t > life)) this.pts.pop();
+    if (!this.pts.length || this.pts[0].p.distanceToSquared(this.pts[1] ? this.pts[1].p : p) > 2.0) {
+      const q = (this.spare || (this.spare = [])).pop();
+      this.pts.unshift(q ? (q.p.copy(p), q.t = t, q) : { p: p.clone(), t });
+    } else { this.pts[0].p.copy(p); this.pts[0].t = t; }
+    while (this.pts.length > this.n || (this.pts.length > 2 && t - this.pts[this.pts.length - 1].t > life)) this.spare.push(this.pts.pop());
     const { tan, to, sd } = this, m = this.pts.length;
     for (let i = 0; i < this.n; i++) {
       const q = this.pts[Math.min(i, m - 1)], nb = this.pts[Math.min(i + 1, m - 1)], pr = this.pts[Math.min(Math.max(i - 1, 0), m - 1)];
@@ -477,19 +479,21 @@ export class Ship {
       const key = o.isMesh && Object.keys(RINGS).find((k) => o.name.startsWith(k));
       if (!key) return;
       const [rc, w] = RINGS[key], m = o.material.clone(), eng = this.engineColor.clone(), hot = eng.clone().lerp(white, 0.8);
+      // (the ring's size and the team's colours as uniforms: one program for every ring of every ship)
+      const U = { ringRW: { value: new THREE.Vector2(rc, w) }, ringEng: { value: eng }, ringHot: { value: hot } };
       m.onBeforeCompile = (sh) => {
+        Object.assign(sh.uniforms, U);
         sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vRingP;')
           .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vRingP = position;');
-        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vRingP;')
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vRingP;\nuniform vec2 ringRW;\nuniform vec3 ringEng, ringHot;')
           .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
   {
-    float uu = (length(vRingP.xy) - ${rc.toFixed(3)}) / ${w.toFixed(3)}, core = exp(-uu * uu);
+    float uu = (length(vRingP.xy) - ringRW.x) / ringRW.y, core = exp(-uu * uu);
     float gain = dot(totalEmissiveRadiance, vec3(0.2126, 0.7152, 0.0722)) / max(dot(emissive, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
-    totalEmissiveRadiance = mix(vec3(${eng.r.toFixed(3)}, ${eng.g.toFixed(3)}, ${eng.b.toFixed(3)}), vec3(${hot.r.toFixed(3)}, ${hot.g.toFixed(3)}, ${hot.b.toFixed(3)}), core * core)
-      * (0.35 + 6.0 * core) * gain * 0.9;
+    totalEmissiveRadiance = mix(ringEng, ringHot, core * core) * (0.35 + 6.0 * core) * gain * 0.9;
   }`);
       };
-      m.customProgramCacheKey = () => `ring-${rc}-${eng.getHexString()}`;
+      m.customProgramCacheKey = () => 'feather-ring';
       o.material = m;
       this.ringMats.push(m);
     });
@@ -813,7 +817,7 @@ export class Ship {
     for (const l of this.exhaustLights) l.intensity = 30 * this.spin * (0.25 + thrust);
     this.animate(dt, ctrl);
     // light trails off every nozzle: on with speed and thrust, longer and brighter on boost
-    if (!this.engineTrails) this.engineTrails = this.plumes.map(() => new EngineTrail(scene, this.engineColor));
+    this.ensureTrails(scene);
     const tr = this.spin * smoothstep(60, 220, ctrl.speed) * (0.25 + 0.3 * clamp(thr, 0, 1) + 0.6 * clamp(boost + kick, 0, 1)) * (1 - 0.8 * brake);
     const nz = this._nz || (this._nz = new THREE.Vector3());
     this.plumes.forEach((pl, k) => {
@@ -821,10 +825,10 @@ export class Ship {
       this.engineTrails[k].update(nz, this.t, tr, pl.r * (0.2 + 0.12 * boost), 0.07 + 0.12 * clamp(boost + kick, 0, 1), camera);
     });
     // vortex trails from both tips when fast and pulling
-    if (!this.trails) this.trails = [new Trail(scene), new Trail(scene)];
     const s = smoothstep(80, 150, ctrl.speed) * (0.2 + 0.8 * smoothstep(0.15, 0.9, ctrl.turn));
-    this.trails[0].update(this.tipR.clone().applyMatrix4(this.root.matrixWorld), s, camera);
-    this.trails[1].update(this.tipL.clone().applyMatrix4(this.root.matrixWorld), s, camera);
+    const tip = this._tip || (this._tip = new THREE.Vector3());
+    this.trails[0].update(tip.copy(this.tipR).applyMatrix4(this.root.matrixWorld), s, camera);
+    this.trails[1].update(tip.copy(this.tipL).applyMatrix4(this.root.matrixWorld), s, camera);
   }
 
   // The animation layer on the visual group - never fed back to the physics:
@@ -916,6 +920,11 @@ export class Ship {
     return [...this.plumes, ...(this.retros || [])].flatMap((p) => [p.outer, p.inner, p.halo])
       .concat(this.brakeLights || [], this.shield ? [this.shield] : [], (this.trails || []).map((t) => t.mesh),
         (this.engineTrails || []).map((t) => t.mesh));
+  }
+
+  ensureTrails(scene) {
+    if (!this.engineTrails) this.engineTrails = this.plumes.map(() => new EngineTrail(scene, this.engineColor));
+    if (!this.trails) this.trails = [new Trail(scene), new Trail(scene)];
   }
 
   clearTrails() { for (const t of [...(this.trails || []), ...(this.engineTrails || [])]) t.clear(); }

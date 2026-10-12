@@ -229,6 +229,27 @@ async function boot() {
 
   const lap = { started: false, time: 0, last: Infinity, best: Infinity, lap: 1, idx: START, progress: 0, s: 0 };
   let autoChase = false, wasCrashed = false, t = 0;
+  // Warm-up behind the loading screen: everything drawn once - hidden things too, every ship at both detail levels,
+  // the trails - so every shader is compiled and every buffer and texture is on the GPU before the race. The first lap
+  // stuttered: ~20 shaders compiled and the ships' far detail levels uploaded the first time each came into view.
+  status('Warming up the shaders');
+  await nextFrame();
+  {
+    const keep = [];
+    for (const e of race ? race.entries : [{ ship }]) e.ship.ensureTrails(scene);
+    scene.traverse((o) => { keep.push([o, o.visible, o.frustumCulled]); o.visible = true; o.frustumCulled = false; });
+    const ships = race ? race.entries.map((e) => e.ship) : [ship];
+    const lods = ships.flatMap((s) => (s.lodMeshes || []).map((l) => [l.mesh, l.mesh.geometry, l.levels]));
+    const t0 = performance.now();
+    for (const level of [0, 1]) {
+      for (const [m, , levels] of lods) if (levels[level]) m.geometry = levels[level];
+      scene.updateMatrixWorld(); composer.render();
+    }
+    for (const [m, g] of lods) m.geometry = g;
+    for (const [o, v, f] of keep) { o.visible = v; o.frustumCulled = f; }
+    scene.updateMatrixWorld(); composer.render();
+    console.info(`warm-up: ${renderer.info.programs.length} programs, ${Math.round(performance.now() - t0)} ms`);
+  }
   document.getElementById('loading').classList.add('done');
 
   const FIXED = 1 / 120;

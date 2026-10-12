@@ -74,21 +74,43 @@ const SONGS = [
 export const SONG_COUNT = SONGS.length;
 export const SONG_NAMES = SONGS.map((s) => s.name);
 
-function impulse(c, seconds, decay) {
-  const n = Math.floor(seconds * c.sampleRate), b = c.createBuffer(2, n, c.sampleRate), rnd = seeded(77);
+// the reverb's impulse and the noise, made once (an AudioBuffer plays in any context; making them for every segment held
+// the main thread ~25 ms each time)
+const shared = {};
+function impulse(sr, seconds = 2.2, decay = 0.6) {
+  if (shared.ir?.sampleRate === sr) return shared.ir;
+  const n = Math.floor(seconds * sr), b = new AudioBuffer({ numberOfChannels: 2, length: n, sampleRate: sr }), rnd = seeded(77);
   for (let ch = 0; ch < 2; ch++) {
     const d = b.getChannelData(ch);
     let y = 0;
     for (let i = 0; i < n; i++) {
       y = y * 0.55 + (rnd() * 2 - 1) * 0.45;                         // a darker tail
-      d[i] = y * Math.exp(-i / (c.sampleRate * decay)) * Math.min(1, i / (c.sampleRate * 0.008));
+      d[i] = y * Math.exp(-i / (sr * decay)) * Math.min(1, i / (sr * 0.008));
     }
   }
-  return b;
+  return (shared.ir = b);
 }
+function noiseBuffer(sr) {
+  if (shared.noise?.sampleRate === sr) return shared.noise;
+  const b = new AudioBuffer({ numberOfChannels: 1, length: sr * 2, sampleRate: sr }), d = b.getChannelData(0), rnd = seeded(1234);
+  for (let i = 0; i < d.length; i++) d[i] = rnd() * 2 - 1;
+  return (shared.noise = b);
+}
+
+// the graph building is shared out: one segment at a time, a bar at a time, the game's frames running in between
+let building = Promise.resolve();
+const breathe = () => new Promise((res) => setTimeout(res, 0));
 
 // song si's segment k (bars 8k .. 8k + 8) as its own buffer
 export async function renderSegment(si, k, sr = 48000) {
+  let done;
+  const turn = building;
+  building = new Promise((res) => (done = res));
+  await turn;
+  try { return await buildAndRender(si, k, sr, done); } finally { done(); }
+}
+
+async function buildAndRender(si, k, sr, built) {
   const S = SONGS[si], BEAT = 60 / S.bpm, S16 = BEAT / 4, BAR = BEAT * 4, SEG_DUR = SEG_BARS * BAR;
   const chordOf = (bar) => Math.floor(bar / 2) % 4;
   const segStart = k * SEG_DUR, w0 = Math.max(0, segStart - PRE), w1 = segStart + SEG_DUR;
@@ -96,8 +118,8 @@ export async function renderSegment(si, k, sr = 48000) {
   const c = new OfflineAudioContext(2, pre + len, sr);
   // only what starts inside the window, in its own time (seconds from the window's start)
   const at = (t) => (t >= w0 - 1e-6 && t < w1 ? t - w0 : null);
-  const noise = c.createBuffer(1, sr * 2, sr), nd = noise.getChannelData(0), rnd = seeded(1234);
-  for (let i = 0; i < nd.length; i++) nd[i] = rnd() * 2 - 1;
+  await breathe();
+  const noise = noiseBuffer(sr);
   const gain = (v, ...to) => { const g = c.createGain(); g.gain.value = v; for (const t of to) g.connect(t); return g; };
   const filter = (type, f, q = 0.7) => { const x = c.createBiquadFilter(); x.type = type; x.frequency.value = f; x.Q.value = q; return x; };
   const noiseAt = (t, dur) => { const s = c.createBufferSource(); s.buffer = noise; s.loop = true; s.start(t, hash(t + w0 + dur) * 1.5); s.stop(t + dur); return s; };
@@ -107,7 +129,9 @@ export async function renderSegment(si, k, sr = 48000) {
   comp.threshold.value = -14; comp.ratio.value = 3.5; comp.knee.value = 8; comp.attack.value = 0.006; comp.release.value = 0.14;
   comp.connect(c.destination);
   const out = gain(S.gain, comp);
-  const rev = c.createConvolver(); rev.buffer = impulse(c, 2.8, 0.6);
+  const ir = impulse(sr);
+  await breathe();
+  const rev = c.createConvolver(); rev.buffer = ir;
   rev.connect(gain(0.3, out));
   const dl = c.createDelay(2); dl.delayTime.value = S16 * 3;
   const dlf = filter('lowpass', 2600), fb = gain(0.36);
@@ -217,6 +241,7 @@ export async function renderSegment(si, k, sr = 48000) {
   const bassLen = (st) => { let n = 1; while (st + n < 16 && S.bass[st + n] === '-') n++; return n; };
   const bar0 = Math.max(0, Math.floor(w0 / BAR) - 1), bar1 = Math.min(BARS, Math.ceil(w1 / BAR));
   for (let bar = bar0; bar < bar1; bar++) {
+    await breathe();
     const T0 = bar * BAR, ci = chordOf(bar), chord = S.chords[ci], root = S.roots[ci];
     // build tension: the bass filter opens through the builds
     const build = bar >= 24 && bar < 32 ? (bar - 24) / 8 : bar >= 56 ? (bar - 56) / 8 : 0;
@@ -237,6 +262,7 @@ export async function renderSegment(si, k, sr = 48000) {
         arpNote(t, m, st % 4 === 0 ? 1 : 0.7, bar < 8 ? 600 * Math.pow(5.5, (bar - 4 + st / 16) / 4) : bar >= 32 ? 3600 : 3000);
       }
     }
+    await breathe();
     // pads: a chord every two bars, slow attack and release, darker in the groove, open in the breakdown
     const t0 = at(T0);
     if (bar % 2 === 0 && t0 !== null) {
@@ -259,6 +285,7 @@ export async function renderSegment(si, k, sr = 48000) {
   }
   // the lead: two rounds in the drop, one softer and darker in the breakdown
   for (const [start, v, cut] of [[32, 1, 2800], [40, 1, 3200], [48, 0.6, 1500]]) {
+    await breathe();
     S.lead.forEach(([b, n, m], i) => {
       const t = at(start * BAR + b * BEAT);
       if (t !== null) leadNote(t, m, S.lead[(i + S.lead.length - 1) % S.lead.length][2], n * BEAT, v, cut * S.leadCut);
@@ -273,10 +300,13 @@ export async function renderSegment(si, k, sr = 48000) {
     if (t !== null) sweep(t, n * BAR, f0, f1, g0, g1);
   }
   for (const bar of [8, 32, 40, 56]) { const t = at(bar * BAR); if (t !== null) crash(t); }
-  const full = await c.startRendering();
+  const rendering = c.startRendering();
+  await breathe();
+  built();                                                       // the next segment may build while this one renders
+  const full = await rendering;
   const res = new AudioBuffer({ numberOfChannels: 2, length: len, sampleRate: sr });
   for (let ch = 0; ch < 2; ch++) {
-    const d = full.getChannelData(ch).slice(pre, pre + len);
+    const d = k === SEGMENTS - 1 ? full.getChannelData(ch).slice(pre, pre + len) : full.getChannelData(ch).subarray(pre, pre + len);
     // the song's end: its last bar and a half fade out into the next song's intro
     if (k === SEGMENTS - 1) {
       const n = Math.round(1.5 * BAR * sr);
