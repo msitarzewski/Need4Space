@@ -8,6 +8,8 @@ import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { MeadowWorld, SUN_DIR as MEADOW_SUN, SUN_FOG } from './world.js';
 import { SpaceWorld, SUN_DIR as SPACE_SUN, SHADOW_HALF, SHADOW_NEAR, SHADOW_FAR, MID_HALF, MID_NEAR, MID_FAR, FAR_HALF, FAR_NEAR, FAR_FAR } from './space.js';
 import { ForestWorld, SUN_DIR as FOREST_SUN } from './forest.js';
+import { IceWorld, SUN_DIR as ICE_SUN } from './ice.js';
+import { ICE_GLSL, ICE_FOG_CHUNK } from './frost.js';
 import { ATMO_GLSL, ATMO_FOG_CHUNK } from './atmo.js';
 import { TrackRacer, TRACK_W } from './track.js';
 import { patchShaders } from './look.js';
@@ -27,8 +29,8 @@ import { Menu } from './menu.js';
 import { compileAll, deferBakes, runBakes, gpuIdle } from './bake.js';
 import { Q, setLite, integratedGPU, liteFiltering, memoryTier } from './quality.js';
 
-// the map: the circuit chosen in the menu (saved), or ?map=space / forest / meadow (the meadow: the old test range)
-const MAP = { meadow: 'meadow', forest: 'forest', space: 'space' }[new URLSearchParams(location.search).get('map') || savedSettings().map] || 'space';
+// the map: the circuit chosen in the menu (saved), or ?map=space / forest / ice / meadow (the meadow: the old test range)
+const MAP = { meadow: 'meadow', forest: 'forest', space: 'space', ice: 'ice' }[new URLSearchParams(location.search).get('map') || savedSettings().map] || 'space';
 const SHIP_URL = { high: 'assets/racer_web.glb', mid: 'assets/racer_web_4k.glb', low: 'assets/racer_web_2k.glb' };   // (by memory tier)
 const LUTS = ['assets/agx_punchy_lut65.bin', 'assets/agx_mhc_lut65.bin'];   // Blender's AgX looks: Punchy, Medium High Contrast
 const status = (t) => (document.getElementById('loadtext').textContent = t);
@@ -48,12 +50,13 @@ const progress = (step, f = 0) => {
 const nextFrame = () => new Promise((r) => { requestAnimationFrame(() => r()); setTimeout(r, 50); });
 async function boot() {
   if (new URLSearchParams(location.search).has('bootprof')) (await import('./profile.js')).bootProfile();
-  const sunDir = { space: SPACE_SUN, forest: FOREST_SUN, meadow: MEADOW_SUN }[MAP];
+  const sunDir = { space: SPACE_SUN, forest: FOREST_SUN, ice: ICE_SUN, meadow: MEADOW_SUN }[MAP];
   // (the forest uses the space map's cascades - the same boxes - and its own air for fog: atmo.js)
   patchShaders({ sunDir, sunFog: SUN_FOG, shadowHalf: MAP !== 'meadow' ? FAR_HALF : 22, shadowDepth: 200,
     cascades: MAP !== 'meadow' ? [{ half: SHADOW_HALF, depth: SHADOW_FAR - SHADOW_NEAR }, { half: MID_HALF, depth: MID_FAR - MID_NEAR },
       { half: FAR_HALF, depth: FAR_FAR - FAR_NEAR }] : null,
-    ...(MAP === 'forest' ? { fogChunk: ATMO_FOG_CHUNK, fogPars: ATMO_GLSL, worldOnly: true } : {}) });
+    ...(MAP === 'forest' ? { fogChunk: ATMO_FOG_CHUNK, fogPars: ATMO_GLSL, worldOnly: true } : {}),
+    ...(MAP === 'ice' ? { fogChunk: ICE_FOG_CHUNK, fogPars: ICE_GLSL, worldOnly: true } : {}) });
   const canvas = document.getElementById('view');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
   // the GPU driver reset (too long a job for a slow GPU, or out of memory): say so rather than a frozen screen
@@ -97,7 +100,7 @@ async function boot() {
   await nextFrame();
   deferBakes(true);
   const world = MAP === 'space' ? new SpaceWorld(scene, renderer, camera) : MAP === 'forest' ? new ForestWorld(scene, renderer, camera)
-    : new MeadowWorld(scene, renderer);
+    : MAP === 'ice' ? new IceWorld(scene, renderer, camera) : new MeadowWorld(scene, renderer);
   deferBakes(false);
   progress('circuit', 1);
   await runBakes(renderer, (what, k, n) => { status(`${what}  ${k} / ${n}`); progress(/Painting/.test(what) ? 'paint' : 'bakes', k / n); });
