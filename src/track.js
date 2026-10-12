@@ -1606,16 +1606,17 @@ const PAD_KICK = 55, PAD_MAX = 380;
 export const turnRate = (v) => 1.6 * (1 - 0.5 * smoothstep(60, 320, v));
 export const gripAt = (v) => 4.0 * (1 - 0.4 * smoothstep(100, 320, v));
 // "add some kind of drifting at the corners, with brake and accelerate, so ships can take corners a bit easier
-// sometimes, with skill" - "it was supposed to work after a brake and a fast A / D turn": the brake touched (held, or
-// let go of under 0.4 s ago) with the stick thrown hard over, on the deck from ~200 km/h. The side it starts on is
-// kept while the stick stays over (into the turn the tightest, against it wide) and the throttle or the brake is
-// held; let the stick go and it ends - with its kick. "make the drift stronger, so it can actually take turns", then
-// "it literally goes on an engine and does a huge turn, that's not how drift works": a slide, not a spin. The way the
-// ship goes turns steadily, building over ~0.3 s to 1.3x the hull's turn rate (the airbrakes swing the nose at 3.4x,
-// and cost far more speed); the nose is held up to ~30 deg into the bend, the tail out; the slide drags with its angle, the brake
-// only feathers. Held through the bend it charges; straighten up and the charge kicks the ship on - three steps (the
-// sparks and trails under it show which), lost to a wall knock. (A rival says when it drifts: inp.drift.)
-export const DRIFT = { v: 55, tap: 0.4, release: 0.2, rate: 1.3, slip: 0.52, brake: 0.1, tiers: [0.5, 1.1, 1.8], kick: [12, 22, 32], drag: 0.3 };
+// sometimes, with skill". Started by touching the brake (held, or let go of under 0.4 s ago) with the stick thrown
+// hard over, on the deck from ~200 km/h. "drifting should start slowly, not punch you into a direction ... you should
+// be able to go left right ... and get out of it after trying to control the ship": a drift is the hull losing grip -
+// over ~0.45 s it fades to 55 % and the nose swings 30 % livelier, either way, as the stick says. The way it goes
+// lags the nose: the tail steps out. Steered into the slide it holds its angle; centred or against it the hull grips
+// again and straightens (flicked the other way while still sliding, the slide swaps sides). Its speed drags with
+// the angle and the brake only feathers; it charges the more angle it holds. Caught - the slide back within ~8 deg
+// for a moment - the grip comes back and the charge kicks the ship on (three steps: the sparks and
+// trails under it show which; lost to a wall knock). (A rival says when it drifts: inp.drift.)
+export const DRIFT = { v: 55, tap: 0.4, rate: 1.3, grip: 0.55, keep: 0.8, drag: 0.12, brake: 0.1, onset: 2.2, caught: 0.14,
+  settle: 0.15, tiers: [0.5, 1.1, 1.8], kick: [12, 22, 32] };
 const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck
 
@@ -1649,14 +1650,8 @@ export class TrackRacer {
   // the drift's step so far: 0 none, 1 - 3
   get driftTier() { const c = this.driftCharge, T = DRIFT.tiers; return c >= T[2] ? 3 : c >= T[1] ? 2 : c >= T[0] ? 1 : 0; }
 
-  // how hard a drift turns (a share of its full rate) for the stick: u = the stick toward the drift's side (-1 .. 1).
-  // Over toward it 45 - 100 %, against it down to 20 %; let go (the moment before it ends) 55 %
-  static driftQ(u) { return u >= 0.15 ? 0.45 + 0.55 * (u - 0.15) / 0.85 : u <= -0.15 ? 0.45 + 0.25 * (u + 0.15) / 0.85 : 0.55; }
-  // and the stick for a share (the rivals' inverse)
-  static driftU(q) { return q >= 0.45 ? Math.min(1, 0.15 + (q - 0.45) * 0.85 / 0.55) : Math.max(-1, -0.15 - (0.45 - q) * 0.85 / 0.25); }
-
   startDrift(side) {
-    this.drift = this.driftSide = side; this.driftCharge = 0; this.driftLetGo = 0;
+    this.drift = this.driftSide = side; this.driftCharge = 0; this.driftAge = 0; this.driftCalm = 0;
     this.emit({ type: 'driftStart', side });
   }
 
@@ -1674,7 +1669,7 @@ export class TrackRacer {
   place(s, hover) {
     this.s = s; this.x = 0; this.y = hover ? HOVER : 0.002; this.vy = 0; this.vs = 0; this.vx = 0; this.psi = 0; this.slow = 0;
     this.throttle = 0; this.steerS = 0; this.yawRate = 0; this.boosting = 0;
-    this.drift = 0; this.driftCharge = 0; this.driftKick = 0;
+    this.drift = 0; this.driftCharge = 0; this.driftKick = 0; this.driftK = 0;
     this.pose(0);
   }
 
@@ -1705,8 +1700,8 @@ export class TrackRacer {
     const braking = ship.ready && inp.throttleDown > 0.5;
     const air = this.y > HOVER + 1.2, flipU = tr.flipAt(this.s);
     const steer = clamp(inp.yaw + inp.roll, -1, 1), brakeL = inp.airL > 0.5 ? 1 : 0, brakeR = inp.airR > 0.5 ? 1 : 0;
-    // the drift: the brake touched and the stick thrown over, on the deck at speed; held by the stick and a pedal,
-    // ended by letting the stick go (or a rival saying so)
+    // the drift: the brake touched and the stick thrown over, on the deck at speed; held while the slide lasts and a
+    // pedal is down, ended by catching it (or a rival saying so)
     const pressing = inp.throttleAxis != null ? inp.throttleAxis > 0.5 : inp.throttleUp > 0.5;
     this.brakeAgo = braking ? 0 : (this.brakeAgo ?? 9) + dt;
     const onDeck = !air && !tr.inGap(this.s) && !tr.inLoop(this.s);
@@ -1717,10 +1712,13 @@ export class TrackRacer {
     } else if (!this.drift) {
       if (ok && (braking || this.brakeAgo < DRIFT.tap) && Math.abs(steer) > 0.55) this.startDrift(Math.sign(steer));
     } else {
-      this.driftLetGo = Math.abs(steer) < 0.15 ? this.driftLetGo + dt : 0;
+      this.driftAge += dt;
+      this.driftCalm = this.driftAge > 0.6 && Math.abs(this.slip) < DRIFT.caught ? this.driftCalm + dt : 0;
       if (!ok) this.endDrift(false);
-      else if (this.driftLetGo > DRIFT.release || !(pressing || braking)) this.endDrift(true);
+      else if (this.driftCalm > DRIFT.settle || !(pressing || braking)) this.endDrift(true);
     }
+    // how far into the drift the hull is: the grip fading over ~0.45 s, back over ~0.25 s
+    this.driftK = clamp((this.driftK || 0) + (this.drift ? DRIFT.onset : -4) * dt, 0, 1);
     if (ship.ready) this.throttle = inp.throttleAxis != null ? inp.throttleAxis
       : clamp(this.throttle + (inp.throttleUp * 1.3 - (this.drift ? 0 : inp.throttleDown) * 3.0) * dt, 0, 1);
     else if (!ship.engineOn) this.throttle = Math.max(0, this.throttle - dt);
@@ -1729,13 +1727,12 @@ export class TrackRacer {
     const wantBoost = inp.boost && this.boostEnergy > 0.02 && ship.ready;
     this.boosting += ((wantBoost ? 1 : 0) - this.boosting) * damp(6, dt);
     this.boostEnergy = clamp(this.boostEnergy + (wantBoost ? -0.2 : 0.08) * dt, 0, 1);
-    // steering (A/D, arrows, mouse, stick), airbrakes (Z / X, bumpers): a sharper turn, more drag. Drifting: held to
-    // the side it started on, the stick setting how hard
-    const want = this.drift ? this.drift * TrackRacer.driftQ(clamp(steer * this.drift, -1, 1)) : steer + (brakeR - brakeL) * 0.8;
-    this.steerS += (want - this.steerS) * damp(this.drift ? 5 : 8, dt);
-    const grip = air ? 0.25 : 1;
-    const rateK = brakeL || brakeR ? 1 + AIRBRAKE : 1, psi0 = this.psi;
-    this.yawRate = this.drift ? 0 : this.steerS * turnRate(Math.abs(this.vs)) * rateK * grip * power;
+    // steering (A/D, arrows, mouse, stick), airbrakes (Z / X, bumpers): a sharper turn, more drag; drifting, a
+    // livelier nose
+    this.steerS += (steer + (brakeR - brakeL) * 0.8 - this.steerS) * damp(8, dt);
+    const grip = air ? 0.25 : 1, dk = this.driftK;
+    const rateK = (brakeL || brakeR ? 1 + AIRBRAKE : 1) * (1 + (DRIFT.rate - 1) * dk);
+    this.yawRate = this.steerS * turnRate(Math.abs(this.vs)) * rateK * grip * power;
     this.psi += this.yawRate * dt;
     if (this.assist && Math.abs(steer) < 0.1 && !air && !this.drift) this.psi -= this.psi * 1.1 * dt;   // eases back along the track
     this.airIn = brakeR - brakeL;
@@ -1759,33 +1756,28 @@ export class TrackRacer {
     const thrust = (this.throttle * THRUST + this.boosting * BOOST) * power * this.thrustScale * (1 + 0.07 * (this.draft || 0));
     const sp = Math.hypot(this.vs, this.vx);
     const drag = DRAG_L + DRAG_Q * sp + (brakeL + brakeR) * 0.25;
-    const ts = this.drift && sp > 1 ? this.vs / sp * Math.cos(this.slip) : hs, tx = this.drift && sp > 1 ? this.vx / sp * Math.cos(this.slip) : hx;
-    this.vs += (ts * thrust - this.vs * drag) * dt;
-    this.vx += (tx * thrust - this.vx * drag) * dt;
+    this.vs += (hs * thrust - this.vs * drag) * dt;
+    this.vx += (hx * thrust - this.vx * drag) * dt;
     // the brake: ~6 g plus a share of the speed (15 g at top speed), never into reverse (drifting: a feather of it)
-    const bk = this.brakeS * (60 + 0.3 * Math.abs(this.vs)) * dt * power * (this.drift ? (pressing ? DRIFT.brake : 0.5) : 1);
+    const bk = this.brakeS * (60 + 0.3 * Math.abs(this.vs)) * dt * power * (1 - (1 - (pressing ? DRIFT.brake : 0.5)) * dk);
     this.vs -= Math.sign(this.vs) * Math.min(Math.abs(this.vs), bk);
+    // grip: slip across the heading bleeds away (into the heading while on the deck). Drifting, less of it and less of
+    // the slide's speed turned forward - a slide never gains speed, it drags with its angle
+    const along = this.vs * hs + this.vx * hx, across = -this.vs * hx + this.vx * hs;
+    const push = this.drift ? clamp(steer * this.drift, 0, 1) : 0;    // steered into the slide (else it grips again)
+    let kept = across * Math.exp(-(air ? 0.4 : gripAt(sp) * (1 - (1 - DRIFT.grip) * dk * (0.35 + 0.65 * push))) * dt);
+    let al2 = along + (air ? 0 : Math.abs(across - kept) * (0.5 + (DRIFT.keep - 0.5) * dk) * Math.sign(along || 1));
+    if (dk > 0) {
+      const was = Math.hypot(along, across), now = Math.hypot(al2, kept);
+      const k = Math.min(1, was / Math.max(1e-6, now)) * Math.exp(-DRIFT.drag * dk * Math.abs(kept) / Math.max(1, now) * dt);
+      al2 *= k; kept *= k;
+    }
+    this.vs = al2 * hs - kept * hx; this.vx = al2 * hx + kept * hs;
+    this.slip = Math.atan2(kept, Math.max(1, Math.abs(al2)));          // the way it goes off the nose (rad)
     if (this.drift) {
-      // the slide: the way it goes turns at the drift's rate, the nose held the slip angle further into the bend, the
-      // speed dragged by that angle
-      const q = Math.abs(this.steerS), a = this.drift * q * turnRate(Math.abs(this.vs)) * DRIFT.rate * power * dt;
-      const ca = Math.cos(a), sa = Math.sin(a), v0 = this.vs;
-      this.vs = v0 * ca - this.vx * sa; this.vx = v0 * sa + this.vx * ca;
-      const th = Math.atan2(this.vx, Math.max(1, this.vs)), beta = this.drift * DRIFT.slip * (0.55 + 0.45 * q);
-      this.psi = clamp(this.psi + (th + beta - this.psi) * damp(10, dt), -1.3, 1.3);
-      this.slip = this.psi - th;
-      const k = Math.exp(-DRIFT.drag * Math.abs(Math.sin(this.slip)) * dt);
-      this.vs *= k; this.vx *= k;
-      this.yawRate = (this.psi - psi0 + turn) / dt;
-      this.driftCharge += dt * (0.4 + 0.6 * q);
+      if (Math.abs(this.slip) > 0.03) this.drift = this.driftSide = -Math.sign(this.slip);   // the side the tail is out
+      this.driftCharge += dt * smoothstep(0.12, 0.4, Math.abs(this.slip)) * dk;
       if (this.driftTier > tierWas) this.emit({ type: 'driftTier', tier: this.driftTier, at: this.pos.clone() });
-    } else {
-      // grip: slip across the heading bleeds away (into the heading while on the deck)
-      const along = this.vs * hs + this.vx * hx, across = -this.vs * hx + this.vx * hs;
-      const kept = across * Math.exp(-(air ? 0.4 : gripAt(sp)) * dt);
-      const al2 = along + (air ? 0 : Math.abs(across - kept) * 0.5 * Math.sign(along || 1));
-      this.vs = al2 * hs - kept * hx; this.vx = al2 * hx + kept * hs;
-      this.slip = Math.atan2(kept, Math.max(1, Math.abs(al2)));          // the way it goes off the nose (rad)
     }
     // a drift's kick, paid over ~0.2 s along the way it goes
     if (this.driftKick > 0) {

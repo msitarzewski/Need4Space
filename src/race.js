@@ -2,7 +2,7 @@
 // a score and a results table. Rivals are clones of the player's ship in their own paint, driven by AI on the same
 // track physics.
 import * as THREE from 'three';
-import { TrackRacer, TRACK_W, turnRate, gripAt, DRIFT } from './track.js';
+import { TrackRacer, TRACK_W, turnRate, gripAt } from './track.js';
 import { Ship } from './ship.js';
 import { clamp, damp, mulberry32, smoothstep } from './noise.js';
 
@@ -124,9 +124,7 @@ class Driver {
   // tunables (searched by simulating laps: a lone ship's lap time and wall touches, then whole races)
   static tune = { lead: 0, tauE: 0.6, tauTh: 0.18, tauPsi: 0.2, ffLag: 0.3, airOn: 1.0, airOff: 0.8, lineM: 3, A: 1.8,
     brakeD: 110, boostRoom: 2.0, boostHi: 0.35, boostLo: 0.04, boostVmax: 400, wallEdge: 2.0, horizon: 0.45, aimRate: 5,
-    airCorr: 0.7, airMinOn: 0.12, airMinOff: 0.08, driftOn: 9, driftOff: 0.6, driftLong: 0.6 };
-  // (driftOn 9: the rivals don't drift - through the slide they ran wide into the walls and lost time; it is the
-  // player's)
+    airCorr: 0.7, airMinOn: 0.12, airMinOff: 0.08 };
 
   constructor(entry, race, rnd, slot) {
     this.e = entry;
@@ -143,7 +141,7 @@ class Driver {
   // a new race: no pass, defence, burst or pad choice carried over
   reset() {
     Object.assign(this, { passSide: 0, passT: 0, passWho: null, defT: 0, defCool: 0, defX: null, airOn: 0, airHold: 0, boostOn: false,
-      boostT: 0, burstT: 0, knockT: 0, offS: 0, odo: 0, gridX: this.e.racer.x, drifting: 0 });
+      boostT: 0, burstT: 0, knockT: 0, offS: 0, odo: 0, gridX: this.e.racer.x });
     this.padPick.clear();
   }
 
@@ -282,49 +280,21 @@ class Driver {
     const ff = (v * cFF) / tRate;
     let steer = ff + (psiDes - r.psi) / (tRate * T.tauPsi);
     const need = Math.max(Math.abs(ff), Math.abs(steer) - T.airCorr), sgn = Math.sign(Math.abs(ff) > 0.5 ? ff : steer);
-    // a drift, for a bend that asks most of what the airbrakes give (they cost far more speed): said outright
-    // (inp.drift), the throttle held, the stick set for the turn of its path it wants (TrackRacer.driftQ: a share of
-    // 1.3 x the turn rate), out of it as the bend eases - with the charge's kick
-    const canDrift = TrackRacer.drifting && !jump && !loop && !air && v > DRIFT.v + 20 && esc < 0.5 && this.odo > 700;
-    // (the side from the track's own bend just ahead: the line's swing out wide before a corner bends the other way)
-    let cT = 0;
-    for (let k = 0; k < 6; k++) cT += tr.kh[at(v * 0.12 * k)];
-    cT /= 6;
-    const bend = Math.abs(cT) * v / tRate > T.driftOn * 0.7 ? Math.sign(cT) : 0;
-    this.postDrift = Math.max(0, (this.postDrift || 0) - dt);
-    // (a bend past what the slide turns - 1.3x the hull - is the airbrakes')
-    if (this.drifting && (!canDrift || need < T.driftOff || need > DRIFT.rate * 1.1 || Math.sign(ff) === -this.drifting || (bend && bend !== this.drifting))) {
-      this.drifting = 0;
-      this.postDrift = 0.3;
-    } else if (!this.drifting && canDrift && Math.abs(ff) > T.driftOn && Math.abs(ff) < DRIFT.rate * 0.95 && Math.sign(ff) === bend) {
-      // only into a bend long enough to charge the slide (a short one it takes on the airbrakes)
-      let long = true;
-      for (let d = 15; d < v * T.driftLong; d += 15) if (Math.abs(plan.c[at(d)]) * v / tRate < T.driftOn * 0.7 || Math.sign(plan.c[at(d)]) !== Math.sign(ff)) { long = false; break; }
-      if (long) this.drifting = Math.sign(ff);
-    }
     // airbrakes: for a bend that asks more than the hull alone turns (they add 90 % rate and 0.8 of a turn, and drag)
     // - set by the bend ahead, not by every correction (switched on and off each step they kicked the nose about),
-    // held at least 0.12 s and rested 0.08 s (flicked for a step or two they twitched the hull); none while drifting
-    // and for a moment after (the slide's end would flick them)
+    // held at least 0.12 s and rested 0.08 s (flicked for a step or two they twitched the hull)
     let air1 = this.airOn;
     if (this.airOn ? need < T.airOff : need > T.airOn) air1 = this.airOn ? 0 : sgn;
     else if (this.airOn && sgn !== this.airOn && need > T.airOn) air1 = sgn;
     this.airHold = Math.max(0, this.airHold - dt);
     if (this.airHold > 0) air1 = this.airOn;
     if (esc > 0.6) air1 = -Math.sign(xp);
-    if (jump || loop || air || this.drifting || this.postDrift > 0) air1 = 0;
+    if (jump || loop || air) air1 = 0;
     if (air1 !== this.airOn) { this.airHold = air1 ? T.airMinOn : T.airMinOff; this.airOn = air1; }
-    if (this.drifting) {
-      // (the slide turns the way it goes: the line's bend fed forward, the gap to the aim's angle closed in tauTh)
-      const wv = v * cFF + (thD - th) / T.tauTh;
-      this.inp.yaw = this.drifting * TrackRacer.driftU(wv * this.drifting / (tRate * DRIFT.rate));
-      this.inp.airL = this.inp.airR = 0;
-    } else {
-      if (this.airOn) steer = steer / 1.9 - 0.8 * this.airOn;
-      this.inp.yaw = clamp(steer, -1, 1);
-      this.inp.airL = this.airOn < 0 ? 1 : 0;
-      this.inp.airR = this.airOn > 0 ? 1 : 0;
-    }
+    if (this.airOn) steer = steer / 1.9 - 0.8 * this.airOn;
+    this.inp.yaw = clamp(steer, -1, 1);
+    this.inp.airL = this.airOn < 0 ? 1 : 0;
+    this.inp.airR = this.airOn > 0 ? 1 : 0;
     // speed: the line's limit just ahead (braking already folded in), traffic; flat out over a cut
     let vT = Infinity;
     for (let d = 0; d <= v * 0.3; d += 8) vT = Math.min(vT, plan.vlim[at(d)]);
@@ -334,8 +304,7 @@ class Driver {
     if (jump) vF = Math.max(vF, r.vs + 50);
     this.inp.throttleAxis = r.vs < vF ? 1 : clamp(1 - (r.vs - vF) * 0.15, 0, 1);
     this.inp.throttleDown = r.vs > vF + 8 ? 1 : 0;
-    this.inp.drift = this.drifting;
-    if (this.drifting) { this.inp.throttleAxis = 1; this.inp.throttleDown = 0; }
+    this.inp.drift = 0;                                  // (the drift is the player's: rivals never start one)
     // boost: where the lap ahead has room for the speed (never into a bend it would brake for), the tank never left
     // full; at once to finish a pass or to get back up to speed after a knock
     const E = r.boostEnergy;
