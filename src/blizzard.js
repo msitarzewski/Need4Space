@@ -88,10 +88,13 @@ export class Blizzard {
           float h = dot(p - deckP, deckU);
           float slab = smoothstep(-0.4, 0.8, h) * smoothstep(13.0, 2.5, h);
           vec3 rel = p - cam; float d = length(rel);
-          float a = on * slab * smoothstep(${(BOX * 0.5).toFixed(1)}, ${(BOX * 0.22).toFixed(1)}, d) * smoothstep(1.5, 6.0, d);
+          // ("the snow storms are too big in the camera ... not fully breaking the view"): none in the last metres before
+          // the lens (the veils kept further off), and no streak longer than an eighth of its distance - a 12 m smear a
+          // few metres away crossed the whole frame
+          float a = on * slab * smoothstep(${(BOX * 0.5).toFixed(1)}, ${(BOX * 0.22).toFixed(1)}, d) * (veil > 0.5 ? smoothstep(10.0, 24.0, d) : smoothstep(5.0, 14.0, d));
           float kk;
           float size = veil > 0.5 ? 0.5 + 1.1 * fract(seed.w * 13.1) : 0.12 + 0.12 * fract(seed.w * 5.7);
-          gl_Position = a > 0.003 ? bzStreak(p, wind * spd - camVel, size, veil > 0.5 ? 0.3 : 0.035, veil > 0.5 ? 12.0 : 5.0, kk) : vec4(0.0, 0.0, -2.0, 1.0);
+          gl_Position = a > 0.003 ? bzStreak(p, wind * spd - camVel, size, veil > 0.5 ? 0.06 : 0.03, min(veil > 0.5 ? 6.0 : 4.0, d * 0.12), kk) : vec4(0.0, 0.0, -2.0, 1.0);
           vK = kk; vVeil = veil;
           vA = a * (veil > 0.5 ? 0.5 : 0.75) * (1.0 + 0.35 * kk) / (1.0 + kk) * k;
           vC = bzLight(normalize(rel)) * (veil > 0.5 ? 1.6 : 2.4);
@@ -173,11 +176,10 @@ export class Blizzard {
           // its motion against the camera's (a spray, not puffs)
           vec3 p = wa.xyz + wb.xyz * (1.0 - exp(-4.0 * age)) / 4.0 + wind * 0.4 * age + vec3(0.0, 1.2 * age, 0.0);
           vec3 v = wb.xyz * exp(-4.0 * age) + wind * 0.4 + vec3(0.0, 1.2, 0.0);
-          float size = wb.w * (0.45 + 2.0 * sqrt(f)), kk;
-          gl_Position = bzStreak(p, v - camVel, size, 0.02, 7.0, kk);
+          float size = wb.w * (0.45 + 2.0 * sqrt(f)), kk, d = length(p - cam);
+          gl_Position = bzStreak(p, v - camVel, size, 0.02, min(7.0, d * 0.12), kk);
           vK = kk;
-          float d = length(p - cam);
-          vA = smoothstep(0.0, 0.05, f) * (1.0 - f) * (1.0 - f) * smoothstep(2.0, 8.0, d) * 0.75 * k * (1.0 + 0.5 * kk) / (1.0 + kk);
+          vA = smoothstep(0.0, 0.05, f) * (1.0 - f) * (1.0 - f) * smoothstep(6.0, 18.0, d) * 0.75 * k * (1.0 + 0.5 * kk) / (1.0 + kk);
           vC = vec3(0.1, 0.13, 0.19) + bzLight(normalize(p - cam)) * 1.8;
         }`,
       fragmentShader: /* glsl */`
