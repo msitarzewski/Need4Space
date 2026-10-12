@@ -176,7 +176,9 @@ ${GLSL_N}`)
     float ndv = abs(dot(normal, normalize(vViewPosition)));
     // its edges: the angle round the axis against the six corners (0 on an edge), the shoulder where the point begins
     float a = atan(vCL.z, vCL.x) / 1.0471976 - 0.5;
-    float ed = abs(fract(a + 0.5) - 0.5), aw = fwidth(a) * 1.5;
+    // (the angle wraps by a whole turn down the middle of one face: its fwidth there drew a dashed false edge - take
+    // the change of whichever of a and fract(a) is continuous at the pixel)
+    float ed = abs(fract(a + 0.5) - 0.5), aw = min(fwidth(a), fwidth(fract(a))) * 1.5;
     float edge = 1.0 - smoothstep(0.0, 0.025 + aw, ed);
     float shoulder = 1.0 - smoothstep(0.0, 0.01 + fwidth(vCy) * 1.5, abs(vCy - 0.8));
     float base = exp(-vCy * 4.5);                             // fed from the ice below: bright at its foot

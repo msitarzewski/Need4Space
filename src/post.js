@@ -648,7 +648,8 @@ export class ShaftPass extends Pass {
           c *= 0.25;
           float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
           vec2 d = (vUv - sun) * vec2(aspect, 1.0);
-          float near = exp(-dot(d, d) * 2.2);
+          // (only round the sun itself: the crystals' lit edges and the glare off the ice further out drew lines too)
+          float near = exp(-dot(d, d) * 9.0);
           gl_FragColor = vec4(c * smoothstep(0.9, 2.6, l) * near, 1.0);
         }`,
     }));
