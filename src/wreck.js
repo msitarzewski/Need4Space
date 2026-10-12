@@ -394,8 +394,10 @@ float wRelief( vec2 uv, float kind, float fp, float W, out vec2 id, out vec3 fea
 	float wr = wHash( wid * vec2( 1.7, 3.1 ) + 0.5 );
 	// grime (metres: broad 24 m, fine 6 m, flecks 1.5 m, streaks along v)
 	vec2 wm = vec2( wq.y + mod( wvi, 8.0 ) * 96.0, wq.x );
-	vec4 wn1 = texture2D( hullNoise, wm / 24.0 ), wn2 = texture2D( hullNoise, wm / 6.0 + 0.37 ), wn3 = texture2D( hullNoise, wm / 1.5 + 0.71 );
-	float wStreak = texture2D( hullNoise, vec2( wm.x / 3.0, wm.y / 40.0 ) ).a;
+	vec4 wn1 = texture2D( hullNoise, wm / 24.0 ), wn2 = texture2D( hullNoise, wm / 6.0 + 0.37 );
+	vec2 wq3 = wm / 1.5 + 0.71, wq3x = dFdx( wq3 ), wq3y = dFdy( wq3 );
+	vec4 wn3 = wfp < 0.05 ? textureGrad( hullNoise, wq3, wq3x, wq3y ) : vec4( 0.5 );
+	float wStreak = wn2.a;
 	// tone: whole sections of 40 x 56 m refitted or faded at different times, each panel a little its own, broad grime
 	float wz = wHash( floor( vec2( wq.x / 40.0 + wSeed * 3.0, ( wq.y + mod( wvi, 64.0 ) * 96.0 ) / 56.0 ) ) + 1.3 );
 	vec3 wPaint = vWC * ( 0.86 + 0.24 * wz ) * ( 0.94 + 0.12 * wr ) * ( 0.84 + 0.32 * wn1.r ) * ( 0.92 + 0.16 * wn2.g );
@@ -1190,11 +1192,13 @@ export class Wreck {
         if (s0 == null) s0 = z;
         const F = this.onHull(H, face, 0.5, z + 12, 5);
         this.box(H, F, 15, 5, 12.05, { ...ox, b: 3.2 });
-        // on its face: a vent and a hatch row
+        // on its face: a vent and a hatch row; a running light, still blinking, on every fourth
         if ((z / 24) % 2 === 0) this.box(H, Wreck.F(F.o.clone().addScaledVector(F.ay, 5.2), F.ax, F.ay, F.az), 6, 0.4, 3, { kind: K_MACH, paint: PAINT_MACH, sky: 1, layer: 'detail' });
+        else if (Math.round((z - from) / 24) % 4 === 1) this.lamp(H, F.o.clone().addScaledVector(F.ay, 5 + 0.32).addScaledVector(F.ax, 9), F.ay, 'red', 0.9);
       }
       if (s0 != null) run(face, 5, [15, 5], s0, zl);
     }
+    for (const face of [1, 7]) for (const z of [140, 210]) { const F = this.onHull(H, face, 0.5, z, 0.32); this.lamp(H, F.o, F.ay, 'amber', 0.9); }
     // the hangar door, port side: a heavy frame proud of the hull, eight segments closed in it, rails above and below
     {
       const face = side > 0 ? 2 : 6, z0 = 384, z1 = 566, zc = (z0 + z1) / 2, Fc = this.onHull(H, face, 0.5, zc, 0);
@@ -1288,6 +1292,7 @@ export class Wreck {
       if ([1, 3, 5, 7].includes(face) && ov(z0, z1, 52, 88) && ov(u0, u1, 0.2, 0.8)) return true;
       if (face === 4 && ov(u0, u1, 0.26, 0.74) && ov(z0, z1, 296, 904)) return true;
       if (face === 0 && ov(u0, u1, 0.2, 0.8) && ov(z0, z1, 836, 952)) return true;
+      if ((face === 1 || face === 7) && ov(u0, u1, 0.42, 0.58) && (ov(z0, z1, 134, 146) || ov(z0, z1, 204, 216))) return true;
     } else {
       if ((face === 1 || face === 7) && ov(z0, z1, 14, 154)) return true;
       if ([1, 3, 5, 7].includes(face) && z1 > H.len - 112) return true;
@@ -1421,14 +1426,16 @@ export class Wreck {
         this.box(H, Wreck.F(F.o.clone().addScaledVector(F.ay, -15.5), F.ax, F.ay, F.az), 3, 1.2, 30, { kind: K_MACH, paint: PAINT_MACH, sky: 1 });
       }
     }
-    // catwalks over the track between the reactors: two chords, posts and diagonals
-    for (const z of [100, 172]) {
+    // catwalks across the hall over the reactors and the track, frame to frame (at two frames): two chords, a grating,
+    // a handrail on posts
+    const xs = HW - SKIN - RIB_D - 0.65;
+    for (const z of [H.ribFrom + RIB_EVERY * 4, H.ribFrom + RIB_EVERY * 7]) {
       for (const dz of [-2.2, 2.2]) {
-        this.beam(H, new THREE.Vector3(-48, 22, z + dz), new THREE.Vector3(48, 22, z + dz), 0.9, 1.1, new THREE.Vector3(0, 1, 0), of);
-        this.beam(H, new THREE.Vector3(-48, 26.5, z + dz), new THREE.Vector3(48, 26.5, z + dz), 0.5, 0.5, new THREE.Vector3(0, 1, 0), { ...of, layer: 'detail' });
+        this.beam(H, new THREE.Vector3(-xs, 22, z + dz), new THREE.Vector3(xs, 22, z + dz), 0.9, 1.1, new THREE.Vector3(0, 1, 0), of);
+        this.beam(H, new THREE.Vector3(-xs, 26.5, z + dz), new THREE.Vector3(xs, 26.5, z + dz), 0.5, 0.5, new THREE.Vector3(0, 1, 0), { ...of, layer: 'detail' });
       }
-      this.box(H, Wreck.F(new THREE.Vector3(0, 22.8, z)), 48, 0.25, 2.1, { kind: K_DECK, paint: PAINT_DECK });
-      for (let k = -8; k <= 8; k++) for (const dz of [-2.2, 2.2]) this.box(H, Wreck.F(new THREE.Vector3(k * 6, 24.6, z + dz)), 0.15, 1.9, 0.15, { ...of, layer: 'detail' });
+      this.box(H, Wreck.F(new THREE.Vector3(0, 22.8, z)), xs, 0.25, 2.1, { kind: K_DECK, paint: PAINT_DECK });
+      for (let k = -18; k <= 18; k++) for (const dz of [-2.2, 2.2]) this.box(H, Wreck.F(new THREE.Vector3(k * 6, 24.6, z + dz)), 0.15, 1.9, 0.15, { ...of, layer: 'detail' });
     }
     // engine nacelles on the four chamfers of the stern: blocks 80 m long standing 14 m off, their own nozzles aft
     for (const face of [1, 3, 5, 7]) {
@@ -1447,7 +1454,7 @@ export class Wreck {
     for (let k = 0; k < 8; k++) {
       const a = (k / 8) * TAU + 0.2, rr = h.r + 18 + (k % 2) * 6;
       const c = new THREE.Vector3(h.x + rr * Math.cos(a), h.y + rr * Math.sin(a), zw - 5);
-      if (Math.abs(c.x) > 95 || Math.abs(c.y) > 65) continue;
+      if (Math.abs(c.x) > 95 || Math.abs(c.y) > 65 || !this.free(H, c, 9)) continue;
       this.box(H, Wreck.F(c), 6 + (k % 3), 6, 5, { kind: K_MACH, paint: PAINT_MACH });
       this.cyl(H, c.clone().add(new THREE.Vector3(0, 0, -5)), c.clone().add(new THREE.Vector3(0, 0, -9)), 3.4, { kind: K_MACH, paint: PAINT_PIPE, segs: 14 });
     }
@@ -1628,7 +1635,9 @@ export class Wreck {
 
   // a box with chamfered edges (b), half sizes hx hy hz, centred on the frame's origin
   box(H, F, hx, hy, hz, o = {}) {
-    const g = this.geo(H, F.o.z, o.layer), b = Math.min(o.b ?? 0.12 * Math.min(hx, hy, hz), 0.45 * Math.min(hx, hy, hz));
+    const g = this.geo(H, F.o.z, o.layer);
+    let b = Math.min(o.b ?? 0.12 * Math.min(hx, hy, hz), 0.45 * Math.min(hx, hy, hz));
+    if (b < 0.06) b = 0;
     const h = [hx, hy, hz], E = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
     const P = (c) => new THREE.Vector3(c[0], c[1], c[2]);
     const oo = { ...o, seed: o.seed ?? (o.kind === K_FRAME ? 2 * Math.min(hx, hy, hz) : 0) };

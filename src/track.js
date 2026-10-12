@@ -59,10 +59,10 @@ const CAVES = [['caveIn', -40, 'caveOut', 40]];                     // (from poi
 const WRECKS = [['wreckIn', -10, 'wreckBrk', -10], ['wreckBrk', 125, 'wreckOut', 10]];
 // boost pads: (point, metres after it, lateral x)
 const PADS = [['start', 360, 0], ['tunIn', -160, -10], ['tunIn', -160, 10], ['north', 120, 0], ['dive', -260, 12],
-  ['preLoop', 30, 0], ['back', 90, -12], ['west', -300, 10], ['west', 260, -10]];
+  ['preLoop', 30, 0], ['back', 90, -12], ['wreckBrk', 55, 0], ['west', -300, 10], ['west', 260, -10]];
 // light gates over the deck: (point, metres after it, colour)
 const GATES = [['start', -60, 0x40c8ff], ['crest1', -90, 0xffb020], ['rollIn', -40, 0xb040ff], ['preLoop', -60, 0xff3a6a],
-  ['crest2', -90, 0xffb020], ['west', 120, 0x40c8ff], ['cork', -330, 0x40ff9a]];
+  ['crest2', -90, 0xffb020], ['wreckIn', -270, 0xff4a1c], ['west', 120, 0x40c8ff], ['cork', -330, 0x40ff9a]];
 // The structure's light colours (linear, HDR) and growth: the space circuit's blue; a map can bring its own (theme)
 export const SPACE_THEME = { field: [0.15, 0.55, 1.0], fieldFlash: [0.7, 0.85, 1.0], strip: [0.03, 0.32, 1.0], stripCore: [0.75, 0.92, 1.0],
   lane: [0.04, 0.33, 1.0], laneCore: [0.75, 0.9, 1.0], spill: [0.06, 0.32, 1.0], stud: [0.7, 1.3, 2.6], trim: [0.08, 0.5, 1.3],

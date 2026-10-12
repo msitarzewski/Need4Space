@@ -34,7 +34,7 @@ const stats = (L) => [
 
 const MAIN = [['race', 'Race'], ['free', 'Free flight'], ['circuit', 'Circuit'], ['settings', 'Settings'], ['controls', 'Controls'], ['support', 'Support']];
 // the circuits (main.js loads the one chosen: the page reloads into it)
-export const CIRCUITS = [['space', 'Space', 'The orbital circuit over the ringed gas giant: a meteorite to fly through, a glass tunnel, a loop'],
+export const CIRCUITS = [['space', 'Space', 'The orbital circuit over the ringed gas giant: a broken derelict to thread, a meteorite to fly through, a glass tunnel, a loop'],
   ['forest', 'Forest moon', 'High over a jungle moon: floating islands, a river arching over the track, a colossal tree, a glowworm cave']];
 // donations (the author's Revolut)
 const DONATE_URL = 'https://revolut.me/alexan_vic', DONATE_HANDLE = '@alexan_vic';
