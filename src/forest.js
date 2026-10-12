@@ -18,6 +18,7 @@ import { trackVines, gantryIvy, vineCanopy, canyonBridges } from './overgrowth.j
 import { Waters } from './water.js';
 import { hollowIsland, caveGlow } from './cave.js';
 import { greatTree } from './greattree.js';
+import { skeleton, boneMaterial } from './skeleton.js';
 import { Creatures } from './creatures.js';
 import { Q } from './quality.js';
 import { fbm, smoothstep } from './noise.js';
@@ -56,20 +57,27 @@ for (let k = 0; k <= 12; k++) {
   const a = (k / 12) * Math.PI * 2;
   pt(-790 - 80 * Math.sin(a), -136 - 80 * Math.cos(a), 1450 - 80 * k / 12, 0, k === 0 ? 'loopIn' : k === 12 ? 'loopOut' : null);
 }
-// the long climb home
-pt(-960, -212, 1355); pt(-1100, -170, 1220, 22); pt(-1170, -100, 1040, 10);
+// south over the abyss to the skeleton: a long run at its open jaws, in through its mouth and out of the back of its
+// skull over a cut in the deck (its neck plunging away below), round, and the long climb home past it
+pt(-930, -214, 1392, -20); pt(-1005, -210, 1560, -6);
+pt(-1018, -206, 1760, 0, 'skullRun'); pt(-1022, -202, 1955, 0, 'skullIn'); pt(-1024, -200, 2140, 0, 'skull'); pt(-1026, -197, 2325, 0, 'skullOut');
+pt(-1032, -206, 2470, 14); pt(-1080, -201, 2590, 30); pt(-1180, -192, 2655, 34); pt(-1295, -182, 2625, 30); pt(-1355, -172, 2505, 20);
+pt(-1375, -160, 2300, 6); pt(-1368, -145, 2080, 0, 'skullView');
+pt(-1340, -124, 1830, -4); pt(-1290, -100, 1580, -8); pt(-1232, -78, 1340, -8); pt(-1188, -55, 1110, -4);
 
 export const FOREST_LAYOUT = layout(P, {
   start: [-1150, 0, 400],
   loops: [['loopIn', 'loopOut']],
-  gaps: [['crest1', 35, 105], ['caveOut', 14, 86]],
+  gaps: [['crest1', 35, 105], ['caveOut', 14, 86], ['skullOut', 26, 92]],
+  // the skull over the deck (no gantry, lamp or board inside it)
+  covers: [['skullIn', -240, 'skullOut', 20]],
   caves: [['caveIn', -30, 'caveOut', 12]],
   pads: [['start', 330, 0], ['fallsIn', -170, -10], ['fallsIn', -170, 10], ['under', 60, 0], ['canyonOut', 120, 0],
-    ['treeIn', -170, 0], ['caveIn', -110, 10], ['preLoop', 30, 0], ['loopOut', 260, -10]],
+    ['treeIn', -170, 0], ['caveIn', -110, 10], ['preLoop', 30, 0], ['loopOut', 260, -10], ['skullRun', -40, 0], ['skullView', 60, -10], ['skullView', 60, 10]],
   gates: [['start', -60, 0x60ffb0], ['crest1', -90, 0xffb020], ['canyonIn', -40, 0x9cff40], ['treeIn', -60, 0x40d8ff],
-    ['caveIn', -60, 0xffb020], ['preLoop', -40, 0xff4a8a]],
+    ['caveIn', -60, 0xffb020], ['preLoop', -40, 0xff4a8a], ['skullOut', -260, 0xffb020]],
   // the tunnels of vines over the deck
-  canopies: [['under', 90, 'under', 420], ['canyonOut', 70, 'canyonOut', 360], ['loopOut', 150, 'loopOut', 470]],
+  canopies: [['under', 90, 'under', 420], ['canyonOut', 70, 'canyonOut', 360], ['loopOut', 100, 'loopOut', 270]],
   // its light: emerald barriers, firefly lanes, warm gantries; moss on the steel and the deck's edges
   theme: { field: [0.1, 0.85, 0.4], fieldFlash: [0.75, 1.0, 0.7], strip: [0.06, 0.75, 0.25], stripCore: [0.8, 1.0, 0.7],
     lane: [0.35, 0.85, 0.05], laneCore: [0.95, 1.0, 0.65], spill: [0.3, 0.75, 0.08], stud: [1.6, 2.4, 0.8], trim: [0.15, 0.95, 0.35],
@@ -99,12 +107,12 @@ const HERO = [
 
 // the rest: scattered round the circuit (near: full detail; far: a ring out to 9 km, coarser, merged)
 // dens: how much of the far scenery the device gets (1 a desktop card, less an integrated GPU or a phone: Q.tier)
-function scatterIslands(track, rnd, dens = 1) {
+function scatterIslands(track, rnd, dens = 1, avoid = []) {
   const out = [], box = new THREE.Box3().setFromPoints(track.P);
   const coarse = track.P.filter((_, i) => i % 8 === 0);
   // (and clear of the Great Tree's crown and roots)
   const crown = { x: TREE_C.x, z: TREE_C.z, rx: 360, rz: 360 };
-  const clearOf = (x, z, r, list) => [...list, crown].every((q) => Math.hypot(q.x - x, q.z - z) > (q.rx + q.rz) / 2 + r + 40);
+  const clearOf = (x, z, r, list) => [...list, crown, ...avoid].every((q) => Math.hypot(q.x - x, q.z - z) > (q.rx + q.rz) / 2 + r + 40);
   for (let k = 0; k < 4000 && out.length < 34; k++) {
     const x = box.min.x - 900 + rnd() * (box.max.x - box.min.x + 1800), z = box.min.z - 900 + rnd() * (box.max.z - box.min.z + 1800);
     const r = 45 + 230 * Math.pow(rnd(), 2.2);
@@ -136,7 +144,7 @@ function scatterIslands(track, rnd, dens = 1) {
     const top = -980 + rnd() * 430, ground = groundHeight(x, z);
     if (top - ground < 120) continue;
     // under no island (their lowest tips come down to here)
-    if (![...HERO, ...out, ...far, ...karst].every((q) => Math.hypot(q.x - x, q.z - z) > (q.rx + q.rz) / 2 + r + 60 || q.top - q.depth > top + 80)) continue;
+    if (![...HERO, ...out, ...far, ...karst, ...avoid].every((q) => Math.hypot(q.x - x, q.z - z) > (q.rx + q.rz) / 2 + r + 60 || q.top - q.depth > top + 80)) continue;
     const e = 0.8 + rnd() * 0.4;
     karst.push({ name: 'karst' + karst.length, far: true, x, z, top, rx: r * e, rz: r / e, rot: rnd() * 6.28,
       depth: top - ground + 120, cliff: (top - ground) * 0.9, seed: 3000 + k, hill: 5, lobes: 1, taper: 3, crag: 1.3, res: 48 });
@@ -198,6 +206,8 @@ export class ForestWorld {
     lap('sky');
     this.track = new Track(FOREST_LAYOUT);
     this.trackGrid();
+    // the skeleton's bones (where they stand: the islands and the fliers keep clear of them)
+    this.skel = skeleton(this.track, { dens: this.dens });
     rockMaps(renderer);
     hullMaps(renderer);
     // the cave's dark, and the shade under the tunnels of vines (their centre lines: overgrowth.js)
@@ -218,9 +228,11 @@ export class ForestWorld {
     lap('planting');
     this.growTree(scene);
     lap('tree');
+    this.raiseSkeleton(scene);
+    lap('skeleton');
     // the fliers: their loops clear of every island, the tree's crown, and the track (45 m over it at least)
     const tr = this.track;
-    this.creatures = new Creatures(scene, [...this.islands.map((i) => i.I), { x: TREE_C.x, z: TREE_C.z, top: 280, rx: 360, rz: 360, depth: 900 }],
+    this.creatures = new Creatures(scene, [...this.islands.map((i) => i.I), { x: TREE_C.x, z: TREE_C.z, top: 280, rx: 360, rz: 360, depth: 900 }, ...this.skel.avoid],
       (p) => { const i = this.nearTrack(p, 150); if (i < 0) return null; const d = p.clone().sub(tr.P[i]);
         return Math.abs(d.dot(tr.R[i])) < 60 ? { y: d.dot(tr.U[i]) } : null; }, tr.P.reduce((a, q) => a.add(q), new THREE.Vector3()).divideScalar(tr.P.length));
     this.noAO.push(this.creatures.rays, this.creatures.birds, this.creatures.whaleMesh);      // (thin wings: no AO)
@@ -273,7 +285,7 @@ export class ForestWorld {
   }
 
   buildIslands(scene) {
-    const rnd = mulberry32(4711), list = [...HERO, ...scatterIslands(this.track, rnd, this.dens)];
+    const rnd = mulberry32(4711), list = [...HERO, ...scatterIslands(this.track, rnd, this.dens, this.skel.avoid)];
     const mat = islandMaterial(), near = [], far = [];
     this.islands = [];
     let pushed = 0;
@@ -457,6 +469,26 @@ export class ForestWorld {
       (bad.length ? ` - ${bad.length} points in the track's way!` : ''));
   }
 
+  // the skeleton: its skull (the track through its jaws) and neck seen near and far, its body in the jungle seen only
+  // far; the lianas that hold it up, the leaves and trees on it, the vines off it (clear of the track)
+  raiseSkeleton(scene) {
+    const K = this.skel, mat = boneMaterial(), F = this.flora;
+    const skull = new THREE.Mesh(K.skull, mat), neck = new THREE.Mesh(K.neck, mat), body = new THREE.Mesh(K.body, mat);
+    for (const m of [skull, neck]) { m.layers.set(2); m.layers.enable(6); }
+    body.layers.set(3); body.layers.enable(6);
+    const wood = new THREE.Mesh(mergeGeometries(K.lianas.map((l) => barkTube(l.path, l.radii, 10))), F.barkMat);
+    wood.layers.set(2); wood.layers.enable(6);
+    const leaves = new THREE.Mesh(leafCards(K.leaves, 'A', 53), F.leafMat);
+    leaves.layers.set(2); leaves.layers.enable(6);
+    skull.name = 'skeleton-skull'; neck.name = 'skeleton-neck'; body.name = 'skeleton-body'; wood.name = 'skeleton-lianas'; leaves.name = 'skeleton-leaves';
+    for (const m of [skull, neck, body, wood, leaves]) { m.castShadow = m.receiveShadow = true; scene.add(m); }
+    this.noAO.push(leaves, body);
+    const strands = K.strands.map((s) => this.clipStrand(s)).filter(Boolean);
+    F.addSector('skeleton', K.plants, strands);
+    const bad = trackClearance(this.track, [['skull', K.skull], ['neck', K.neck], ['lianas', wood.geometry], ['leaves', leaves.geometry]], { nearest: (p) => this.nearTrack(p, 60) });
+    console.info(`skeleton raised: ${strands.length} strands clear of the track` + (bad.length ? ` - ${bad.length} points in the track's way! ${JSON.stringify(bad.slice(0, 6))}` : ''));
+  }
+
   // where a fall's water would come near the deck (the slab round it, 30 m up): null if it never does
   fallHits(at, tMax) {
     const tr = this.track, d = new THREE.Vector3();
@@ -586,6 +618,7 @@ float rN(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
     const box = new THREE.Box3(), v = new THREE.Vector3();
     for (const isl of this.islands) if (!isl.I.far) { isl.geometry.computeBoundingBox(); box.union(isl.geometry.boundingBox); }
     if (this.tree) for (const g of [this.tree.wood, this.tree.leaves]) { g.computeBoundingBox(); box.union(g.boundingBox); }
+    if (this.skel) for (const g of [this.skel.skull, this.skel.neck]) { g.computeBoundingBox(); box.union(g.boundingBox); }
     const ctr = box.getCenter(new THREE.Vector3());
     let half = 0;
     for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {

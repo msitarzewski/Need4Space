@@ -242,6 +242,8 @@ export class Track {
     this.caves = CAVES.map(([a, fa, b, fb]) => [this.at(a, fa), this.at(b, fb)]);
     // covered stretches (the forest's tunnels of vines): no gantry, lamp post, board or gate inside one
     this.canopies = (L.canopies || []).map(([a, fa, b, fb]) => [this.at(a, fa), this.at(b, fb)]);
+    // and the stretches something else covers (the forest's skull): nothing of the track's own over the deck there
+    this.covers = (L.covers || []).map(([a, fa, b, fb]) => [this.at(a, fa), this.at(b, fb)]);
     // the cave's centre line (a polyline the shaders test every pixel against: inside it, no sun and no sky light)
     this.caveLines = this.caves.map(([s0, s1]) => {
       const len = this.wrap(s1 - s0), pts = [];
@@ -303,6 +305,7 @@ export class Track {
 
   inCanopy(s, pad = 0) {
     for (const [s0, s1] of this.canopies) if (this.inSpan(s, s0 - pad, s1 + pad)) return true;
+    for (const [s0, s1] of this.covers) if (this.inSpan(s, s0 - pad, s1 + pad)) return true;
     return false;
   }
 
