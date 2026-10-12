@@ -2,7 +2,9 @@
 // crescent ice giant over the south-east, the aurora over the north. The lap jumps a rift off the grid, weaves through
 // a garden of giant crystals, threads a wind-carved arch, rolls twice down a gallery of ice, bores through a glacier
 // (the dark section: an ice cave lit by its own blue and the ships), corkscrews down past frozen falls, loops over the
-// sea, jumps the second rift and sweeps home into the sunset.
+// sea, jumps the second rift and climbs to the ice shelf in the south: down the crevasse that splits it, out of its
+// western face and off the cliff among its bergs, then north over the broken sea ice - upside down under its own deck
+// for half a kilometre (two gravity flips), the floes and the bergs overhead - and home.
 import * as THREE from 'three';
 import { Track, TRACK_W, layout } from './track.js';
 import { setCave } from './look.js';
@@ -10,11 +12,13 @@ import { hullMaps } from './hull.js';
 import { bakeLater } from './bake.js';
 import { Q } from './quality.js';
 import { SUN_DIR, SUN_E, SUN_COL, iceSkyDome, iceStars, iceGiant, aurora } from './frost.js';
-import { IceSheet, iceMaps, iceSheetMaterial, setGroundGlow } from './glacier.js';
+import { IceSheet, iceMaps, iceSheetMaterial, setGroundGlow, setFloes } from './glacier.js';
 import { glacierMaterial, crystalMaterial, crystalGeometry, spireGeometry, sweptIce, TrackGrid, crystalField, glacier,
   icicleGeometry, frozenFall, mergeGeometries } from './spires.js';
 import { mulberry32, smoothstep } from './noise.js';
-import { Blizzard } from './blizzard.js';
+import { Blizzard, WIND } from './blizzard.js';
+import { IceShelf, bergGeometry, bergField } from './shelf.js';
+import { Storm } from './storm.js';
 export { SUN_DIR };
 const TRACK_W_HALF = TRACK_W / 2;
 
@@ -23,11 +27,32 @@ export const SHADOW_HALF = 10, SHADOW_NEAR = 300, SHADOW_FAR = 500;
 export const MID_HALF = 45, MID_NEAR = 250, MID_FAR = 550;
 export const FAR_HALF = 170, FAR_NEAR = 100, FAR_FAR = 900;
 // the ice cave's reach round its centre line and its mouths' fade (m)
-const CAVE_R = 40, CAVE_MOUTH = 50;
+const CAVE_R = 52, CAVE_MOUTH = 50;
+// the ice shelf's outline (shelf.js roughens it), the field of bergs off its western face, and where the sea ice is
+// broken into floes (x, z, radius: soft discs)
+const SHELF = [[330, 1760], [740, 1790], [1150, 1790], [1300, 2300], [1280, 2900], [1150, 3400], [800, 3640], [400, 3600],
+  [130, 3450], [150, 3200], [220, 2700], [300, 2200]];
+const BERGS = { c: new THREE.Vector3(-450, 0, 2500), r: 1000 };
+const FLOES = [[-450, 2500, 1300], [700, 2700, 1250], [780, 1450, 650]];
+const calm = (x, z) => FLOES.reduce((k, [cx, cz, r]) => Math.max(k, smoothstep(r, r * 0.55, Math.hypot(x - cx, z - cz))), 0);
 
 // The circuit (x east, y up, z south; the ice at y = 0). The grid faces north up the causeway toward the aurora.
 const P = [];
 const pt = (x, y, z, bank = 0, name = null) => P.push([x, y, z, bank, name]);
+// a run of circular arcs from (x, z) heading h (rad, from south toward east), the height easing from y0 to y1:
+// [[length, turn (deg, + to the left)]], a point every ~70 m, banked into each arc by its radius; the last one named
+const arcs = (x, z, h, y0, y1, list, last) => {
+  const total = list.reduce((a, [L]) => a + L, 0);
+  let d = 0;
+  list.forEach(([L, turn], j) => {
+    const n = Math.max(1, Math.round(L / 70)), dh = THREE.MathUtils.degToRad(turn) / n, R = turn ? L / Math.abs(dh * n) : 0;
+    for (let k = 0; k < n; k++) {
+      h += dh / 2; x += Math.sin(h) * L / n; z += Math.cos(h) * L / n; h += dh / 2; d += L / n;
+      pt(x, y0 + (y1 - y0) * d / total, z, turn ? -Math.sign(turn) * Math.min(24, 4200 / R) : 0, j === list.length - 1 && k === n - 1 ? last : null);
+    }
+  });
+  return { x, z, h };
+};
 pt(-100, 44, 1020); pt(-30, 44, 800); pt(0, 44, 560, 0, 'start'); pt(0, 46, 300);
 pt(0, 62, 40, 0, 'crest1'); pt(0, 44, -120); pt(-30, 40, -380);                              // the first rift
 // the crystal garden: sweepers among the giant crystals, climbing to a crest ~150 m over the ice
@@ -44,23 +69,38 @@ for (let k = 0; k <= 12; k++) {
   const a = (k / 12) * Math.PI * 2;
   pt(1000 - 80 * k / 12, 104 - 80 * Math.cos(a), 220 + 80 * Math.sin(a), 0, k === 0 ? 'loopIn' : k === 12 ? 'loopOut' : null);
 }
-// the second rift, and the long sweep home into the sunset
-pt(915, 30, 420); pt(905, 48, 600, 0, 'crest2'); pt(890, 30, 760); pt(830, 38, 1030, 18, 'back'); pt(660, 66, 1290, 30);
-pt(420, 100, 1450, 28); pt(170, 112, 1500, 24); pt(-40, 92, 1420, 24); pt(-130, 64, 1240, 14);
+// the second rift, then the long climb south to the ice shelf
+pt(915, 30, 420); pt(905, 48, 600, 0, 'crest2'); pt(890, 30, 760); pt(830, 38, 1030, -8, 'back'); pt(790, 70, 1330);
+pt(730, 120, 1600); pt(700, 145, 1800, 0, 'canyonIn');
+// down the crevasse that splits it: an S of ~300 m bends between its walls, a long right-hander, out of its western face
+// (shelf.js)
+const exit = arcs(700, 1800, Math.atan2(-30, 200), 145, 100,
+  [[60, 0], [170, 22], [300, -44], [300, 44], [170, -22], [100, 0], [500, -76], [60, 0]], 'canyonOut');
+// the dive off the cliff past the falls to the broken sea ice, among the bergs; north over the floes and home
+pt(exit.x + Math.sin(exit.h) * 260, 58, exit.z + Math.cos(exit.h) * 260, 0, 'dive');
+pt(exit.x + Math.sin(exit.h) * 500, 24, exit.z + Math.cos(exit.h) * 500); pt(-500, 22, 3150, 12); pt(-640, 24, 2990, 16);
+pt(-705, 28, 2780, 10);
+// gravity flips: up onto the underside of the deck overhead, half a kilometre upside down over the floes (the bergs
+// hanging overhead, the aurora under the nose), and back down
+pt(-714, 30, 2560, 0, 'flipA'); pt(-714, 56, 2340, 180, 'flipB'); pt(-704, 58, 2060, 180, 'floes');
+pt(-680, 58, 1830, 180, 'flipC'); pt(-650, 36, 1630, 0, 'flipD'); pt(-520, 40, 1420, 12); pt(-300, 44, 1220, 10);
 
 export const ICE_LAYOUT = layout(P, {
   start: [0, 44, 560],
   loops: [['loopIn', 'loopOut']],
   gaps: [['crest1', 35, 105], ['crest2', 35, 105]],
   caves: [['caveIn', -20, 'caveOut', 20]],
+  flips: [['flipA', 'flipB'], ['flipC', 'flipD']],
   pads: [['start', 330, 0], ['garden', -260, -10], ['garden', -260, 10], ['arch', 120, 0], ['rollOut', 140, 0],
-    ['caveIn', 160, -10], ['preLoop', 20, 0], ['back', -120, 10], ['back', 260, -10]],
+    ['caveIn', 160, -10], ['preLoop', 20, 0], ['back', -120, 10], ['back', 260, -10], ['canyonIn', 380, 0],
+    ['dive', 120, -10], ['floes', 40, 0], ['flipD', 220, -10]],
   gates: [['start', -60, 0xff3aa8], ['crest1', -90, 0xffb020], ['garden', -40, 0x40ffd0], ['rollIn', -40, 0xb060ff],
-    ['caveIn', -70, 0x40c8ff], ['preLoop', -40, 0xff3aa8], ['crest2', -90, 0xffb020]],
+    ['caveIn', -70, 0x40c8ff], ['preLoop', -40, 0xff3aa8], ['crest2', -90, 0xffb020], ['canyonIn', -80, 0x40c8ff],
+    ['dive', -60, 0xffb020]],
   // its light: magenta barriers, ice-white lanes, cold gantries
   theme: { field: [1.0, 0.14, 0.62], fieldFlash: [1.0, 0.75, 0.95], strip: [1.0, 0.06, 0.42], stripCore: [1.0, 0.8, 0.92],
     lane: [0.05, 0.7, 1.0], laneCore: [0.85, 0.97, 1.0], spill: [0.04, 0.5, 0.9], stud: [1.0, 2.2, 2.8], trim: [1.2, 0.12, 0.6],
-    gantry: [1.6, 2.4, 3.2], lamp: [2.2, 2.7, 3.4], moss: false, frost: true },
+    gantry: [1.6, 2.4, 3.2], lamp: [2.2, 2.7, 3.4], moss: false, frost: true, flip: [0.36, 0.42, 1.0] },
 });
 
 export class IceWorld {
@@ -80,6 +120,8 @@ export class IceWorld {
     this.dome = iceSkyDome(renderer, Q.tier === 'low' ? 384 : 768);
     this.aurora = aurora();
     this.sky.add(this.stars, this.giant, this.dome, this.aurora);
+    // the storm in the east: its clouds in the reflections too (baked before them)
+    this.storm = new Storm(renderer, this.sky);
     // reflections: the sky without the sun's disc (the sun light makes its own highlight)
     bakeLater([[this.sky, this.skyCam]], () => {
       this.dome.material.uniforms.sunDisc.value = 0;
@@ -89,7 +131,8 @@ export class IceWorld {
       this.dome.material.uniforms.sunDisc.value = 1;
       scene.environment = this.env;
     });
-    scene.environmentIntensity = 0.6;
+    scene.environmentIntensity = this.envK = 0.6;
+    this.scene = scene;
     this.exposure = 1.0;
     scene.fog = new THREE.FogExp2(0xffffff, 1e-4);       // (on: the air's own chunk does the work, frost.js)
     const sunLight = (intensity, half, near, far, normalBias) => {
@@ -113,9 +156,11 @@ export class IceWorld {
     this.track = new Track(ICE_LAYOUT);
     hullMaps(renderer);
     setCave(this.track.caveLines, CAVE_R, CAVE_MOUTH);
+    this.shelf = new IceShelf(this.track, SHELF, [this.track.at('canyonIn', -500), this.track.at('canyonOut', 500)]);
     this.track.meshes(scene);
     this.track.bakeDeck(renderer);
-    this.noAO = [];
+    // (the flips' tubes of light: no occluders to the ambient occlusion)
+    this.noAO = (this.track.parts.flips || []).filter((m) => m.material.transparent);
     lap('track');
     // (layer 2: seen, but in no cascade's shadow - the scenery; 3 and 4: drawn only in the far / the near depth slice)
     camera.layers.enable(2); camera.layers.enable(3); camera.layers.enable(4);
@@ -136,6 +181,7 @@ export class IceWorld {
     // the weather: snow streaming across the circuit, diamond dust, the ships' wakes of ice dust (blizzard.js)
     this.snow = new Blizzard(scene, this.dens);
     this.snow.plumes(scene, this.plumeTips);
+    this.snow.geysers(scene, this.ventSpots());
     this.noAO.push(...this.snow.meshes);
     this.wakeShips = [];
     this.minimap = this.track;
@@ -148,13 +194,14 @@ export class IceWorld {
   buildGround(scene, renderer) {
     const tr = this.track, box = new THREE.Box3().setFromPoints(tr.P), C = box.getCenter(new THREE.Vector3()).setY(0);
     const f = {};
-    const rifts = tr.gaps.map(([s0, s1]) => {
+    const rifts = tr.gaps.filter((g) => !tr.flips.includes(g)).map(([s0, s1]) => {
       tr.frame((s0 + tr.wrap(s1 - s0) / 2), f);
       const dir = f.R.clone().setY(0).normalize();
       return { c: f.P.clone().setY(0), dir, len: 1100, wid: 95, depth: 90 };
     });
-    this.ground = new IceSheet(C, rifts);
+    this.ground = new IceSheet(C, rifts, calm);
     iceMaps(renderer);
+    this.floeMap();
     const mat = (this.groundMat = iceSheetMaterial());
     // (an integrated GPU or a phone: fewer segments round - the drifts are tens of metres across)
     const seg = this.dens < 1 ? 0.7 : 1;
@@ -203,13 +250,14 @@ export class IceWorld {
       const x = box.min.x - 900 + rnd() * (box.max.x - box.min.x + 1800), z = box.min.z - 900 + rnd() * (box.max.z - box.min.z + 1800);
       const p = new THREE.Vector3(x, 0, z), i = grid.nearest(p, 1e9);
       const d = i < 0 ? 1e9 : Math.hypot(tr.P[i].x - x, tr.P[i].z - z);
-      if (d < 140 || G.sample(x, z).rift > 0.05) continue;
+      if (d < 140 || G.sample(x, z).rift > 0.05 || this.byShelf(x, z, 160)) continue;
       p.y = G.height(x, z);
       clusters.push({ c: p, n: 3 + Math.floor(rnd() * 8), size: 40 + 200 * Math.pow(rnd(), 1.8) });
     }
     const giants = [];
     for (let k = 0; k < 14; k++) {
       const a = rnd() * Math.PI * 2, d = 2200 + rnd() * 1800, x = ctr.x + Math.cos(a) * d, z = ctr.z + Math.sin(a) * d;
+      if (this.byShelf(x, z, 400)) continue;
       giants.push({ c: new THREE.Vector3(x, G.height(x, z), z), n: 5 + Math.floor(rnd() * 6), size: 260 + rnd() * 380 });
     }
     const cMat = (this.crystalMat = crystalMaterial()), cGeo = crystalGeometry();
@@ -230,14 +278,30 @@ export class IceWorld {
       const x = box.min.x - 700 + rnd() * (box.max.x - box.min.x + 1400), z = box.min.z - 700 + rnd() * (box.max.z - box.min.z + 1400);
       const i = grid.nearest(new THREE.Vector3(x, 0, z), 1e9), d = i < 0 ? 1e9 : Math.hypot(tr.P[i].x - x, tr.P[i].z - z);
       const h = 90 + 260 * Math.pow(rnd(), 1.5), r = h * (0.1 + 0.06 * rnd());
-      if (d < r + 90 || G.sample(x, z).rift > 0.05) continue;
+      if (d < r + 90 || G.sample(x, z).rift > 0.05 || this.byShelf(x, z, r + 120)) continue;
       const g = spireGeometry(h, r, 100 + k).translate(x, G.height(x, z), z);
       if (grid.geometryClear(g, 4, 3) < 0) continue;
       spires.push(g);
     }
+    // and needles of it right by the track, their tips over the deck (the speed against them)
+    const rn = mulberry32(5150);
+    let needles = 0;
+    for (let s = 200; s < tr.length - 100; s += 90 + rn() * 110) {
+      if (tr.inGap(s, 120) || tr.inLoop(s, 160) || tr.inCave(s, 120)) continue;
+      tr.frame(s, f);
+      const R = f.R.clone().setY(0).normalize(), sd = rn() < 0.5 ? -1 : 1;
+      const h = Math.min(260, Math.max(30, f.P.y) * (0.9 + 1.4 * rn()) + 20), r = h * (0.08 + 0.05 * rn()), lat = TRACK_W_HALF + 16 + r + 40 * rn();
+      const x = f.P.x + R.x * sd * lat, z = f.P.z + R.z * sd * lat;
+      if (this.byShelf(x, z, r + 40) || G.sample(x, z).rift > 0.05) continue;
+      const g = spireGeometry(h, r, 300 + needles, { seg: 14, rows: 28 }).translate(x, G.height(x, z), z);
+      if (grid.geometryClear(g, 3, 2) < 0) continue;
+      spires.push(g);
+      needles++;
+    }
     for (let k = 0; k < 26; k++) {
       const a = rnd() * Math.PI * 2, d = 2600 + rnd() * 2600, x = ctr.x + Math.cos(a) * d, z = ctr.z + Math.sin(a) * d;
       const h = 300 + 500 * rnd();
+      if (this.byShelf(x, z, 300)) continue;
       farSpires.push(spireGeometry(h, h * (0.09 + 0.05 * rnd()), 900 + k, { seg: 14, rows: 32 }).translate(x, G.height(x, z), z));
     }
     add(new THREE.Mesh(mergeGeometries(spires), ice), 'spires');
@@ -307,7 +371,57 @@ export class IceWorld {
       for (const t of bins.values()) this.plumeTips.push({ p: t, s: 0.9 });
       console.info(`glacier: ${(gl.shell.index.count / 3000).toFixed(0)} k tris, bore ${(gl.bore.index.count / 3000).toFixed(0)} k, ${gl.icicles.length} icicles, ${falls.length} falls`);
     }
-    console.info(`crystals: ${cf.mats.length} (+${cg.mats.length} far, ${cf.dropped} dropped clear of the track), spires ${spires.length} + ${farSpires.length}`);
+    // ---- the ice shelf (shelf.js): its faces and top, the bridges over its crevasse, falls down its cliffs, its bergs
+    {
+      const sh = this.shelf, fallMat = glacierMaterial({ key: 'falls', glow: 2.0, snow: 0.3 });
+      add(new THREE.Mesh(sh.geometry(), (this.shelfMat = glacierMaterial({ key: 'shelf', glow: 2.2, walls: true }))), 'ice-shelf');
+      const br = sh.bridges(grid), fl = sh.falls();
+      if (br.length) add(new THREE.Mesh(mergeGeometries(br), ice), 'ice-bridges');
+      if (fl.length) add(new THREE.Mesh(mergeGeometries(fl), fallMat), 'shelf-falls');
+      const bergs = (this.bergs = bergField(tr, sh, BERGS.c, BERGS.r, 70));
+      for (const kind of [0, 1, 2]) for (const v of [0, 1]) {
+        const list = bergs.filter((b) => b.kind === kind && b.v === v);
+        if (!list.length) continue;
+        const im = new THREE.InstancedMesh(bergGeometry(kind, 7 + kind * 2 + v), ice, list.length);
+        list.forEach((b, i) => im.setMatrixAt(i, b.m));
+        im.computeBoundingSphere();
+        add(im, `bergs-${kind}${v}`);
+      }
+      this.plumeTips.push(...sh.plumeTips(WIND));
+      console.info(`shelf: ${(sh.tris / 1000).toFixed(0)} k tris, crevasse ${(sh.sOut - sh.sIn).toFixed(0)} m, ${br.length} bridges, ${fl.length} falls, ${bergs.length} bergs`);
+    }
+    console.info(`crystals: ${cf.mats.length} (+${cg.mats.length} far, ${cf.dropped} dropped clear of the track), spires ${spires.length} (${needles} by the track) + ${farSpires.length}`);
+  }
+
+  // on the shelf or in its bergs' field (within m)
+  byShelf(x, z, m) {
+    return this.shelf.near(x, z, m) || Math.hypot(x - BERGS.c.x, z - BERGS.c.z) < BERGS.r + m;
+  }
+
+  // the floes' map over the shelf's sea: r how open the sea ice is, g under the shelf (all water: its crevasse's floor
+  // is the sea) - a small map; glacier.js breaks it into floes per pixel
+  floeMap() {
+    const N = 512, pad = 200;
+    const x0 = Math.min(...FLOES.map(([x, , r]) => x - r)) - pad, z0 = Math.min(...FLOES.map(([, z, r]) => z - r)) - pad;
+    const size = Math.max(...FLOES.map(([x, , r]) => x + r - x0), ...FLOES.map(([, z, r]) => z + r - z0)) + pad;
+    const c = document.createElement('canvas');
+    c.width = c.height = N;
+    const g = c.getContext('2d'), img = g.createImageData(N, N);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const k = (j * N + i) * 4;
+      img.data[k] = 255 * calm(x0 + ((i + 0.5) / N) * size, z0 + ((j + 0.5) / N) * size);
+      img.data[k + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+    g.globalCompositeOperation = 'lighter';
+    g.fillStyle = '#00ff00';
+    g.beginPath();
+    this.shelf.coast.forEach(([x, z], i) => g[i ? 'lineTo' : 'moveTo'](((x - x0) / size) * N, ((z - z0) / size) * N));
+    g.fill();
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.NoColorSpace;
+    tex.flipY = false;
+    setFloes(tex, x0, z0, size);
   }
 
   // the crystals' light pooled on the ice round them: painted once into a map over the ground (glacier.js reads it)
@@ -397,6 +511,24 @@ export class IceWorld {
     if (this.snow.plume) this.snow.plume.visible = snow;
     this.snow.dust.visible = v.iceDust !== false;
     this.aurora.visible = v.aurora !== false;
+    this.storm.visible = v.iceStorm !== false;
+    this.snow.vents.visible = v.iceGeysers !== false;
+  }
+
+  // the geysers' vents: in the leads of the broken sea ice along the climb to the shelf and over the floes, out to
+  // either side of the track, clear of the shelf and of the bergs
+  ventSpots() {
+    const tr = this.track, rnd = mulberry32(4040), f = {}, out = [];
+    for (const [a, b] of [[tr.at('back', 300), tr.at('canyonIn', -120)], [tr.at('dive', 200), tr.at('flipD', 300)]]) {
+      for (let s = a; s < b; s += 200 + rnd() * 160) {
+        tr.frame(s, f);
+        const R = f.R.clone().setY(0).normalize(), sd = rnd() < 0.5 ? -1 : 1, lat = 75 + rnd() * 80;
+        const x = f.P.x + R.x * sd * lat, z = f.P.z + R.z * sd * lat;
+        if (calm(x, z) < 0.3 || this.shelf.near(x, z, 60) || this.bergs.some((g) => Math.hypot(g.x - x, g.z - z) < g.r + 25)) continue;
+        out.push({ p: new THREE.Vector3(x, this.ground.height(x, z) - 1, z), s: 0.8 + 0.5 * rnd() });
+      }
+    }
+    return out;
   }
 
   // the static casters on (the world's map is about to be drawn) or off (it has been)
@@ -445,6 +577,11 @@ export class IceWorld {
     this.stars.material.uniforms.pr.value = pr;
     this.stars.material.uniforms.time.value = t;
     this.aurora.material.uniforms.time.value = t;
+    // the lightning: a flicker of the sky's light over everything
+    if (this.storm.clouds.visible) {
+      this.storm.update(t);
+      this.scene.environmentIntensity = this.envK * (1 + 0.7 * this.storm.flash);
+    }
     const dt = Math.max(0, t - (this.lastT ?? t));
     this.track.update(t, shipPos, dt);
     this.lastT = t;
