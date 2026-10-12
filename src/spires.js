@@ -36,13 +36,15 @@ float spN(vec3 x) {
 // Glacier ice: bands of old ice laid down year on year (deep blue, pale, a line of grit), warped; frost dulling it in
 // patches; snow wherever a face looks up; and its own light - the blue the ice lets through, strongest where it is
 // thin (the geometry's 'glow' per vertex) and seen straight on. lamps: the point and spot lights too (the cave)
-export function glacierMaterial({ key = 'glacier', lamps = false, glow = 1, side = THREE.FrontSide, snow = 1 } = {}) {
+// shadows: false - no shadow map looked up at all (the cave, where the sun is cut)
+export function glacierMaterial({ key = 'glacier', lamps = false, glow = 1, side = THREE.FrontSide, snow = 1, shadows = true } = {}) {
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0, side });
   if (!lamps) mat.defines = { ...mat.defines, FOLIAGE_SHADOW: '' };
   mat.onBeforeCompile = (sh) => {
     const lite = Q.lite ? '#define SP_LITE\n' : '';
     sh.vertexShader = lite + sh.vertexShader.replace('#include <common>', `#include <common>
-attribute float glow; varying float vGlow; varying vec3 vGW; varying vec3 vGN;`)
+attribute float glow; varying float vGlow; varying vec3 vGW; varying vec3 vGN; varying vec4 vGA;
+${GLSL_N}`)
       .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
   vGlow = glow;
   {
@@ -51,24 +53,26 @@ attribute float glow; varying float vGlow; varying vec3 vGW; varying vec3 vGN;`)
     tw = instanceMatrix * tw; tn = mat3(instanceMatrix) * tn;
   #endif
     vGW = (modelMatrix * tw).xyz; vGN = normalize(mat3(modelMatrix) * tn);
+    // (the noises that vary over tens of metres, per vertex: the bands' warp, the frost's patches, the grit's, the snow's
+    // edge - per pixel they were most of the shader, and the cave's walls fill the screen)
+    vGA = vec4(spN(vGW * 0.012) * 26.0 + spN(vGW * 0.05) * 5.0, spN(vGW * 0.035 + 7.0), spN(vGW * 0.03 + 4.0), spN(vGW * 0.08));
   }`);
-    sh.fragmentShader = lite + sh.fragmentShader.replace('#include <common>', `#include <common>
-varying float vGlow; varying vec3 vGW; varying vec3 vGN;
+    sh.fragmentShader = lite + (shadows ? '' : '#undef USE_SHADOWMAP\n') + sh.fragmentShader.replace('#include <common>', `#include <common>
+varying float vGlow; varying vec3 vGW; varying vec3 vGN; varying vec4 vGA;
 ${GLSL_N}
 float gSnow = 0.0, gBand = 0.0;`)
       .replace('#include <map_fragment>', `#include <map_fragment>
   vec3 gn = normalize(vGN);
-  float warp = spN(vGW * 0.012) * 26.0 + spN(vGW * 0.05) * 5.0;
-  float y = vGW.y + warp;
+  float y = vGW.y + vGA.x;
   float band = 0.5 + 0.5 * sin(y * 0.21) * (0.6 + 0.4 * sin(y * 0.047 + 1.3));
-  float grit = smoothstep(0.93, 0.99, 0.5 + 0.5 * sin(y * 0.083 + 0.7)) * smoothstep(0.4, 0.7, spN(vGW * 0.03 + 4.0));
+  float grit = smoothstep(0.93, 0.99, 0.5 + 0.5 * sin(y * 0.083 + 0.7)) * smoothstep(0.4, 0.7, vGA.z);
   gBand = band;
   vec3 deep = vec3(0.008, 0.05, 0.1), pale = vec3(0.1, 0.34, 0.48);
   vec3 alb = mix(deep, pale, band * 0.8 + 0.2 * spN(vGW * 0.11));
   alb = mix(alb, vec3(0.03, 0.03, 0.035), grit * 0.7);
-  float frost = smoothstep(0.45, 0.75, spN(vGW * 0.035 + 7.0) * 0.7 + spN(vGW * 0.2) * 0.3);
+  float frost = smoothstep(0.45, 0.75, vGA.y * 0.7 + spN(vGW * 0.2) * 0.3);
   alb = mix(alb, vec3(0.32, 0.45, 0.55), frost * 0.45);
-  gSnow = smoothstep(0.55, 0.75, gn.y + (spN(vGW * 0.08) - 0.5) * 0.5) * ${snow.toFixed(2)};
+  gSnow = smoothstep(0.55, 0.75, gn.y + (vGA.w - 0.5) * 0.5) * ${snow.toFixed(2)};
   alb = mix(alb, vec3(0.62, 0.78, 1.0), gSnow);
   diffuseColor.rgb = alb;
   float gRough = mix(mix(0.08, 0.45, frost), 0.75, gSnow);`)
@@ -92,7 +96,7 @@ float gSnow = 0.0, gBand = 0.0;`)
   }`);
     if (!lamps) sh.fragmentShader = sunOnly(sh.fragmentShader);
   };
-  mat.customProgramCacheKey = () => `ice-${key}-${lamps}-${glow}-${snow}-${Q.lite}`;
+  mat.customProgramCacheKey = () => `ice-${key}-${lamps}-${glow}-${snow}-${shadows}-${Q.lite}`;
   return mat;
 }
 
@@ -268,8 +272,10 @@ export function crystalField(clusters, grid, ground, seed = 7) {
   const HUES = [[0.08, 0.72, 1.0], [0.08, 0.72, 1.0], [0.06, 0.55, 1.0], [0.1, 0.85, 1.0], [0.15, 0.32, 1.0], [0.15, 0.32, 1.0],
     [0.45, 0.25, 1.0], [0.1, 0.95, 0.62], [0.85, 0.2, 1.0]].map((c) => new THREE.Color(...c));
   let dropped = 0;
+  const pools = [];
   for (const cl of clusters) {
     const hue = HUES[Math.floor(rnd() * HUES.length)];
+    const n0 = mats.length;
     for (let k = 0; k < cl.n; k++) {
       const L = cl.size * (0.35 + 0.65 * Math.pow(rnd(), 0.7)) * (k === 0 ? 1.25 : 1), r = L * (0.09 + rnd() * 0.07);
       // tilted out from the cluster's middle (the first one stands up)
@@ -287,8 +293,9 @@ export function crystalField(clusters, grid, ground, seed = 7) {
       mats.push(M.compose(p, q, s).clone());
       cols.push(hue.clone().multiplyScalar(0.75 + 0.5 * rnd()).lerp(HUES[Math.floor(rnd() * HUES.length)], 0.25 * rnd()));
     }
+    if (mats.length > n0) pools.push({ x: cl.c.x, z: cl.c.z, r: cl.size * 0.75, col: hue, k: Math.min(1, (mats.length - n0) / 5) });
   }
-  return { mats, cols, dropped };
+  return { mats, cols, dropped, pools };
 }
 
 // ---------------------------------------------------------------- the glacier and its cave

@@ -60,7 +60,7 @@ export class Blizzard {
     this.U = U;
     // ---- the streams: low over the deck (its plane at the camera: deckP, deckU), veils of fine snow and single
     // flakes streaking past, gathered into bands that drift across the track with the wind
-    const NS = Math.round(3200 * dens), BOX = 140, BOXV = 26;
+    const NS = Math.round(5200 * dens), BOX = 140, BOXV = 26;
     this.deckP = new THREE.Vector3(); this.deckU = new THREE.Vector3(0, 1, 0);
     this.streams = new THREE.Mesh(quads(NS, (r) => [r(), r(), r(), r()]), new THREE.ShaderMaterial({
       transparent: true, depthWrite: false,
@@ -75,25 +75,25 @@ export class Blizzard {
         varying vec2 vUv; varying float vA; varying float vK; varying vec3 vC; varying float vVeil;
         void main() {
           vUv = uv;
-          float veil = step(seed.w, 0.6);
+          float veil = step(seed.w, 0.45);
           float spd = 0.75 + 0.5 * fract(seed.w * 7.3);
           vec3 box = vec3(${BOX.toFixed(1)}, ${BOXV.toFixed(1)}, ${BOX.toFixed(1)}), ctr = cam - vec3(0.0, 4.0, 0.0);
           vec3 p = seed.xyz * box + wind * spd * time + vec3(0.0, sin(time * 1.7 + seed.w * 40.0) * 0.7, 0.0);
           p = mod(p - ctr + box * 0.5, box) - box * 0.5 + ctr;
           // the bands of driven snow: a field drifting with the wind, thin in its gaps
           float n = bzN((p - wind * time * 0.85) * vec3(0.016, 0.06, 0.016)) * 0.75 + bzN(p * 0.05 - time * 0.2) * 0.25;
-          float on = smoothstep(0.44, 0.66, n);
+          float on = smoothstep(0.42, 0.62, n);
           // hugging the deck: thickest in its first metres, none under it
           float h = dot(p - deckP, deckU);
           float slab = smoothstep(-0.4, 0.8, h) * smoothstep(13.0, 2.5, h);
           vec3 rel = p - cam; float d = length(rel);
           float a = on * slab * smoothstep(${(BOX * 0.5).toFixed(1)}, ${(BOX * 0.22).toFixed(1)}, d) * smoothstep(1.5, 6.0, d);
           float kk;
-          float size = veil > 0.5 ? 1.2 + 2.6 * fract(seed.w * 13.1) : 0.12 + 0.12 * fract(seed.w * 5.7);
-          gl_Position = a > 0.003 ? bzStreak(p, wind * spd - camVel, size, veil > 0.5 ? 0.012 : 0.03, veil > 0.5 ? 5.0 : 9.0, kk) : vec4(0.0, 0.0, -2.0, 1.0);
+          float size = veil > 0.5 ? 0.5 + 1.1 * fract(seed.w * 13.1) : 0.12 + 0.12 * fract(seed.w * 5.7);
+          gl_Position = a > 0.003 ? bzStreak(p, wind * spd - camVel, size, veil > 0.5 ? 0.3 : 0.05, veil > 0.5 ? 12.0 : 9.0, kk) : vec4(0.0, 0.0, -2.0, 1.0);
           vK = kk; vVeil = veil;
-          vA = a * (veil > 0.5 ? 0.16 : 0.75) * (1.0 + 0.35 * kk) / (1.0 + kk) * k;
-          vC = bzLight(normalize(rel)) * 1.6;
+          vA = a * (veil > 0.5 ? 0.5 : 1.0) * (1.0 + 0.35 * kk) / (1.0 + kk) * k;
+          vC = bzLight(normalize(rel)) * (veil > 0.5 ? 1.6 : 3.2);
         }`,
       fragmentShader: /* glsl */`
         varying vec2 vUv; varying float vA; varying float vK; varying vec3 vC; varying float vVeil;
@@ -159,36 +159,33 @@ export class Blizzard {
       vertexShader: /* glsl */`
         ${ICE_GLSL}
         ${SNOW_LIGHT}
-        uniform float time, k; uniform vec3 cam, wind;
+        ${STRETCH}
+        uniform float time, k; uniform vec3 cam, camVel, wind;
         attribute vec4 wa; attribute vec4 wb;
-        varying vec2 vUv; varying float vA; varying vec3 vC; varying float vR;
+        varying vec2 vUv; varying float vA; varying vec3 vC; varying float vK;
         void main() {
           vUv = uv;
-          float age = time - wa.w, life = 1.5;
+          float age = time - wa.w, life = 1.4;
           if (age < 0.0 || age > life) { gl_Position = vec4(0.0, 0.0, -2.0, 1.0); vA = 0.0; return; }
           float f = age / life;
-          // flung off at the ship's pace, braked hard by the air, carried off downwind, rising a little
+          // flung off at the ship's pace, braked hard by the air, carried off downwind, rising a little; streaked by
+          // its motion against the camera's (a spray, not puffs)
           vec3 p = wa.xyz + wb.xyz * (1.0 - exp(-4.0 * age)) / 4.0 + wind * 0.4 * age + vec3(0.0, 1.2 * age, 0.0);
-          float size = wb.w * (0.5 + 2.6 * sqrt(f));
-          vec4 mv = viewMatrix * vec4(p, 1.0);
-          float rot = fract(wa.x * 0.37 + wa.z * 0.71) * 6.28 + age * 0.8;
-          vec2 c = vec2(cos(rot), sin(rot));
-          mv.xy += mat2(c.x, c.y, -c.y, c.x) * position.xy * size;
-          gl_Position = projectionMatrix * mv;
-          vR = fract(wa.x * 1.37 + wa.y * 0.31);
+          vec3 v = wb.xyz * exp(-4.0 * age) + wind * 0.4 + vec3(0.0, 1.2, 0.0);
+          float size = wb.w * (0.45 + 2.0 * sqrt(f)), kk;
+          gl_Position = bzStreak(p, v - camVel, size, 0.02, 7.0, kk);
+          vK = kk;
           float d = length(p - cam);
-          vA = smoothstep(0.0, 0.06, f) * (1.0 - f) * (1.0 - f) * smoothstep(1.5, 6.0, d) * 0.55 * k;
+          vA = smoothstep(0.0, 0.05, f) * (1.0 - f) * (1.0 - f) * smoothstep(2.0, 8.0, d) * 0.75 * k * (1.0 + 0.5 * kk) / (1.0 + kk);
           vC = vec3(0.1, 0.13, 0.19) + bzLight(normalize(p - cam)) * 1.8;
         }`,
       fragmentShader: /* glsl */`
-        varying vec2 vUv; varying float vA; varying vec3 vC; varying float vR;
-        ${NOISE}
+        varying vec2 vUv; varying float vA; varying vec3 vC; varying float vK;
         void main() {
-          vec2 q = vUv - 0.5;
-          float r = length(q) * 2.0;
-          float lump = bzN(vec3(q * 5.0, vR * 9.0)) * 0.6 + 0.4;
-          float m = smoothstep(1.0, 0.2, r + (lump - 0.7) * 0.6);
-          gl_FragColor = vec4(vC, m * vA);
+          vec2 q = vec2((vUv.x - 0.5) * 2.0, (vUv.y - 0.5) * 2.0 * (vK + 1.0));
+          q.y = max(abs(q.y) - vK, 0.0);
+          float m = max(1.0 - length(q), 0.0);
+          gl_FragColor = vec4(vC, m * m * vA);
         }`,
     }));
     this.wI = 0;
@@ -196,6 +193,71 @@ export class Blizzard {
     this.meshes = [this.streams, this.dust, this.wakes];
     this.last = null;
     this._v = new THREE.Vector3();
+  }
+
+  // Spindrift: snow torn off the high points (spire tips, the glacier's crest) and streamed out downwind for hundreds of
+  // metres - a train of soft puffs per plume, each running out along it and fading, the train drooping and swaying;
+  // lit gold and rose looking toward the low sun (snow scatters forward), blue-grey away from it.
+  // tips: [{ p: Vector3, s: scale (~1 for a 200 m spire) }]
+  plumes(scene, tips, per = 22) {
+    const n = tips.length * per, rnd = mulberry32(5150);
+    const quad = new THREE.PlaneGeometry(1, 1), g = new THREE.InstancedBufferGeometry();
+    g.index = quad.index;
+    g.setAttribute('position', quad.attributes.position);
+    g.setAttribute('uv', quad.attributes.uv);
+    const a = new Float32Array(n * 4), b = new Float32Array(n * 4);
+    tips.forEach((tp, i) => {
+      for (let k = 0; k < per; k++) {
+        const j = i * per + k;
+        a.set([tp.p.x, tp.p.y, tp.p.z, tp.s], j * 4);
+        b.set([(k + rnd() * 0.6) / per, rnd(), i * 1.37 + rnd() * 0.2, 0.7 + 0.6 * rnd()], j * 4);
+      }
+    });
+    g.setAttribute('pa', new THREE.InstancedBufferAttribute(a, 4));
+    g.setAttribute('pb', new THREE.InstancedBufferAttribute(b, 4));
+    g.instanceCount = n;
+    this.plume = new THREE.Mesh(g, new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false,
+      uniforms: { ...this.U, k: { value: 1 } },
+      vertexShader: /* glsl */`
+        ${ICE_GLSL}
+        ${SNOW_LIGHT}
+        uniform float time, k; uniform vec3 cam, wind;
+        attribute vec4 pa; attribute vec4 pb;
+        varying vec2 vUv; varying float vA; varying vec3 vC; varying float vR;
+        void main() {
+          vUv = uv; vR = pb.y;
+          float S = pa.w, L = 380.0 * S * pb.w;
+          // each puff runs out along the plume and starts again at the tip (the plume itself stays)
+          float f = fract(pb.x + time * length(wind) * 0.9 / L);
+          vec3 wd = normalize(wind);
+          vec3 side = normalize(cross(wd, vec3(0.0, 1.0, 0.0)));
+          float sway = sin(f * 5.0 + time * 0.6 + pb.z) * 14.0 * S * f + sin(f * 13.0 - time * 1.1 + pb.z * 2.0) * 4.0 * S * f;
+          vec3 p = pa.xyz + wd * f * L + side * sway + vec3(0.0, -40.0 * S * f * f + (pb.y - 0.5) * 10.0 * S * f, 0.0);
+          float size = S * (8.0 + 70.0 * f) * (0.7 + 0.6 * pb.y);
+          vec4 mv = viewMatrix * vec4(p, 1.0);
+          float rot = pb.y * 6.28 + time * 0.2;
+          vec2 c = vec2(cos(rot), sin(rot));
+          mv.xy += mat2(c.x, c.y, -c.y, c.x) * position.xy * size;
+          gl_Position = projectionMatrix * mv;
+          vA = smoothstep(0.0, 0.06, f) * pow(1.0 - f, 1.6) * 0.16 * k * smoothstep(20.0, 120.0, -mv.z);
+          vC = bzLight(normalize(p - cam)) * 1.5;
+        }`,
+      fragmentShader: /* glsl */`
+        varying vec2 vUv; varying float vA; varying vec3 vC; varying float vR;
+        ${NOISE}
+        void main() {
+          vec2 q = vUv - 0.5;
+          float lump = bzN(vec3(q * 4.0, vR * 7.0)) * 0.7 + bzN(vec3(q * 9.0, vR * 3.0)) * 0.3;
+          float m = smoothstep(1.0, 0.1, length(q) * 2.0 + (lump - 0.5) * 0.7);
+          gl_FragColor = vec4(vC, m * vA);
+        }`,
+    }));
+    this.plume.frustumCulled = false;
+    this.plume.renderOrder = 3;
+    scene.add(this.plume);
+    this.meshes.push(this.plume);
+    return this.plume;
   }
 
   // one ship's wake this frame: n puffs at its tail p on the deck (up: the deck's up), thrown at a share of its velocity

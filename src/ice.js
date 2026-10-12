@@ -10,7 +10,7 @@ import { hullMaps } from './hull.js';
 import { bakeLater } from './bake.js';
 import { Q } from './quality.js';
 import { SUN_DIR, SUN_E, SUN_COL, iceSkyDome, iceStars, iceGiant, aurora } from './frost.js';
-import { IceSheet, iceMaps, iceSheetMaterial } from './glacier.js';
+import { IceSheet, iceMaps, iceSheetMaterial, setGroundGlow } from './glacier.js';
 import { glacierMaterial, crystalMaterial, crystalGeometry, spireGeometry, sweptIce, TrackGrid, crystalField, glacier,
   icicleGeometry, frozenFall, mergeGeometries } from './spires.js';
 import { mulberry32, smoothstep } from './noise.js';
@@ -30,10 +30,10 @@ const P = [];
 const pt = (x, y, z, bank = 0, name = null) => P.push([x, y, z, bank, name]);
 pt(-100, 44, 1020); pt(-30, 44, 800); pt(0, 44, 560, 0, 'start'); pt(0, 46, 300);
 pt(0, 62, 40, 0, 'crest1'); pt(0, 44, -120); pt(-30, 40, -380);                              // the first rift
-// the crystal garden: sweepers among the giant crystals, climbing
-pt(-180, 46, -640, -16); pt(-430, 62, -760, 14); pt(-700, 80, -940, -18, 'garden'); pt(-860, 96, -1230, 12); pt(-830, 90, -1540, 24);
-// the great arch, then the gallery: two barrel rolls between walls of ice
-pt(-640, 70, -1800, 10, 'arch'); pt(-360, 62, -1960, 0);
+// the crystal garden: sweepers among the giant crystals, climbing to a crest ~150 m over the ice
+pt(-180, 50, -640, -16); pt(-430, 74, -760, 14); pt(-700, 104, -940, -18, 'garden'); pt(-860, 132, -1230, 12); pt(-830, 146, -1540, 24);
+// diving through the great arch, then the gallery: two barrel rolls between walls of crystal
+pt(-640, 100, -1800, 10, 'arch'); pt(-360, 68, -1960, 0);
 pt(-120, 58, -2010, 0, 'rollIn'); pt(50, 58, -2015, 120); pt(220, 58, -2020, 240); pt(390, 58, -2025, 0, 'rollOut'); pt(620, 66, -1990, -18);
 // through the glacier
 pt(880, 80, -1820, -32); pt(1060, 88, -1560, -12, 'caveIn'); pt(1130, 84, -1260, 0); pt(1150, 76, -960, 0, 'caveOut');
@@ -45,8 +45,8 @@ for (let k = 0; k <= 12; k++) {
   pt(1000 - 80 * k / 12, 104 - 80 * Math.cos(a), 220 + 80 * Math.sin(a), 0, k === 0 ? 'loopIn' : k === 12 ? 'loopOut' : null);
 }
 // the second rift, and the long sweep home into the sunset
-pt(915, 30, 420); pt(905, 48, 600, 0, 'crest2'); pt(890, 30, 760); pt(830, 34, 1030, 18, 'back'); pt(660, 40, 1290, 30);
-pt(420, 44, 1450, 28); pt(170, 46, 1500, 24); pt(-40, 46, 1420, 24); pt(-130, 45, 1240, 14);
+pt(915, 30, 420); pt(905, 48, 600, 0, 'crest2'); pt(890, 30, 760); pt(830, 38, 1030, 18, 'back'); pt(660, 66, 1290, 30);
+pt(420, 100, 1450, 28); pt(170, 112, 1500, 24); pt(-40, 92, 1420, 24); pt(-130, 64, 1240, 14);
 
 export const ICE_LAYOUT = layout(P, {
   start: [0, 44, 560],
@@ -135,6 +135,7 @@ export class IceWorld {
     this.lamps = [0, 1, 2].map(() => { const l = new THREE.PointLight(new THREE.Color(0.8, 0.9, 1.0), 0, 70, 2); scene.add(l); return l; });
     // the weather: snow streaming across the circuit, diamond dust, the ships' wakes of ice dust (blizzard.js)
     this.snow = new Blizzard(scene, this.dens);
+    this.snow.plumes(scene, this.plumeTips);
     this.noAO.push(...this.snow.meshes);
     this.wakeShips = [];
     this.minimap = this.track;
@@ -155,7 +156,7 @@ export class IceWorld {
     this.ground = new IceSheet(C, rifts);
     iceMaps(renderer);
     const mat = (this.groundMat = iceSheetMaterial());
-    const near = this.ground.build(0, 3800, 560, 12, mat), far = this.ground.build(3800, 20000, 720, 8, mat);
+    const near = this.ground.build(0, 3800, 480, 16, mat), far = this.ground.build(3800, 20000, 640, 8, mat);
     for (const m of near.meshes) { m.layers.set(2); m.name = 'ice-sheet'; scene.add(m); }
     for (const m of far.meshes) { m.layers.set(3); m.name = 'ice-peaks'; scene.add(m); }
     this.groundMeshes = [...near.meshes, ...far.meshes];
@@ -184,7 +185,7 @@ export class IceWorld {
       const x = out.P.x + R.x * lat, z = out.P.z + R.z * lat;
       return new THREE.Vector3(x, G.height(x, z), z);
     };
-    const ice = (this.iceMat = glacierMaterial());
+    const ice = (this.iceMat = glacierMaterial({ glow: 1.6 }));
     // ---- the crystals: the garden (sweepers among them), the gallery's walls (the rolls), scattered over the sea, and
     // a few enormous ones out toward the peaks
     const clusters = [];
@@ -220,6 +221,7 @@ export class IceWorld {
       return cf;
     };
     const cf = place(clusters, 'crystals', false), cg = place(giants, 'crystals-far', true);
+    this.glowMap([...cf.pools, ...cg.pools], ctr);
     // ---- spires of glacier ice: near the circuit and along the skyline
     const spires = [], farSpires = [];
     for (let k = 0; k < 2000 && spires.length < 46; k++) {
@@ -238,6 +240,15 @@ export class IceWorld {
     }
     add(new THREE.Mesh(mergeGeometries(spires), ice), 'spires');
     add(new THREE.Mesh(mergeGeometries(farSpires), ice), 'spires-far', { far: true });
+    // the high points the wind tears snow off (blizzard.js plumes): the tall spires' needles
+    const tipOf = (g) => { const p = g.attributes.position; let bi = 0; for (let i = 1; i < p.count; i++) if (p.getY(i) > p.getY(bi)) bi = i; return new THREE.Vector3().fromBufferAttribute(p, bi); };
+    this.plumeTips = [];
+    for (const g of [...spires, ...farSpires]) {
+      const t = tipOf(g);
+      g.computeBoundingBox();
+      const h = t.y - g.boundingBox.min.y;
+      if (h > 150) this.plumeTips.push({ p: t, s: Math.min(1.6, h / 260) });
+    }
     // ---- the great arch over the track, carved by the wind: feet on the ice either side, its crown ~75 m over the deck
     {
       tr.frame(tr.at('arch'), f);
@@ -259,13 +270,16 @@ export class IceWorld {
     {
       const [s0, s1] = tr.caves[0];
       const gl = (this.glacier = glacier(tr, s0, s1));
-      const boreMat = (this.boreMat = glacierMaterial({ key: 'bore', lamps: true, glow: 2.4, snow: 0 }));
+      const boreMat = (this.boreMat = glacierMaterial({ key: 'bore', lamps: true, glow: 2.4, snow: 0, shadows: false }));
       add(new THREE.Mesh(gl.shell, ice), 'glacier');
-      add(new THREE.Mesh(gl.bore, boreMat), 'glacier-bore', { cast: false });
+      // (inside the cave the sun is cut: its walls and icicles look up no shadow map at all - with the cascades'
+      // search on every pixel of a screen full of cave they cost a third of a millisecond)
+      const bore = add(new THREE.Mesh(gl.bore, boreMat), 'glacier-bore', { cast: false });
       const ig = icicleGeometry(), icm = new THREE.InstancedMesh(ig, boreMat, gl.icicles.length);
       gl.icicles.forEach((m, i) => icm.setMatrixAt(i, m));
       icm.computeBoundingSphere();
       add(icm, 'icicles', { cast: false });
+      bore.receiveShadow = icm.receiveShadow = false;
       // frozen falls down its flanks: found by casting in from beside the body at a few places along it
       const shellMesh = new THREE.Mesh(gl.shell), rc = new THREE.Raycaster(), falls = [];
       shellMesh.updateMatrixWorld();
@@ -281,9 +295,39 @@ export class IceWorld {
         falls.push(frozenFall(top, out, w, top.y - G.height(top.x, top.z) + 8, seed));
       }
       if (falls.length) add(new THREE.Mesh(mergeGeometries(falls), glacierMaterial({ key: 'falls', glow: 2.0, snow: 0.3 })), 'frozen-falls');
+      // and the snow streaming off its crest: the highest point of each stretch along it
+      const sp = gl.shell.attributes.position, bins = new Map(), v = new THREE.Vector3();
+      for (let i = 0; i < sp.count; i += 3) {
+        v.fromBufferAttribute(sp, i);
+        const b = Math.round(v.clone().sub(gl.O).dot(gl.Z) / 90);
+        if (!bins.has(b) || bins.get(b).y < v.y) bins.set(b, v.clone());
+      }
+      for (const t of bins.values()) this.plumeTips.push({ p: t, s: 0.9 });
       console.info(`glacier: ${(gl.shell.index.count / 3000).toFixed(0)} k tris, bore ${(gl.bore.index.count / 3000).toFixed(0)} k, ${gl.icicles.length} icicles, ${falls.length} falls`);
     }
     console.info(`crystals: ${cf.mats.length} (+${cg.mats.length} far, ${cf.dropped} dropped clear of the track), spires ${spires.length} + ${farSpires.length}`);
+  }
+
+  // the crystals' light pooled on the ice round them: painted once into a map over the ground (glacier.js reads it)
+  glowMap(pools, ctr) {
+    const N = 1024, SIZE = 9000, x0 = ctr.x - SIZE / 2, z0 = ctr.z - SIZE / 2, c = document.createElement('canvas');
+    c.width = c.height = N;
+    const g = c.getContext('2d');
+    g.fillStyle = '#000'; g.fillRect(0, 0, N, N);
+    g.globalCompositeOperation = 'lighter';
+    for (const q of pools) {
+      const px = ((q.x - x0) / SIZE) * N, pz = ((q.z - z0) / SIZE) * N, pr = Math.max(2, (q.r / SIZE) * N * 1.6);
+      const col = q.col.clone().multiplyScalar(0.55 * q.k), rgb = (a) => `rgba(${Math.round(Math.min(1, col.r) * 255)},${Math.round(Math.min(1, col.g) * 255)},${Math.round(Math.min(1, col.b) * 255)},${a})`;
+      const gr = g.createRadialGradient(px, pz, 0, px, pz, pr);
+      gr.addColorStop(0, rgb(1)); gr.addColorStop(0.25, rgb(0.55)); gr.addColorStop(1, rgb(0));
+      g.fillStyle = gr;
+      g.fillRect(px - pr, pz - pr, pr * 2, pr * 2);
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.NoColorSpace;
+    tex.flipY = false;
+    tex.generateMipmaps = true; tex.minFilter = THREE.LinearMipmapLinearFilter;
+    setGroundGlow(tex, x0, z0, SIZE);
   }
 
   // The world's own shadow: a fourth sun light whose map (drawn once) covers the circuit and its scenery - the track's
@@ -348,6 +392,7 @@ export class IceWorld {
   setOptions(v) {
     const snow = v.iceSnow !== false;
     this.snow.streams.visible = this.snow.wakes.visible = snow;
+    if (this.snow.plume) this.snow.plume.visible = snow;
     this.snow.dust.visible = v.iceDust !== false;
     this.aurora.visible = v.aurora !== false;
   }

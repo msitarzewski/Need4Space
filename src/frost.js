@@ -1,4 +1,4 @@
-// The ice planet's air and sky: a world at the end of its day. The sun sits ~11 deg over the south-western horizon, a
+// The ice planet's air and sky: a world at the end of its day. The sun sits ~8 deg over the south-western horizon, a
 // small hot disc through a thin band of orange and red; the rest of the sky darkens through rose and violet into a
 // deep indigo night, stars out over most of it. A crescent ice giant - the world's primary, ringed - hangs over the
 // south-east, and the aurora burns in curtains over the north. Ice crystals in the low air throw the sun's halo (22
@@ -12,8 +12,8 @@ import { Q } from './quality.js';
 import { mulberry32 } from './noise.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
-export const SUN_DIR = new THREE.Vector3(-0.62, 0.2, 0.76).normalize();   // toward the sun: south-west, ~11 deg up
-export const SUN_E = 5.2;                                                  // its irradiance (three units)
+export const SUN_DIR = new THREE.Vector3(-0.62, 0.14, 0.76).normalize();  // toward the sun: south-west, ~8 deg up
+export const SUN_E = 4.6;                                                  // its irradiance (three units)
 export const SUN_COL = new THREE.Color(1.0, 0.76, 0.6);                   // through a long path of air: a sunset's
 export const GIANT_DIR = new THREE.Vector3(0.38, 0.44, 0.82).normalize();  // the ice giant: south-east, ~25 deg up
 const GIANT_D = 60000, GIANT_R = GIANT_D * Math.sin(THREE.MathUtils.degToRad(12.5));
@@ -28,7 +28,7 @@ export const ICE_GLSL = /* glsl */`
 const vec3 IA_SUN = ${v3(SUN_DIR)};
 const vec3 IA_SUNRAD = vec3(${f(SUN_E * SUN_COL.r)}, ${f(SUN_E * SUN_COL.g)}, ${f(SUN_E * SUN_COL.b)});
 const float IA_HB = 260.0;          // the ice fog's scale height (m)
-const float IA_BB = 1.6e-4;         // its extinction at the ice (per m)
+const float IA_BB = 2.4e-4;         // its extinction at the ice (per m)
 const float IA_BA = 1.4e-5;         // the thin air's, scale height 8 km
 // the optical depth of a density exp(-y / H) along o + d t, t in [0, dist]
 float iaExp(float oy, float dy, float dist, float H) {
@@ -138,10 +138,13 @@ export function iceSkyDome(renderer, size = 768) {
         // the sun: a disc 0.9 deg across, flattened a little by the air, reddened toward its lower limb
         vec3 q = d - IA_SUN;
         float r = length(vec2(dot(q, normalize(cross(IA_SUN, vec3(0.0, 1.0, 0.0)))), dot(q, vec3(0.0, 1.0, 0.0)) * 1.12)) / 0.0078;
-        float od = (${f(1.6e-4 * 260)} + ${f(1.4e-5 * 8000)}) / max(d.y, 0.01);
+        float od = (${f(2.4e-4 * 260)} + ${f(1.4e-5 * 8000)}) / max(d.y, 0.01);
         vec3 T = exp(-od * vec3(0.8, 0.95, 1.15));
         vec3 disc = IA_SUNRAD * (900.0 * (r < 1.0 ? 0.6 + 0.4 * sqrt(1.0 - r * r) : 0.0) * smoothstep(1.0, 0.92, r) + 4.0 * exp(-r * 0.7));
-        gl_FragColor = vec4(a.rgb + disc * T * sunDisc * step(0.0, d.y) * step(0.9, dot(d, IA_SUN)), a.a);
+        // (in the reflections' bake - no disc - the glow round the sun is damped too: blurred over a glossy deck it greyed
+        // the whole road racing into the sunset)
+        vec3 sky = a.rgb * mix(1.0, mix(0.3, 1.0, sunDisc), smoothstep(0.55, 0.97, dot(d, IA_SUN)));
+        gl_FragColor = vec4(sky + disc * T * sunDisc * step(0.0, d.y) * step(0.9, dot(d, IA_SUN)), a.a);
       }`,
   });
   const mesh = new THREE.Mesh(geo, m);

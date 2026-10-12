@@ -71,7 +71,9 @@ const TILE_GEN = /* glsl */`
   }
 `;
 
-const U = { iceMask: { value: null }, iceNrm: { value: null } };
+const U = { iceMask: { value: null }, iceNrm: { value: null }, iceGlow: { value: null }, iceGlowT: { value: new THREE.Vector4(0, 0, 1, 1) } };
+// the light pooled on the ice round what stands on it (a map over the ground: x0, z0, 1 / size)
+export function setGroundGlow(tex, x0, z0, size) { U.iceGlow.value = tex; U.iceGlowT.value.set(x0, z0, 1 / size, 1 / size); }
 let maps = null;
 export function iceMaps(renderer) {
   if (maps) return maps;
@@ -153,9 +155,14 @@ export class IceSheet {
     this.rifts = rifts.map((r) => ({ ...r, nrm: new THREE.Vector3(-r.dir.z, 0, r.dir.x) }));
   }
 
-  // { h: height (m), rift: 0..1 how deep in a rift, rock: 0..1 how much mountain }
+  // { h: height (m), rift: 0..1 how deep in a rift, rock: 0..1 how much mountain, drift: 0..1 snow lying there }
   sample(x, z) {
     let h = 4 * (fbm(x / 700, z / 700, 3) - 0.5);
+    // drifts of snow combed out along the wind (from the north-east): long low ridges, black ice swept bare between
+    const a = x * -0.72 + z * 0.69, c = -x * 0.69 - z * 0.72;
+    const dn = fbm(a / 300 + 4.1, c / 75 - 2.3, 4) + 0.12 * (noise2(x / 1800, z / 1800) - 0.5);
+    const drift = smoothstep(0.47, 0.6, dn);
+    h += drift * (1.6 + 2.6 * smoothstep(0.55, 0.75, dn));
     // pressure ridges: sparse, sharp, wandering
     const wx = x + 160 * (noise2(x / 900, z / 900) - 0.5), wz = z + 160 * (noise2(x / 900 + 7.3, z / 900 + 3.1) - 0.5);
     const r = 1 - Math.abs(2 * noise2(wx / 380, wz / 380) - 1);
@@ -175,10 +182,13 @@ export class IceSheet {
     let rock = 0;
     if (m > 0) {
       const rr = ridged(x / 2400 + 11, z / 2400 - 4, 6);
-      h += m * (120 + 2100 * Math.pow(rr, 1.7) * (0.55 + 0.45 * noise2(x / 6000, z / 6000)));
+      // a great massif across the north (under the aurora), the ring low in the south-west (under the sunset)
+      const north = Math.max(0, -dz / Math.max(d, 1)), sw = Math.max(0, (-dx * 0.62 + dz * 0.76) / Math.max(d, 1));
+      const tall = (0.5 + 1.1 * Math.pow(north, 1.5) - 0.35 * Math.pow(sw, 2)) * (0.55 + 0.45 * noise2(x / 6000, z / 6000));
+      h += m * (120 + 2100 * Math.pow(rr, 1.7) * tall);
       rock = m;
     }
-    return { h, rift, rock };
+    return { h, rift, rock, drift };
   }
 
   height(x, z) { return this.sample(x, z).h; }
@@ -187,7 +197,7 @@ export class IceSheet {
   // that are culled on their own; r0..r1 (m), nA segments round
   build(r0, r1, nA, sectors, mat) {
     const rings = [];
-    for (let r = r0; r < r1;) { rings.push(r); r += Math.min(420, Math.max(8, r * 0.015)); }
+    for (let r = r0; r < r1;) { rings.push(r); r += Math.min(420, Math.max(9, r * 0.019)); }
     rings.push(r1);
     const nR = rings.length, pos = new Float32Array(nR * nA * 3), attr = new Float32Array(nR * nA * 3);
     const hs = new Float32Array(nR * nA);
@@ -197,7 +207,7 @@ export class IceSheet {
         const s = this.sample(x, z), k = i * nA + j;
         pos.set([x, s.h, z], k * 3);
         hs[k] = s.h;
-        attr.set([0.5 + (fbm(x / 520 + 3.3, z / 200 - 1.1, 3) - 0.5) * 1.6, s.rock, s.rift], k * 3);
+        attr.set([s.drift * (1 - Math.min(1, s.rift * 4)), s.rock, s.rift], k * 3);
       }
     }
     const g = new THREE.BufferGeometry();
@@ -247,6 +257,7 @@ attribute vec3 ice; varying vec3 vIce; varying vec3 vTW;`)
   vTW = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
     sh.fragmentShader = lite + sh.fragmentShader.replace('#include <common>', `#include <common>
 varying vec3 vIce; varying vec3 vTW;
+uniform sampler2D iceGlow; uniform vec4 iceGlowT;
 ${HEX}
 float iceCrack = 0.0, iceSnow = 0.0;
 vec2 iceG = vec2(0.0);`)
@@ -265,21 +276,24 @@ vec2 iceG = vec2(0.0);`)
   float up = normalize((vec4(n0, 0.0) * viewMatrix).xyz).y;          // (the normal back in world space)
   // snow: broad fields of it (the tile at the broad scale, the vertices' drift field) ragged at their edges by the
   // fine drifts; patches of it out on the bare ice. None down the rifts' walls; on the peaks, wherever it can lie
-  float sf = ib.g * 0.75 + im.g * 0.45 + (vIce.x - 0.5) * 0.7 - 0.22;
-  float snow = smoothstep(0.4, 0.54, sf) * (1.0 - smoothstep(0.15, 0.5, vIce.z));
+  float sf = vIce.x * 0.75 + ib.g * 0.4 + im.g * 0.35 - 0.38;
+  float snow = smoothstep(0.4, 0.54, sf) * (1.0 - smoothstep(0.05, 0.25, vIce.z)) * smoothstep(0.72, 0.9, up);
   float rock = vIce.y * smoothstep(0.78, 0.55, up + (im.g - 0.5) * 0.2);
   snow = mix(snow, smoothstep(0.42, 0.62, up + (ib.g - 0.5) * 0.35), vIce.y);
   vec3 blackIce = vec3(0.004, 0.012, 0.022), milk = vec3(0.07, 0.17, 0.25);
   vec3 alb = mix(blackIce, milk, max(im.b, ib.b * 0.6) * 0.8);
   alb = mix(alb, vec3(0.012, 0.07, 0.13), smoothstep(0.1, 0.4, vIce.z));   // the rifts' walls: blue glacier ice
   alb = mix(alb, vec3(0.012, 0.016, 0.028) * (0.7 + 0.6 * im.b), rock);
-  alb = mix(alb, vec3(0.6, 0.76, 1.0) * (0.9 + 0.1 * im.g), snow);
+  alb = mix(alb, vec3(0.6, 0.76, 1.0) * (0.9 + 0.1 * im.g) * (1.0 - 0.4 * vIce.y), snow);
   diffuseColor.rgb = alb;
   iceSnow = snow;
   // the seams: the big plates' (hundreds of metres, metres wide) and the fine ones
-  iceCrack = (ib.r * (0.2 + 1.5 * smoothstep(0.55, 0.2, ib.b)) + im.r * 0.12) * (1.0 - snow) * (1.0 - vIce.y) * (1.0 - smoothstep(0.1, 0.4, vIce.z));
-  float iceRough = mix(mix(mix(0.04, 0.22, im.b), 0.6, rock), 0.72, snow);`)
+  iceCrack = (ib.r * (0.15 + 1.35 * smoothstep(0.55, 0.2, ib.b)) + im.r * 0.07) * (1.0 - snow) * (1.0 - vIce.y) * (1.0 - smoothstep(0.1, 0.4, vIce.z));
+  float iceRough = mix(mix(mix(0.09, 0.28, im.b), 0.6, rock), 0.72, snow);`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = iceRough;')
+      // (the sun's own glint off the black ice held to a glow: on a mirror-smooth sheet a low sun's highlight filled a
+      // quarter of the frame with bloom)
+      .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.directSpecular = min(reflectedLight.directSpecular, vec3(2.2));')
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
   {
     vec3 nw = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
@@ -289,6 +303,11 @@ vec2 iceG = vec2(0.0);`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
   // the seams: the sea's light through them, cyan, strongest at the cores; the rifts glow deeper down
   totalEmissiveRadiance += vec3(0.03, 0.55, 1.0) * iceCrack * 0.9 + vec3(0.0, 0.12, 0.3) * smoothstep(0.3, 1.0, vIce.z);
+  {
+    // what stands on the ice lights it: the crystals' colours pooled round their feet, stronger on snow
+    vec2 gu = (vTW.xz - iceGlowT.xy) * iceGlowT.zw;
+    if (gu.x > 0.0 && gu.y > 0.0 && gu.x < 1.0 && gu.y < 1.0) totalEmissiveRadiance += texture2D(iceGlow, gu).rgb * (0.35 + 0.9 * iceSnow + 0.6 * iceCrack);
+  }
 #ifndef ICE_LITE
   // glitter: a facet here and there in the snow catching the sun (near only: past ~10 cm a pixel it would shimmer)
   if (iceFp < 0.12 && iceSnow > 0.0) {
