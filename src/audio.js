@@ -89,9 +89,9 @@ export class GameAudio {
     if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
-    // (Laptop mode: a 40 ms buffer, not 10 - on a laptop's busy CPU the audio thread missed its deadline now and then:
-    // the sound stuttered)
-    const c = (this.ctx = new AC({ latencyHint: this.lite ? 0.04 : 'interactive' }));
+    // (Laptop mode: a 60 ms buffer, not 10 - on a laptop's busy CPU the audio thread missed its deadline now and then:
+    // the sound crackled)
+    const c = (this.ctx = new AC({ latencyHint: this.lite ? 0.06 : 'interactive' }));
     this.master = c.createGain();
     this.master.gain.value = this.muted ? 0 : 1;
     const lim = c.createDynamicsCompressor();
@@ -104,7 +104,8 @@ export class GameAudio {
     this.conv.buffer = this.impulse(2.4, 0.55);
     this.envRet = this.gain(ENV_WET.open, this.sfxBus);
     this.conv.connect(this.envRet);
-    this.envSend = this.gain(1, this.conv);
+    this.envSend = this.sleeper(1);
+    this.envSend.connect(this.conv);
     const mk = (fill) => { const b = c.createBuffer(1, c.sampleRate * 2, c.sampleRate), d = b.getChannelData(0); fill(d); return b; };
     this.white = mk((d) => { for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; });
     this.pink = mk((d) => {
@@ -117,7 +118,11 @@ export class GameAudio {
     this.musicIn = this.gain(0, this.musicBus);
     this.musicIn.gain.setTargetAtTime(1, c.currentTime + 0.3, 1.0);       // fade in
     this.prepareMusic();
-    for (const el of this.decks) c.createMediaElementSource(el).connect(this.musicIn);
+    // Laptop mode: the songs play straight out of their audio elements (the browser's own media path), not through
+    // this graph - a late block of the effects can no longer break up the music. Their level is the elements' volume.
+    this.musicDirect = this.lite;
+    if (this.musicDirect) { this.musicFade = performance.now(); this.musicVolume(); }
+    else for (const el of this.decks) c.createMediaElementSource(el).connect(this.musicIn);
     this.decks[this.deck].play().catch((e) => console.warn('music:', e));
   }
 
@@ -159,7 +164,9 @@ export class GameAudio {
   }
   panner(ref = 20, roll = 1.1) {
     const p = this.ctx.createPanner();
-    p.panningModel = 'HRTF'; p.distanceModel = 'inverse'; p.refDistance = ref; p.rolloffFactor = roll; p.maxDistance = 20000;
+    // (Laptop mode: equal-power stereo - HRTF convolves every source with a pair of head responses, crossfading as it
+    // moves)
+    p.panningModel = this.lite ? 'equalpower' : 'HRTF'; p.distanceModel = 'inverse'; p.refDistance = ref; p.rolloffFactor = roll; p.maxDistance = 20000;
     return p;
   }
   place(p, v, snap = false) {
@@ -266,13 +273,24 @@ export class GameAudio {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
     this.musicBus.gain.setTargetAtTime(MUSIC_LV[this.levels.music] ?? 0.36, t, 0.1);
+    this.musicVolume();
     this.sfxBus.gain.setTargetAtTime((SFX_LV[this.levels.sfx] ?? 0.9) * (this.paused ? 0.15 : 1), t, 0.1);
   }
 
   toggleMute() {
     this.muted = !this.muted;
     if (this.master) this.master.gain.setTargetAtTime(this.muted ? 0 : 1, this.ctx.currentTime, 0.05);
+    this.musicVolume();
     return this.muted;
+  }
+
+  // the music's level on the elements themselves (played straight out): the setting's, faded in over ~2 s at the
+  // start, and a little up - in the graph the limiter's make-up gain lifted it ~2 dB
+  musicVolume() {
+    if (!this.musicDirect || !this.decks) return;
+    const fade = Math.min(1, Math.max(0, (performance.now() - this.musicFade - 300) / 2000));
+    const v = this.muted ? 0 : Math.min(1, (MUSIC_LV[this.levels.music] ?? 0.36) * 1.25 * fade);
+    for (const el of this.decks) if (Math.abs(el.volume - v) > 0.002) el.volume = v;
   }
 
   // The music: the songs streamed from files, one after another (each ends on a fade into the next one's intro). Two
@@ -371,7 +389,10 @@ export class GameAudio {
       // gantries and light gates passing overhead
       this.passes(track, ctl.s, v);
     } else if (this.env !== 'open') this.env = 'open';
-    this.envRet.gain.setTargetAtTime(ENV_WET[this.env], t, 0.25);
+    // (Laptop mode: no echo in open space - the 2.4 s reverb is only computed in the tunnel and the cave)
+    this.envRet.gain.setTargetAtTime(this.lite && this.env === 'open' ? 0 : ENV_WET[this.env], t, 0.25);
+    this.level(this.envSend, this.lite && this.env === 'open' ? 0 : 1, t, 0.4);
+    if (this.musicDirect) this.musicVolume();
     this.level(P.grindG, grind, t, grind > 0 ? 0.01 : 0.06);
     this.level(P.buzzG, buzz, t, 0.05);
 
