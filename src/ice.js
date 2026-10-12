@@ -598,7 +598,9 @@ export class IceWorld {
         w.low = e.ship.engineOn && !tr0.inGap(r.s, 4) ? 1 - smoothstep(2.5, 6, r.y) : 0;
       });
     }
-    this.snow.update(t, dt, camera, pr, ws, 1 - this.track.caveLight(camera.position), this.track.frame(s - 12, this.camDeck ||= {}));
+    // (the crevasse is out of the wind: its snow was a white smear piled up ahead in the dark between the walls)
+    const sh = this.shelf, inCrack = sh && sh.sOut > sh.sIn ? smoothstep(0, 80, Math.min(this.track.wrap(s - sh.sIn), this.track.wrap(sh.sOut - s))) * (this.track.inSpan(s, sh.sIn, sh.sOut) ? 1 : 0) : 0;
+    this.snow.update(t, dt, camera, pr, ws, Math.max(1 - this.track.caveLight(camera.position), 0.85 * inCrack), this.track.frame(s - 12, this.camDeck ||= {}));
     const tr = this.track, gi = tr.gantryIdx, sIdx = Math.floor(s / tr.step);
     gi.map((i) => ({ i, d: Math.min((i - sIdx + tr.n) % tr.n, (sIdx - i + tr.n) % tr.n) }))
       .sort((p, q) => p.d - q.d).slice(0, 3).forEach(({ i }, k) => {
