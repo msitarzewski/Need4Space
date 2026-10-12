@@ -33,13 +33,13 @@ export const CHAMBERS = [
   { name: 'fissure', d0: 1672, d1: 1980, wl: 38, wr: 38, up: 104, down: 96, sq: 4.0, amp: 4 },
   { name: 'exit', d0: 2012, d1: 9999, wl: 50, wr: 50, up: 46, down: 28, sq: 2.2, amp: 5 },
 ];
-// the sinkholes: down from the hill's top into a chamber (d, lateral offset from the track, radius); the first pours
-// the jungle's river into the cavern
 // the faint light of each chamber (its glowworms, its moss; linear): teal galleries, a blue-black cavern, the violet
 // of the crystal throat, the hall's amber, the roots' green, the fungi's teal, the river's blue-green
 const TINT = { mouth: [0.004, 0.011, 0.01], gallery: [0.004, 0.012, 0.011], cavern: [0.002, 0.005, 0.011], throat: [0.008, 0.003, 0.014],
   hall: [0.013, 0.007, 0.002], roots: [0.005, 0.011, 0.003], fungi: [0.005, 0.011, 0.012], river: [0.002, 0.009, 0.012],
   fissure: [0.003, 0.005, 0.007], exit: [0.004, 0.009, 0.009] };
+// the sinkholes: down from the hill's top into a chamber (d, lateral offset from the track, radius); the first pours
+// the jungle's river into the cavern
 export const SHAFTS = [{ d: 392, x: 96, r: 30, fall: true }, { d: 948, x: -16, r: 26 }, { d: 1522, x: 12, r: 21 }];
 const XC = TRACK_W / 2 + 9, YB = -14, YT = 32;    // the walls stop this far out, the floor this far under, the roof over
 
@@ -718,10 +718,14 @@ export function caveDressing(scene, H, track, mats, dens = 1) {
       M.compose(q.p.clone().addScaledVector(UP, q.down ? 2 : -2), q.down ? new THREE.Quaternion() : flip, S3.set(r, q.len + 2, r));
       mats4.push({ r: q.r, m: M.clone() });
     }
-    rows.forEach((rw, ri) => {
-      if (rw.sec.w.hall < 0.6 || rnd() > 0.08) return;
-      // a column: a stalactite and a stalagmite run together (each down / up past the middle), beside the way
-      const side = rnd() < 0.5 ? -1 : 1, base = rw.P.clone().addScaledVector(rw.Rl, side * (XC + 15 + rnd() * 26)), cr = 5 + rnd() * 6;
+    // columns, a stalactite and a stalagmite run together (each down / up past the middle): through the hall's S, one
+    // close by the way every 55 m, left and right in turn - a slalom - and others further back
+    const cols = [];
+    for (let d = 575, k = 0; d < 800; d += 55, k++) cols.push([d, k % 2 ? -1 : 1, XC + 11 + rnd() * 5]);
+    for (const rw of rows) if (rw.sec.w.hall > 0.6 && rnd() < 0.05) cols.push([rw.d, rnd() < 0.5 ? -1 : 1, XC + 28 + rnd() * 18]);
+    cols.forEach(([d, side, x]) => {
+      const rw = H.rowAt(d), ri = rows.indexOf(rw);
+      const base = rw.P.clone().addScaledVector(rw.Rl, side * x), cr = 5 + rnd() * 4;
       const top = rw.P.y + rw.sec.up + 8, bot = rw.P.y - rw.sec.down - 8, mid = (top + bot) / 2;
       mats4.push({ r: ri, m: new THREE.Matrix4().compose(new THREE.Vector3(base.x, top, base.z), new THREE.Quaternion(), new THREE.Vector3(cr, top - mid + 6, cr)) });
       mats4.push({ r: ri, m: new THREE.Matrix4().compose(new THREE.Vector3(base.x, bot, base.z), flip, new THREE.Vector3(cr * 1.15, mid - bot + 6, cr * 1.15)) });
