@@ -88,43 +88,46 @@ const WAY = [
   ['aft', 0, 59, -370, 0, 'jump2'],
   ['aft', 0, 50, -470],
   // the fore piece: its torn end, the cargo holds - a bulkhead's gaps left then right, the long hold where gravity
-  // turns over (up onto the deck overhead, along it upside down, back down), another collapsed bulkhead
+  // turns over (up onto the deck overhead, along it upside down, back down), another collapsed bulkhead (the jinks
+  // through the gaps ~7 m: at ~15 the ships went into the flip, and came out of it, sliding into the wall)
   ['fore', 0, 30, 2230],
   ['fore', 0, 12, 2140],
-  ['fore', -14, -12, 2060, 4],
-  ['fore', 12, -36, 1960, -4],
+  ['fore', -7, -12, 2060, 2],
+  ['fore', 6, -36, 1960, -2],
   ['fore', 0, -45, 1910],
   ['fore', 0, -45, 1860, 0, 'flipA'],
   ['fore', 0, -21, 1680, 180, 'flipB'],
   ['fore', 0, -21, 1580, 180, 'flipC'],
   ['fore', 0, -45, 1400, 0, 'flipD'],
   ['fore', 0, -48, 1330],
-  ['fore', -16, -55, 1230, 4],
-  ['fore', 14, -70, 1120, -4],
+  ['fore', -8, -55, 1230, 2],
+  ['fore', 7, -70, 1120, -2],
   // the hangar: down among the racks, up and out through the breach in its port flank
   ['fore', 5, -100, 1010],
   ['fore', -10, -122, 880],
   ['fore', -25, -108, 760],
   ['fore', -80, -75, 680, -10],
   ['fore', -175, -40, 610, -18, 'breach'],
-  ['fore', -330, -20, 540, -18],
-  // the graveyard: out to port, round in front of the bow, back down its starboard side and onto its back
-  ['fore', -520, 0, 420, -14],
-  ['fore', -650, 28, 160, -22],
-  ['fore', -670, 58, -190, -28],
-  ['fore', -540, 88, -520, -32],
-  ['fore', -240, 116, -720, -34],
-  ['fore', 100, 136, -740, -34],
-  ['fore', 380, 156, -560, -30],
-  ['fore', 500, 168, -250, -20],
-  ['fore', 440, 172, 80, 4],
-  ['fore', 230, 166, 290, 16],
-  ['fore', 50, 172, 480, 10, 'trench'],
-  // the trench along its back (going aft: starboard on the left), banked sweepers between its turrets
-  ['fore', 0, 196, 720, 0],
-  ['fore', 40, 192, 1020, 10],
-  ['fore', -40, 192, 1370, -10],
-  ['fore', 35, 193, 1720, 8],
+  ['fore', -330, -20, 540, 0],
+  // the graveyard: out to port, round in front of the bow, back down its starboard side and onto its back (banked into
+  // the long right-hander round the bow and the left onto the back, not away)
+  ['fore', -520, 0, 420, 14],
+  ['fore', -650, 28, 160, 22],
+  ['fore', -670, 58, -190, 28],
+  ['fore', -540, 88, -520, 32],
+  ['fore', -240, 116, -720, 34],
+  ['fore', 100, 136, -740, 34],
+  ['fore', 380, 156, -560, 30],
+  ['fore', 500, 168, -250, 20],
+  ['fore', 440, 172, 80, 0],
+  ['fore', 230, 166, 290, -16],
+  ['fore', 50, 172, 480, -14, 'trench'],
+  // the trench along its back (going aft: starboard on the left), banked sweepers between its turrets (swinging ~28 m:
+  // at ~40 its pad threw the ships into the next one)
+  ['fore', 0, 196, 720, -10],
+  ['fore', 28, 192, 1020, 8],
+  ['fore', -28, 192, 1370, -8],
+  ['fore', 25, 193, 1720, 6],
   ['fore', 0, 198, 2050, 0],
   // over the break (the stern piece's frame ahead of its torn front)
   ['aft', 0, 230, -420],
@@ -132,7 +135,7 @@ const WAY = [
   ['aft', 0, 218, -100],
   // the stern piece's back; the ramp up to the command tower's control deck, through it, down off the stern
   ['aft', -24, 194, 140, -6],
-  ['aft', 20, 194, 400, 6],
+  ['aft', 8, 194, 400, 3],
   ['aft', 0, 206, 590],
   ['aft', 0, 246, 770, 0, 'tower'],
   ['aft', 0, 250, 940],

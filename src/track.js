@@ -37,8 +37,8 @@ pt(1650, -240, 400, 0, 'rollIn'); pt(1820, -240, 405, 120); pt(1990, -240, 410, 
 pt(2330, -240, 420, 120); pt(2500, -240, 425, 240); pt(2670, -240, 430, 0, 'rollOut');
 pt(2850, -240, 435, 0, 'preLoop');
 for (let k = 0; k <= 12; k++) {                                      // R 80 m, stepping 80 m sideways over the turn
-  const a = (k / 12) * Math.PI * 2;
-  pt(3000 + 80 * Math.sin(a), -160 - 80 * Math.cos(a), 440 + 80 * k / 12, 0, k === 0 ? 'loopIn' : k === 12 ? 'loopOut' : null);
+  const a = (k / 12) * Math.PI * 2, z = 440 + 40 * (1 - Math.cos(a / 2));   // (the step eased: taken evenly it kinked the way in and out)
+  pt(3000 + 80 * Math.sin(a), -160 - 80 * Math.cos(a), z, 0, k === 0 ? 'loopIn' : k === 12 ? 'loopOut' : null);
 }
 pt(3160, -240, 525); pt(3420, -225, 620, 20); pt(3560, -210, 850, 28); pt(3600, -195, 1050, 10);
 pt(3605, -195, 1150); pt(3610, -180, 1245, 0, 'crest2'); pt(3615, -195, 1340);   // the second jump
@@ -66,7 +66,7 @@ const WRECKS = [['wreckIn', 60, 'jump1', 20], ['jump1', 150, 'jump2', 20], ['jum
 // boost pads: (point, metres after it, lateral x)
 const PADS = [['start', 360, 0], ['tunIn', -160, -10], ['tunIn', -160, 10], ['north', 120, 0], ['dive', -260, 12],
   ['preLoop', 30, 0], ['back', 90, -12], ['jump1', -280, 0], ['trench', 420, -10], ['tower', -380, 0], ['west', -300, 10],
-  ['west', 260, -10]];
+  ['west', 60, -10]];
 // light gates over the deck: (point, metres after it, colour)
 const GATES = [['start', -60, 0x40c8ff], ['crest1', -90, 0xffb020], ['rollIn', -40, 0xb040ff], ['preLoop', -60, 0xff3a6a],
   ['crest2', -90, 0xffb020], ['wreckIn', -270, 0xff4a1c], ['west', 120, 0x40c8ff], ['cork', -330, 0x40ff9a]];
