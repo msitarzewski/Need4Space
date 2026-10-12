@@ -1274,7 +1274,7 @@ export class Wreck {
     }
     this.skyDirs = dirs;
     for (const H of this.hulls) {
-      const cell = H.HW > 100 ? 28 : 10, nx = Math.ceil((2 * H.HW) / cell) + 1, ny = Math.ceil((2 * H.HH) / cell) + 1, nz = Math.ceil(H.len / cell) + 1;
+      const cell = H.HW > 100 ? 36 : 12, nx = Math.ceil((2 * H.HW) / cell) + 1, ny = Math.ceil((2 * H.HH) / cell) + 1, nz = Math.ceil(H.len / cell) + 1;
       // what lets the sky in: the holes, the open ends, a stern's hole (centre, reach)
       const opens = H.holes.map((h) => ({ c: new THREE.Vector3(Math.cos(h.t) * H.HW, Math.sin(h.t) * H.HH, h.z), r: 2.5 * Math.max(h.rz, h.rt) + 40 }));
       for (const [c, z] of [[H.cap0, 0], [H.cap1, H.len]]) if (c === 'open') opens.push({ z, r: 260 * H.scale });
