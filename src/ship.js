@@ -555,7 +555,7 @@ export class Ship {
       if (m) { m.emissive.copy(m.color).multiplyScalar(m.metalness > 0.5 ? 0.16 : 0.22); m.emissiveIntensity = 0; }
     }
     this.glowBase = {};
-    // engine glows 0.6x the export's: they bloomed into white blobs (the user: "make glow less agresive")
+    // engine glows 0.6x the export's: at full strength they bloomed into white blobs
     for (const n of [...GLOWS, ...AVIONICS]) if (this.mats[n]) this.glowBase[n] = this.mats[n].emissiveIntensity * (GLOWS.includes(n) ? 0.6 : 1);
 
     if (base) {                        // same hull: same probes, tips and span, nozzles, parts atlas
