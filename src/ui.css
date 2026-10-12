@@ -70,6 +70,9 @@ body[data-ui="pause"] #hud * { animation-play-state: paused !important; }   /* t
 /* top left: position and lap (free flight: a mode tag; the controls card under it) */
 #hud-tl { position: absolute; top: var(--g); left: var(--g); display: flex; flex-direction: column; align-items: flex-start; gap: 0.7rem; }
 #hud-tl .hp { position: relative; }
+/* Laptop mode: no backdrop blur - the browser re-blurred the moving frame under every panel, every frame */
+body.lite .hp, body.lite #msg { backdrop-filter: none; }
+body.lite .hp { background: linear-gradient(115deg, rgba(9, 13, 19, 0.86), rgba(9, 13, 19, 0.62)); }
 #hud-race { display: flex; align-items: stretch; gap: 1.3rem; padding: 0.7rem 1.4rem 0.8rem 1rem; }
 .h-pos, .h-lap { display: flex; flex-direction: column; justify-content: space-between; gap: 0.35rem; }
 .h-lap { padding-left: 1.3rem; border-left: 1px solid var(--line); }

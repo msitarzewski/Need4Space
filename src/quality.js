@@ -2,7 +2,8 @@
 // off the frame was still the sum of many things (structure 23 %, ships 17 %, rocks 12 %, a dozen lights in every
 // lit pixel ...). Lite: the heaviest shaders in cheaper versions - rocks one texture scale of their three (18 taps a
 // pixel, not 54), the structure's plates without their relief normal (one evaluation of the layout, not three), the
-// ships without clear coat - and fewer lights (settings.js sets the rest: 50 % scale, SMAA only, effects off).
+// ships without clear coat - fewer lights, 4x texture filtering, no blur behind the HUD (settings.js sets the rest:
+// 50 % scale, SMAA only, effects off).
 // Shaders read Q.lite as they compile and key their programs by it.
 export const Q = { lite: false };
 
@@ -26,4 +27,34 @@ export function integratedGPU(name = '') {
   if (/Intel/i.test(name) && !/Arc\(TM\) [AB]\d{3}/i.test(name)) return true;
   if (/Radeon\(TM\) (Graphics|\d{3}M\b|Vega)/i.test(name)) return true;
   return false;
+}
+
+// Laptop mode's texture filtering: anisotropic 4x at most (16x was ~7 % of the frame even on a desktop card: the road
+// seen at a glancing angle samples its maps many times over, and an integrated GPU shares slow memory). Textures on
+// the GPU already are set there directly (some have no image left to upload again); the materials' own maps and their
+// compiled shaders' uniforms are both looked through (run again once the warm-up has compiled them).
+export function liteFiltering(renderer, roots) {
+  const gl = renderer.getContext(), ext = gl.getExtension('EXT_texture_filter_anisotropic');
+  if (!ext) return;
+  const seen = new Set(), max = renderer.capabilities.getMaxAnisotropy();
+  const visit = (t) => {
+    if (!t || !t.isTexture || seen.has(t) || t.isCubeTexture || t.isData3DTexture || t.isDataArrayTexture) return;
+    seen.add(t);
+    const a0 = (t.userData.aniso0 ??= t.anisotropy), a = Q.lite ? Math.min(4, a0) : a0;
+    if (a0 <= 1) return;
+    t.anisotropy = a;
+    const p = renderer.properties.get(t);
+    if (p.__webglTexture && p.__currentAnisotropy !== a) {
+      renderer.state.bindTexture(gl.TEXTURE_2D, p.__webglTexture);
+      gl.texParameterf(gl.TEXTURE_2D, ext.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(a, max));
+      p.__currentAnisotropy = a;
+    }
+  };
+  for (const root of roots) root?.traverse((o) => {
+    for (const m of [].concat(o.material || [])) {
+      for (const v of Object.values(m)) visit(v);
+      for (const u of Object.values(m.uniforms || {})) visit(u?.value);
+      for (const u of Object.values(renderer.properties.get(m).uniforms || {})) visit(u?.value);
+    }
+  });
 }

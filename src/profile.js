@@ -313,3 +313,81 @@ export function bootProfile() {
   });
   window.__boot = rec;
 }
+
+// A lap's GPU frame times at a given output size (the render scale as set): the player's ship on the AI autopilot,
+// a frame every 1/60 s, each frame's GPU time by timer query - the worst stretches of the circuit (s in m) and the
+// programs compiled during it (should be 0). Run with ?bootprof off; await, it takes a while.
+export async function lapGPU(W = 1920, H = 1080, sec = 50) {
+  const F = window.__feather, r = F.renderer, comp = F.composer, gl = r.getContext(), ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+  await scenario('pack', 0);
+  const scale = F.settings.v.scale, ow = innerWidth, oh = innerHeight, pr = r.getPixelRatio();
+  r.setPixelRatio(1); r.setSize(W, H, false); comp.setPixelRatio(scale); comp.setSize(W, H);
+  F.camera.aspect = W / H; F.camera.updateProjectionMatrix();
+  const prog0 = r.info.programs.length, rows = [], pend = [];
+  for (let i = 0; i < sec * 60; i++) {
+    const q = gl.createQuery();
+    gl.beginQuery(ext.TIME_ELAPSED_EXT, q);
+    F.advance(1 / 60);
+    gl.endQuery(ext.TIME_ELAPSED_EXT);
+    pend.push([q, F.racer.s]);
+    if (i % 20 === 19) {
+      await new Promise((res) => setTimeout(res, 0));
+      for (let k = pend.length - 1; k >= 0; k--) {
+        const [qq, s] = pend[k];
+        if (!gl.getQueryParameter(qq, gl.QUERY_RESULT_AVAILABLE)) continue;
+        rows.push([s, gl.getQueryParameter(qq, gl.QUERY_RESULT) / 1e6]); gl.deleteQuery(qq); pend.splice(k, 1);
+      }
+    }
+  }
+  r.setPixelRatio(pr); r.setSize(ow, oh, false); comp.setPixelRatio(pr * scale); comp.setSize(ow, oh);
+  F.camera.aspect = ow / oh; F.camera.updateProjectionMatrix();
+  const ms = rows.map((x) => x[1]).sort((a, b) => a - b), q = (p) => +ms[Math.floor(p * (ms.length - 1))].toFixed(3);
+  // the worst 200 m stretches
+  const bins = new Map();
+  for (const [s, t] of rows) { const b = Math.floor(s / 200) * 200; const e = bins.get(b) || [0, 0]; e[0] += t; e[1]++; bins.set(b, e); }
+  const worst = [...bins].map(([b, [t, n]]) => [b, +(t / n).toFixed(3)]).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  return { frames: rows.length, med: q(0.5), p90: q(0.9), p99: q(0.99), max: q(1), worst, compiled: r.info.programs.length - prog0 };
+}
+
+// lapGPU's spikes taken apart: each frame's GPU time per composer pass, and for the frames over 2x the median, what
+// was going on (where on the lap, the pass that grew, the particles alive, the wave rings showing)
+export async function lapSpikes(W = 1920, H = 1080, sec = 40) {
+  const F = window.__feather, r = F.renderer, comp = F.composer, gl = r.getContext(), ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+  await scenario('pack', 0);
+  const scale = F.settings.v.scale, ow = innerWidth, oh = innerHeight, pr = r.getPixelRatio();
+  r.setPixelRatio(1); r.setSize(W, H, false); comp.setPixelRatio(scale); comp.setSize(W, H);
+  F.camera.aspect = W / H; F.camera.updateProjectionMatrix();
+  const names = comp.passes.map((p, i) => (p.constructor.name || 'pass') + '#' + i);
+  let cur = null;
+  const origs = comp.passes.map((p) => p.render);
+  comp.passes.forEach((p, i) => { const o = origs[i].bind(p); p.render = (...a) => { const q = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, q); o(...a); gl.endQuery(ext.TIME_ELAPSED_EXT); cur.q.push([names[i], q]); }; });
+  const frames = [], pend = [];
+  const alive = () => F.fx.pools.reduce((n, p) => { let k = 0; for (let i = 0; i < p.n; i++) if (p.age[i] < p.life[i]) k++; return n + k; }, 0);
+  try {
+    for (let i = 0; i < sec * 60; i++) {
+      cur = { q: [], s: F.racer.s, alive: 0, waves: 0 };
+      F.advance(1 / 60);
+      cur.alive = alive(); cur.waves = F.fx.waves.filter((m) => m.visible).length + (F.fx.ring.visible ? 1 : 0);
+      pend.push(cur);
+      if (i % 20 === 19) await new Promise((res) => setTimeout(res, 0));
+    }
+    await new Promise((res) => setTimeout(res, 300));
+    for (const f of pend) {
+      f.t = {}; f.tot = 0;
+      for (const [n, q] of f.q) { const ms = gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6; f.t[n] = (f.t[n] || 0) + ms; f.tot += ms; gl.deleteQuery(q); }
+      frames.push(f);
+    }
+  } finally {
+    comp.passes.forEach((p, i) => (p.render = origs[i]));
+    r.setPixelRatio(pr); r.setSize(ow, oh, false); comp.setPixelRatio(pr * scale); comp.setSize(ow, oh);
+    F.camera.aspect = ow / oh; F.camera.updateProjectionMatrix();
+  }
+  const tots = frames.map((f) => f.tot).sort((a, b) => a - b), med = tots[tots.length >> 1];
+  const passMed = {};
+  for (const n of names) { const v = frames.map((f) => f.t[n] || 0).sort((a, b) => a - b); passMed[n] = +v[v.length >> 1].toFixed(3); }
+  const spikes = frames.map((f, i) => [i, f]).filter(([, f]) => f.tot > 2 * med).map(([i, f]) => {
+    const grew = Object.entries(f.t).map(([n, t]) => [n, t - passMed[n]]).sort((a, b) => b[1] - a[1])[0];
+    return [i, Math.round(f.s), +f.tot.toFixed(2), grew[0], +grew[1].toFixed(2), f.alive, f.waves];
+  });
+  return { med: +med.toFixed(3), passMed, nSpikes: spikes.length, spikes: spikes.slice(0, 40) };
+}

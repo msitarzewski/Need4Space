@@ -22,7 +22,7 @@ import { Settings } from './settings.js';
 import { Race, Driver } from './race.js';
 import { Menu } from './menu.js';
 import { compileAll, deferBakes, runBakes, gpuIdle } from './bake.js';
-import { Q, setLite, integratedGPU } from './quality.js';
+import { Q, setLite, integratedGPU, liteFiltering } from './quality.js';
 
 const MAP = new URLSearchParams(location.search).get('map') === 'meadow' ? 'meadow' : 'space';
 const SHIP_URL = 'assets/racer_web.glb';
@@ -266,6 +266,8 @@ async function boot() {
     // Laptop mode: the lite shaders (quality.js) and fewer lights - the rivals' lights in the cave, the exhaust's
     // glow on the road and two of the three gantry lamps (each light costs every lit pixel)
     setLite(!!v.laptop, [scene, world.sky]);
+    liteFiltering(renderer, [scene, world.sky]);
+    document.body.classList.toggle('lite', !!v.laptop);    // (ui.css: no backdrop blur behind the HUD's panels)
     for (const l of [...rivalLights, ...ship.exhaustLights, ...(world.lamps || []).slice(1)]) l.visible = !v.laptop;
     aoRes = v.aoRes || 'auto';
     resize();
@@ -285,7 +287,9 @@ async function boot() {
     const keep = [];
     for (const e of race ? race.entries : [{ ship }]) e.ship.ensureTrails(scene);
     // (the sky's backdrop too: its hidden pieces - the sun's eruption and the like - compiled when they first showed)
-    for (const root of [scene, world.sky].filter(Boolean)) root.traverse((o) => { keep.push([o, o.visible, o.frustumCulled]); o.visible = true; o.frustumCulled = false; });
+    // (lights left as they are: a hidden one - Laptop mode's - would compile every lit program for a light count the
+    // race never has)
+    for (const root of [scene, world.sky].filter(Boolean)) root.traverse((o) => { if (o.isLight) return; keep.push([o, o.visible, o.frustumCulled]); o.visible = true; o.frustumCulled = false; });
     const ships = race ? race.entries.map((e) => e.ship) : [ship];
     const lods = ships.flatMap((s) => (s.lodMeshes || []).map((l) => [l.mesh, l.mesh.geometry, l.levels]));
     const t0 = performance.now();
@@ -325,6 +329,7 @@ async function boot() {
     resize();
     scene.updateMatrixWorld(); composer.render();
     await gpuIdle(renderer);
+    liteFiltering(renderer, [scene, world.sky]);           // (the shaders' own maps, now compiled and uploaded)
     console.info(`warm-up: ${renderer.info.programs.length} programs, ${Math.round(performance.now() - t0)} ms`);
   }
   document.getElementById('loading').classList.add('done');
@@ -356,7 +361,8 @@ async function boot() {
 
   let fpsN = 0, fpsT = 0;
   function frame(now) {
-    const raw = (now - last) / 1000, dt = Math.min(0.05, raw);
+    // (a frame's time held to 0.1 s at most: with 0.05 a slow GPU's long frames each lost time - a hitch in the motion)
+    const raw = (now - last) / 1000, dt = Math.min(0.1, raw);
     last = now;
     tick(menu.paused ? 0 : dt);                          // paused: a frame with no time in it (no physics, nothing moves)
     render();

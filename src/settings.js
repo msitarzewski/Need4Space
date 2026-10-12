@@ -1,7 +1,7 @@
 // Settings (O): every look feature has a switch that changes the picture and costs what it costs; saved per browser.
 const KEY = 'feather.settings.v4';
 export const DEFAULTS = { tonemap: 'aces', ao: true, bloom: true, shadows: 'high', scale: 1, exposure: 0, fps: true,
-  blur: true, reflections: true, streaks: true, ai: 'normal', music: 'mid', sfx: 'high', aa: 'smaa', aoRes: 'auto',
+  blur: true, reflections: true, streaks: true, ai: 'normal', music: 'high', sfx: 'high', aa: 'smaa', aoRes: 'auto',
   brakeLights: true, laptop: false };
 // Laptop mode's picture (quality.js has what else it cuts); turned off, the rows go back to what they were
 const LAPTOP = { scale: 0.5, aa: 'smaa1', ao: false, reflections: false, shadows: 'off', streaks: false, blur: false };
@@ -39,6 +39,8 @@ export class Settings {
     if (!saved && integrated) this.laptop(true);
     // Normal is the default difficulty: a Hard saved before the player ever chose one goes back to it
     if (!this.v.aiPicked) this.v.ai = DEFAULTS.ai;
+    // and the music's level High, unless one was chosen
+    if (!this.v.musicPicked) this.v.music = DEFAULTS.music;
     this.focus = 0;                                  // the row the keyboard / gamepad is on
     this.onSet = null;                               // (k, value) after every change (menu.js: the difficulty accent)
     this.el = document.getElementById('settings');
@@ -72,6 +74,7 @@ export class Settings {
     if (k === 'laptop') this.laptop(val);
     this.v[k] = val;
     if (k === 'ai') this.v.aiPicked = true;
+    if (k === 'music') this.v.musicPicked = true;
     try { localStorage.setItem(KEY, JSON.stringify(this.v)); } catch { /* storage blocked */ }
     this.apply(this.v);
     this.draw();

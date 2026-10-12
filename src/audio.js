@@ -14,7 +14,7 @@ import * as THREE from 'three';
 const SONGS = ['ring_runner', 'nebula_drift', 'hyperlane'];
 import { TRACK_W } from './track.js';
 
-const MUSIC_LV = { off: 0, low: 0.24, mid: 0.4, high: 0.58 };
+const MUSIC_LV = { off: 0, low: 0.3, mid: 0.5, high: 0.72 };     // (+2 dB on the first levels: "a bit louder")
 const SFX_LV = { low: 0.4, mid: 0.65, high: 0.9 };
 const C_SOUND = 700;            // a stylised speed of sound for the Doppler shift (m/s): ships pass at ~300 m/s
 const VOICES = 5;               // rival engines heard at once (the nearest)
@@ -90,7 +90,7 @@ export class GameAudio {
     this.master = c.createGain();
     this.master.gain.value = this.muted ? 0 : 1;
     const lim = c.createDynamicsCompressor();
-    lim.threshold.value = -6; lim.knee.value = 4; lim.ratio.value = 14; lim.attack.value = 0.002; lim.release.value = 0.12;
+    lim.threshold.value = -4; lim.knee.value = 4; lim.ratio.value = 14; lim.attack.value = 0.002; lim.release.value = 0.12;
     this.master.connect(lim).connect(c.destination);
     this.sfxBus = this.gain(SFX_LV[this.levels.sfx] ?? 0.9, this.master);
     this.musicBus = this.gain(MUSIC_LV[this.levels.music] ?? 0.36, this.master);
