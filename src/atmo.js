@@ -28,9 +28,11 @@ export const ATMO_GLSL = /* glsl */`
 #define ATMO_DEFINED
 const vec3 ATMO_SUN = ${v3(SUN_DIR)};
 const vec3 ATMO_SUNRAD = vec3(${f(SUN_E * SUN_COL.r)}, ${f(SUN_E * SUN_COL.g)}, ${f(SUN_E * SUN_COL.b)});
-const vec3 ATMO_BA = vec3(0.65e-5, 1.25e-5, 2.9e-5);      // the air's extinction at y = 0 (per m)
+const vec3 ATMO_BA = vec3(0.4e-5, 1.0e-5, 2.75e-5);      // the air's extinction at y = 0 (per m): clear, deep blue
+// the sunlight the air scatters (up in it, before the air has warmed it: whiter than what reaches the circuit)
+const vec3 ATMO_SKYSUN = vec3(${f(SUN_E)}) * vec3(1.0, 0.95, 0.9);
 const float ATMO_HA = 8000.0;
-const float ATMO_BB = 0.32e-3;                             // the haze's at the canopy
+const float ATMO_BB = 0.24e-3;                             // the haze's at the canopy
 const float ATMO_YB = ${f(CANOPY_Y)};
 const float ATMO_HB = 300.0;
 // the optical depth of a density exp(-(y - y0) / H) along o + d t, t in [0, dist]
@@ -41,11 +43,11 @@ float atmoExp(float oy, float dy, float dist, float y0, float H) {
 float atmoPhaseR(float mu) { return 0.0596831 * (1.0 + mu * mu); }
 float atmoPhaseHG(float mu, float g) { float g2 = g * g; return 0.0795775 * (1.0 - g2) / pow(max(1.0 + g2 - 2.0 * g * mu, 1e-4), 1.5); }
 // what the air and the haze scatter toward the eye looking along d (radiance of a saturated path)
-vec3 atmoSourceA(float mu) { return ATMO_SUNRAD * (atmoPhaseR(mu) * 3.0 + vec3(0.035, 0.05, 0.075)); }
+vec3 atmoSourceA(float mu) { return ATMO_SKYSUN * (atmoPhaseR(mu) * 3.0 + vec3(0.02, 0.04, 0.085)); }
 vec3 atmoSourceB(float mu, float dy) {
   // the haze: the sun's forward glare, the sky's light on it, a little of the jungle's green from below
-  return ATMO_SUNRAD * (atmoPhaseHG(mu, 0.72) * 0.42 + atmoPhaseHG(mu, -0.2) * 0.14) * vec3(0.92, 0.97, 1.0)
-    + ATMO_SUNRAD * vec3(0.012, 0.02, 0.032) + vec3(0.003, 0.01, 0.006) * ATMO_SUNRAD * smoothstep(0.2, -0.6, dy);
+  return ATMO_SKYSUN * (atmoPhaseHG(mu, 0.72) * 0.42 + atmoPhaseHG(mu, -0.2) * 0.14) * vec3(0.9, 0.96, 1.0)
+    + ATMO_SKYSUN * vec3(0.01, 0.018, 0.03) + vec3(0.004, 0.013, 0.007) * ATMO_SUNRAD * smoothstep(0.2, -0.6, dy);
 }
 // along o + d t (t < dist): transmittance and the light picked up
 void atmoPath(vec3 o, vec3 d, float dist, out vec3 T, out vec3 L) {
@@ -123,7 +125,9 @@ export const ATMO_FOG_CHUNK = /* glsl */`#ifdef USE_FOG
 		gl_FragColor.rgb = gl_FragColor.rgb * fogCT + fogCC * ( 1.0 - fogCT );
 		vec3 fogT, fogL;
 		atmoPath( cameraPosition, fogDir, fogDist, fogT, fogL );
-		gl_FragColor.rgb = gl_FragColor.rgb * fogT + fogL;
+		// (the air's light thinned over the middle distance, all of it again far off where things meet the sky: an
+		// island a few km off keeps its own shading instead of turning into a flat blue cut-out)
+		gl_FragColor.rgb = gl_FragColor.rgb * fogT + fogL * ( 1.0 - 0.45 * dot( fogT, vec3( 0.3333 ) ) );
 	}
 #endif`;
 
@@ -136,13 +140,19 @@ export const ATMO_FOG_CHUNK = /* glsl */`#ifdef USE_FOG
 const DOME_BAKE = /* glsl */`
   varying vec3 vDir;
   ${ATMO_GLSL}
+  // the jungle's roof seen from far above: its leaves in the sun, a third of them in their own shade (radiance)
+  const vec3 JUNGLE = vec3(0.05, 0.068, 0.02);
   void main() {
     vec3 d = normalize(vDir), o = vec3(0.0);
+    // below the horizon the ray ends on the jungle (the abyss's own mesh covers the nearer part of it; this, what
+    // lies past its edge and what the reflections see down there) - not on haze without end
+    bool down = d.y < -1e-4;
+    float dist = down ? (ATMO_YB - o.y) / d.y : 1e7;
     float cT; vec3 cC;
-    atmoClouds(o, d, 1e7, cT, cC, 5);
+    atmoClouds(o, d, dist, cT, cC, 5);
     vec3 T, L;
-    atmoPath(o, d, 1e7, T, L);
-    gl_FragColor = vec4(cC * (1.0 - cT) * T + L, 1.0 - dot(T, vec3(0.3333)) * cT);
+    atmoPath(o, d, dist, T, L);
+    gl_FragColor = vec4(cC * (1.0 - cT) * T + L + (down ? JUNGLE * T * cT : vec3(0.0)), down ? 1.0 : 1.0 - dot(T, vec3(0.3333)) * cT);
   }`;
 export function skyDome(renderer, size = 768) {
   const rt = new THREE.WebGLCubeRenderTarget(size, { type: THREE.HalfFloatType, generateMipmaps: true,

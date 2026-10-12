@@ -20,7 +20,7 @@ import { TouchControls, isTouch } from './touch.js';
 import { FX } from './fx.js';
 import { HUD } from './hud.js';
 import { GameAudio } from './audio.js';
-import { agxPass, speedBlurPass, LayeredRenderPass, DeckSSRPass, StreakPass, BloomPass, ResamplePass, ShaftPass, LensWaterPass } from './post.js';
+import { agxPass, speedBlurPass, LayeredRenderPass, DeckSSRPass, StreakPass, BloomPass, ResamplePass, ShaftPass, LensWaterPass, GradePass } from './post.js';
 import { Settings, savedSettings } from './settings.js';
 import { Race, Driver } from './race.js';
 import { Menu } from './menu.js';
@@ -231,6 +231,11 @@ async function boot() {
   composer.addPass(streaks);
   const blur = speedBlurPass();
   composer.addPass(blur);
+  // the map's own grade (a map under a bright sky: its contrast and colour back)
+  const grade = new GradePass();
+  Object.assign(grade, world.grade || {});
+  grade.enabled = !!world.grade;
+  composer.addPass(grade);
   status('Loading the colour transform');
   progress('colour');
   const agx = await agxLoad;

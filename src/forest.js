@@ -175,6 +175,7 @@ export class ForestWorld {
     // (the sky's light ~a fifth of the sun's on a lit face: more washed everything out - "no shadow detail")
     scene.environmentIntensity = 0.4;
     this.exposure = 0.9;
+    this.grade = { contrast: 1.12, saturation: 1.2 };     // (post.js GradePass)
     scene.fog = new THREE.FogExp2(0xffffff, 1e-4);       // (on: the atmosphere's own chunk does the work, atmo.js)
     // the sun: three cascades (the first carries the light)
     const sunLight = (intensity, half, near, far, normalBias) => {

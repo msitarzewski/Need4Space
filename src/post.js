@@ -589,6 +589,36 @@ export class ResamplePass extends Pass {
   }
 }
 
+// A map's own grade, on the scene's light before the view transform: contrast round mid grey (on the luminance: the
+// hues kept) and saturation. Under a bright sky everything is lit from all round and reads flat and pale next to
+// space's black - this gives it back its punch.
+export class GradePass extends Pass {
+  constructor() {
+    super();
+    this.contrast = 1;
+    this.saturation = 1;
+    this.quad = new FullScreenQuad(new THREE.ShaderMaterial({
+      uniforms: { tDiffuse: { value: null }, contrast: { value: 1 }, saturation: { value: 1 } },
+      vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+      fragmentShader: /* glsl */`uniform sampler2D tDiffuse; uniform float contrast, saturation; varying vec2 vUv;
+        void main() {
+          vec4 t = texture2D(tDiffuse, vUv);
+          vec3 c = max(t.rgb, vec3(0.0));
+          float Y = max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 1e-6), Yn = 0.18 * pow(Y / 0.18, contrast);
+          c *= Yn / Y;
+          gl_FragColor = vec4(max(mix(vec3(Yn), c, saturation), vec3(0.0)), t.a);
+        }`,
+    }));
+  }
+
+  render(renderer, writeBuffer, readBuffer) {
+    const u = this.quad.material.uniforms;
+    u.tDiffuse.value = readBuffer.texture; u.contrast.value = this.contrast; u.saturation.value = this.saturation;
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    this.quad.render(renderer);
+  }
+}
+
 // Light shafts (the forest moon's air): the bright sky round the sun, streaked toward it - so wherever an island, a
 // tree or a roof of vines stands in front of the sun, the light comes through its gaps in shafts. A quarter-size mask
 // (bright and near the sun), two radial blurs toward the sun's place on screen (24 taps each, the second finer: ~600

@@ -376,7 +376,11 @@ void iProj(vec2 p, float rot, out vec4 c, out vec2 g) {
     vec3 tx = vec3(gX * k + iN0.zy, iN0.x), ty = vec3(gY * k + iN0.xz, iN0.y), tz = vec3(gZ * k + iN0.xy, iN0.z);
     vec3 nw = normalize(tx.zyx * tpw.x + ty.xzy * tpw.y + tz.xyz * tpw.z);
     normal = normalize((viewMatrix * vec4(nw, 0.0)).xyz) * (gl_FrontFacing ? 1.0 : -1.0);
-  }`);
+  }`)
+      .replace('#include <lights_fragment_maps>', `#include <lights_fragment_maps>
+  // the sky's light on the rock and what bounces onto it off the sunlit tops, the other islands and the jungle: a
+  // cliff in its own shade is a cool grey, not the sky's own blue
+  iblIrradiance = mix(vec3(dot(iblIrradiance, vec3(0.2126, 0.7152, 0.0722))), iblIrradiance, 0.45) * vec3(1.06, 1.0, 0.9);`);
     if (!lamps) sh.fragmentShader = sunOnly(sh.fragmentShader);
   };
   mat.customProgramCacheKey = () => `forest-${key}-${Q.lite}`;
