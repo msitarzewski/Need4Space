@@ -498,3 +498,55 @@ export class BloomPass extends Pass {
     this.comp.render(renderer);
   }
 }
+
+// The render scale's last step: the frame is drawn at a fraction of the screen's pixels and brought up to it here -
+// Catmull-Rom (in five bilinear taps) and a contrast-adaptive sharpen held inside its neighbours' range (no halos).
+// (Before, a lower scale just made the canvas smaller and the browser stretched it: soft.) Above 1, a box down.
+export class ResamplePass extends Pass {
+  constructor() {
+    super();
+    this.needsSwap = true;
+    this.sharpen = 0.35;
+    this.down = false;
+    this.quad = new FullScreenQuad(new THREE.ShaderMaterial({
+      uniforms: { tDiffuse: { value: null }, texel: { value: new THREE.Vector2() }, sharpen: { value: 0 }, down: { value: 0 } },
+      vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+      fragmentShader: /* glsl */`
+        uniform sampler2D tDiffuse; uniform vec2 texel; uniform float sharpen, down; varying vec2 vUv;
+        vec3 catmullRom(vec2 uv) {
+          vec2 sp = uv / texel, tc = floor(sp - 0.5) + 0.5, f = sp - tc;
+          vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f)), w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+          vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f)), w3 = f * f * (-0.5 + 0.5 * f);
+          vec2 w12 = w1 + w2, t0 = (tc - 1.0) * texel, t3 = (tc + 2.0) * texel, t12 = (tc + w2 / w12) * texel;
+          vec3 c = texture2D(tDiffuse, vec2(t12.x, t0.y)).rgb * (w12.x * w0.y) + texture2D(tDiffuse, vec2(t0.x, t12.y)).rgb * (w0.x * w12.y)
+            + texture2D(tDiffuse, t12).rgb * (w12.x * w12.y) + texture2D(tDiffuse, vec2(t3.x, t12.y)).rgb * (w3.x * w12.y)
+            + texture2D(tDiffuse, vec2(t12.x, t3.y)).rgb * (w12.x * w3.y);
+          return c / (w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y);
+        }
+        void main() {
+          if (down > 0.5) {
+            vec2 q = 0.25 * fwidth(vUv);                           // quarter of an output pixel
+            gl_FragColor = vec4((texture2D(tDiffuse, vUv + vec2(-q.x, -q.y)).rgb + texture2D(tDiffuse, vUv + vec2(q.x, -q.y)).rgb
+              + texture2D(tDiffuse, vUv + vec2(-q.x, q.y)).rgb + texture2D(tDiffuse, vUv + vec2(q.x, q.y)).rgb) * 0.25, 1.0);
+            return;
+          }
+          vec3 c = catmullRom(vUv);
+          vec3 a = texture2D(tDiffuse, vUv + vec2(texel.x, 0.0)).rgb, b = texture2D(tDiffuse, vUv - vec2(texel.x, 0.0)).rgb;
+          vec3 d = texture2D(tDiffuse, vUv + vec2(0.0, texel.y)).rgb, e = texture2D(tDiffuse, vUv - vec2(0.0, texel.y)).rgb;
+          vec3 mn = min(min(a, b), min(d, e)), mx = max(max(a, b), max(d, e));
+          c = clamp(c + (c - (a + b + d + e) * 0.25) * sharpen, min(mn, c), max(mx, c));
+          gl_FragColor = vec4(max(c, 0.0), 1.0);
+        }`,
+    }));
+  }
+
+  render(renderer, writeBuffer, readBuffer) {
+    const u = this.quad.material.uniforms;
+    u.tDiffuse.value = readBuffer.texture;
+    u.texel.value.set(1 / readBuffer.width, 1 / readBuffer.height);
+    u.sharpen.value = this.sharpen;
+    u.down.value = this.down ? 1 : 0;
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    this.quad.render(renderer);
+  }
+}

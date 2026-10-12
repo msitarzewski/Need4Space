@@ -215,3 +215,35 @@ export async function timeTrial(opts = {}) {
   race.reset();
   return { laps, walls, pads, falls, boost: +(boostT / t).toFixed(3), airbrake: +(air / t).toFixed(3), minV: minV | 0, maxLineErr: +err.toFixed(1), rmsLineErr: +Math.sqrt(e2 / Math.max(1, ne)).toFixed(2) };
 }
+
+// The music, exported: each song of music.js rendered whole and saved as 16-bit WAV through the dev server
+// (racer/wip/shots/music_<name>.png - the PNG name is the server's; it is a WAV), then encoded with ffmpeg to
+// assets/music/<name>.ogg (Opus) and .m4a (AAC). The game streams those files instead of synthesising at runtime.
+export async function exportMusic() {
+  const m = await import('./music.js');
+  const done = [];
+  for (let si = 0; si < m.SONG_COUNT; si++) {
+    const segs = [];
+    for (let k = 0; k < m.SEGMENTS; k++) segs.push(await m.renderSegment(si, k));
+    const sr = segs[0].sampleRate, n = segs.reduce((a, b) => a + b.length, 0);
+    const buf = new ArrayBuffer(44 + n * 4), v = new DataView(buf);
+    const str = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    str(0, 'RIFF'); v.setUint32(4, 36 + n * 4, true); str(8, 'WAVE'); str(12, 'fmt ');
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 2, true); v.setUint32(24, sr, true);
+    v.setUint32(28, sr * 4, true); v.setUint16(32, 4, true); v.setUint16(34, 16, true); str(36, 'data'); v.setUint32(40, n * 4, true);
+    let o = 44;
+    for (const b of segs) {
+      const L = b.getChannelData(0), R = b.getChannelData(1);
+      for (let i = 0; i < b.length; i++) {
+        for (const x of [L[i], R[i]]) {          // TPDF dither, then 16 bits
+          const d = (Math.random() - Math.random()) / 32768;
+          v.setInt16(o, Math.max(-32768, Math.min(32767, Math.round((x + d) * 32767))), true); o += 2;
+        }
+      }
+    }
+    const name = 'music_' + m.SONG_NAMES[si].toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    await fetch('/shot/' + name, { method: 'POST', body: buf });
+    done.push([name, +(n / sr).toFixed(1)]);
+  }
+  return done;
+}

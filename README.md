@@ -49,6 +49,10 @@ A gamepad (standard mapping) also works.
 - **3D sound:** HRTF-panned positional audio with distance filtering and Doppler; echo inside the tunnel and the meteorite.
 - **Settings:** every look feature has its own switch.
 
+## Support
+
+Need4Space is free. If you enjoy it, you can support development on Revolut: [revolut.me/alexan_vic](https://revolut.me/alexan_vic).
+
 ## Credits
 
 - **Hit and impact sounds:** [Kenney](https://kenney.nl), the *Impact Sounds* and *Sci-fi Sounds* packs, CC0. The licence files are in `assets/sfx/`.

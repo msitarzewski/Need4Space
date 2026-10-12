@@ -1,7 +1,7 @@
 // Settings (O): every look feature has a switch that changes the picture and costs what it costs; saved per browser.
 const KEY = 'feather.settings.v4';
 export const DEFAULTS = { tonemap: 'aces', ao: true, bloom: true, shadows: 'high', scale: 1, exposure: 0, fps: true,
-  blur: true, reflections: true, streaks: true, ai: 'normal', music: 'mid', sfx: 'high', aa: 'smaa' };
+  blur: true, reflections: true, streaks: true, ai: 'normal', music: 'mid', sfx: 'high', aa: 'smaa', aoRes: 'auto' };
 // (AI difficulty: the rivals, race.js AI_LEVELS - Normal a fair fight, Hard close to a flawless lap, Brutal at it)
 const ROWS = [
   ['ai', 'AI difficulty', [['normal', 'Normal'], ['hard', 'Hard'], ['brutal', 'Brutal']]],
@@ -9,8 +9,9 @@ const ROWS = [
   ['sfx', 'Sound effects', [['low', 'Low'], ['mid', 'Medium'], ['high', 'High']]],
   ['tonemap', 'Tone mapping', [['punchy', 'AgX Punchy'], ['agx', 'AgX Medium'], ['aces', 'ACES']]],
   ['exposure', 'Exposure', [[-1.5, '-1.5'], [-1, '-1'], [-0.5, '-0.5'], [0, '0'], [0.5, '+0.5']]],
-  ['aa', 'Anti-aliasing', [['msaa', 'MSAA 4x'], ['smaa', 'MSAA 4x + SMAA'], ['high', 'MSAA 8x + SMAA']]],
+  ['aa', 'Anti-aliasing', [['msaa', 'MSAA 4x'], ['fast', 'MSAA 2x + SMAA'], ['smaa', 'MSAA 4x + SMAA'], ['high', 'MSAA 8x + SMAA']]],
   ['ao', 'Ambient occlusion', [[true, 'On'], [false, 'Off']]],
+  ['aoRes', 'AO resolution', [['auto', 'Auto'], ['full', 'Full'], ['half', 'Half']]],
   ['bloom', 'Bloom', [[true, 'On'], [false, 'Off']]],
   ['reflections', 'Deck reflections (needs AO)', [[true, 'On'], [false, 'Off']]],
   ['streaks', 'Light streaks', [[true, 'On'], [false, 'Off']]],

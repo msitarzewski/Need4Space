@@ -121,9 +121,10 @@ class Plume {
     this.inner = new THREE.Mesh(plumeGeo(r * 0.1, r * 0.6),
       plumeMaterial(eng.clone().lerp(white, 0.4), white.clone(), true));
     if (reverse) { this.outer.rotation.y = this.inner.rotation.y = Math.PI; }
+    // (frustum-culled: the cone's bounds scale with the mesh - a plume off screen, or in the far depth slice while its
+    // ship is near, is no draw at all; unculled, every ship's ten cones were drawn in both slices every frame)
     for (const m of [this.outer, this.inner]) {
       m.position.copy(at);
-      m.frustumCulled = false;
       m.renderOrder = 2;
       parent.add(m);
     }
@@ -157,6 +158,21 @@ class Plume {
   }
 }
 
+// A world-space ribbon's bounds, from the vertices it was just given: so it is frustum-culled like anything else (a
+// trail off screen, or in the far depth slice while its ship is near, is no draw at all).
+function ribbonBounds(g, pos) {
+  let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+  for (let i = 0; i < pos.length; i += 3) {
+    const x = pos[i], y = pos[i + 1], z = pos[i + 2];
+    if (x < x0) x0 = x; if (x > x1) x1 = x;
+    if (y < y0) y0 = y; if (y > y1) y1 = y;
+    if (z < z0) z0 = z; if (z > z1) z1 = z;
+  }
+  const s = g.boundingSphere || (g.boundingSphere = new THREE.Sphere());
+  s.center.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+  s.radius = 0.5 * Math.hypot(x1 - x0, y1 - y0, z1 - z0);
+}
+
 // a camera-facing ribbon behind a point (wingtip vortices)
 class Trail {
   constructor(scene, n = 90) {
@@ -176,7 +192,6 @@ class Trail {
         void main() { vA = alpha; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
       fragmentShader: /* glsl */`varying float vA; void main() { gl_FragColor = vec4(0.94, 0.96, 1.0, vA); }`,
     }));
-    this.mesh.frustumCulled = false;
     scene.add(this.mesh);
   }
 
@@ -184,6 +199,7 @@ class Trail {
     const old = this.pts.length >= this.n ? this.pts.pop() : null;          // the oldest point, reused
     this.pts.unshift(old ? (old.p.copy(p), old.s = strength, old) : { p: p.clone(), s: strength });
     const side = this._side || (this._side = new THREE.Vector3()), tan = this._tan || (this._tan = new THREE.Vector3()), to = this._to || (this._to = new THREE.Vector3());
+    let maxA = 0;
     for (let i = 0; i < this.n; i++) {
       const q = this.pts[Math.min(i, this.pts.length - 1)];
       const nb = this.pts[Math.min(i + 1, this.pts.length - 1)];
@@ -193,12 +209,16 @@ class Trail {
       side.crossVectors(tan, to).normalize();
       const f = i / (this.n - 1), w = 0.05 + 0.5 * f;
       const a = i < this.pts.length ? q.s * Math.pow(1 - f, 1.5) * 0.4 : 0;
+      if (a > maxA) maxA = a;
       for (let k = 0; k < 2; k++) {
         const o = (i * 2 + k) * 3, sgn = k ? -1 : 1;
         this.pos[o] = q.p.x + side.x * w * sgn; this.pos[o + 1] = q.p.y + side.y * w * sgn; this.pos[o + 2] = q.p.z + side.z * w * sgn;
         this.alpha[i * 2 + k] = a;
       }
     }
+    // all clear (not pulling hard, or not fast): nothing to draw - alpha 0 blends to nothing anyway
+    this.mesh.visible = maxA > 0;
+    if (this.mesh.visible) ribbonBounds(this.mesh.geometry, this.pos);
     this.mesh.geometry.attributes.position.needsUpdate = true;
     this.mesh.geometry.attributes.alpha.needsUpdate = true;
   }
@@ -237,7 +257,6 @@ class EngineTrail {
           gl_FragColor = vec4((colour * sheath * sheath * 0.9 + hot * exp(-x * 14.0) * 1.6) * vA, 1.0);
         }`,
     }));
-    this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 2;
     scene.add(this.mesh);
     this.tan = new THREE.Vector3(); this.to = new THREE.Vector3(); this.sd = new THREE.Vector3();
@@ -268,6 +287,7 @@ class EngineTrail {
       }
     }
     this.mesh.visible = strength > 0.005 && m > 1;
+    if (this.mesh.visible) ribbonBounds(this.mesh.geometry, this.pos);
     this.mesh.geometry.attributes.position.needsUpdate = true;
     this.mesh.geometry.attributes.alpha.needsUpdate = true;
   }
@@ -324,6 +344,53 @@ function shieldMaterial(tint) {
 const GLOWS = ['EngineGlow', 'EngineCore'];
 const AVIONICS = ['LedCyan', 'LedAmber', 'BayLight', 'Screen', 'NavLamp', 'NavGreen', 'NavRed'];
 const BAY_FILL = ['Chip', 'PCB', 'Cable', 'CableOrange', 'Copper', 'Gold'];
+// the engine glow rings: [centre-line radius, width] (m), in each ring's own space (its own xy plane)
+const RINGS = { InletGlow: [0.51, 0.03], ExhaustGlow: [0.54, 0.035], TailGlow: [0.15, 0.016] };
+const MAPS = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap', 'bumpMap', 'lightMap', 'displacementMap'];
+const IDENTITY = new THREE.Matrix4();
+
+// The parts atlas's material: a plain MeshStandardMaterial whose colour, roughness, metalness and emissive come per
+// part from uniform arrays, read in the fragment shader by the part id - the very values its own material had, so each
+// part shades exactly as before - the engine rings' gaussian glow included. One program for every ship; each ship its
+// own uniforms. (The id travels as a plain interpolated float - the same on every vertex of a part, so it arrives
+// exact - not a flat varying: on the RX 7900 XT any flat varying, even one vec4 of the part's values, made the parts
+// ~0.03 ms slower to shade than all their separate draws; this way they shade faster.)
+function partsMaterial(n, U) {
+  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, emissive: 0x000000 });
+  m.name = 'Parts';
+  m.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float partId;\nattribute vec2 ringP;\nvarying float vPartId;\nvarying vec2 vRingP;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vPartId = partId;\n  vRingP = ringP;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>\nvarying float vPartId;\nvarying vec2 vRingP;\nuniform vec4 partA[${n}];\nuniform vec4 partB[${n}];\nuniform vec2 partR[${n}];\nuniform vec3 ringEng, ringHot;`)
+      .replace('vec4 diffuseColor = vec4( diffuse, opacity );',
+        'int partI = int( vPartId + 0.5 );\n\tvec4 partCA = partA[ partI ], partCB = partB[ partI ];\n\tvec4 diffuseColor = vec4( partCA.rgb, opacity );')
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = partCA.a;')
+      .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = partCB.a;')
+      .replace('vec3 totalEmissiveRadiance = emissive;', 'vec3 totalEmissiveRadiance = partCB.rgb;')
+      // (the rings: as their own shader had it, `gain` included - the emissive here is the ring's emissive x intensity)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+  vec2 partRW = partR[ partI ];
+  if (partRW.y > 0.0) {
+    float uu = (length(vRingP) - partRW.x) / partRW.y, core = exp(-uu * uu);
+    float gain = dot(totalEmissiveRadiance, vec3(0.2126, 0.7152, 0.0722)) / max(dot(partCB.rgb, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
+    totalEmissiveRadiance = mix(ringEng, ringHot, core * core) * (0.35 + 6.0 * core) * gain * 0.9;
+  }`);
+  };
+  m.customProgramCacheKey = () => 'feather-parts-' + n;
+  return m;
+}
+
+// one detail level of an atlas for one ship: the shared vertex buffers and index, its own draw range
+function partsGeometry(G, index) {
+  const g = new THREE.BufferGeometry();
+  for (const k in G.attrs) g.setAttribute(k, G.attrs[k]);
+  g.setIndex(index);
+  g.boundingSphere = G.sphere;
+  return g;
+}
 
 // Glass that reads as glass. three.js scales a transparent surface's reflection by its opacity as well, so the canopy
 // and the bay windows were a flat grey film ("the glass on the engine looks so bad"). Here the reflection goes on at
@@ -419,7 +486,7 @@ export class Ship {
     if (base) {                        // each rival owns its materials: its glows follow its own engines
       const own = new Map();
       this.model.traverse((o) => {
-        if (!o.isMesh) return;
+        if (!o.isMesh || o.userData.parts != null) return;     // (the parts atlases get theirs in setupParts)
         if (!own.has(o.material)) own.set(o.material, o.material.clone());
         o.material = own.get(o.material);
       });
@@ -442,7 +509,7 @@ export class Ship {
         o.castShadow = true;
         o.receiveShadow = true;
         this.tris += o.geometry.index ? o.geometry.index.count / 3 : o.geometry.attributes.position.count / 3;
-        this.mats[o.material.name] = o.material;
+        if (o.userData.parts == null) this.mats[o.material.name] = o.material;
       }
     });
     // the canopy: smoked; the bay windows: clear enough to see the electronics behind them
@@ -458,8 +525,8 @@ export class Ship {
     // engine glows 0.6x the export's: they bloomed into white blobs (the user: "make glow less agresive")
     for (const n of [...GLOWS, ...AVIONICS]) if (this.mats[n]) this.glowBase[n] = this.mats[n].emissiveIntensity * (GLOWS.includes(n) ? 0.6 : 1);
 
-    if (base) {                        // same hull: same probes, tips and span
-      for (const k of ['probes', 'bottom', 'tipR', 'tipL', 'halfSpan', 'length', 'tangentsFixed']) this[k] = base[k];
+    if (base) {                        // same hull: same probes, tips and span, nozzles, parts atlas
+      for (const k of ['probes', 'bottom', 'tipR', 'tipL', 'halfSpan', 'length', 'tangentsFixed', 'nozzles', 'parts']) this[k] = base[k];
     } else {
       this.repairTangents();
       this.root.updateMatrixWorld(true);
@@ -473,8 +540,8 @@ export class Ship {
     if (this.mats.EngineCore) this.mats.EngineCore.emissive.copy(this.engineColor).lerp(white, 0.6);
     // the glow rings as HDR light: white-hot along the ring's centre line, the engine colour at its edges (the Cycles
     // look's ring shader: a gaussian across the ring); each ring its own radius
+    // (a rival has none of its own: its rings are in the parts atlas it cloned, lit through setupParts)
     this.ringMats = [];
-    const RINGS = { InletGlow: [0.51, 0.03], ExhaustGlow: [0.54, 0.035], TailGlow: [0.15, 0.016] };
     this.model.traverse((o) => {
       const key = o.isMesh && Object.keys(RINGS).find((k) => o.name.startsWith(k));
       if (!key) return;
@@ -497,11 +564,17 @@ export class Ship {
       o.material = m;
       this.ringMats.push(m);
     });
+    // the nozzles (the glow rings' boxes) - measured on the player's ship before its rings join the parts atlas
+    this.nozzles ||= {};
+    const nozzle = (name) => {
+      if (!(name in this.nozzles)) { const n = this.model.getObjectByName(name); this.nozzles[name] = n ? new THREE.Box3().setFromObject(n) : null; }
+      return this.nozzles[name];
+    };
     this.plumes = [];
     for (const [name, scale] of [['ExhaustGlow_R', 1], ['ExhaustGlow_L', 1], ['TailGlow', 1.4]]) {
-      const n = this.model.getObjectByName(name);
-      if (!n) { console.warn('no exhaust', name); continue; }
-      const b = new THREE.Box3().setFromObject(n), c = b.getCenter(new THREE.Vector3()), s = b.getSize(new THREE.Vector3());
+      const b = nozzle(name);
+      if (!b) { console.warn('no exhaust', name); continue; }
+      const c = b.getCenter(new THREE.Vector3()), s = b.getSize(new THREE.Vector3());
       const r = 0.45 * Math.max(s.x, s.y);
       this.plumes.push(new Plume(this.visual, new THREE.Vector3(c.x, c.y, b.max.z - 0.05), r, scale * (r > 0.3 ? 1 : 2.2), this.engineColor));
     }
@@ -511,9 +584,9 @@ export class Ship {
     // retro-jets: braking fires short jets forward out of both inlets
     this.retros = [];
     for (const name of ['InletGlow_R', 'InletGlow_L']) {
-      const n = this.model.getObjectByName(name);
-      if (!n) continue;
-      const b = new THREE.Box3().setFromObject(n), c = b.getCenter(new THREE.Vector3());
+      const b = nozzle(name);
+      if (!b) continue;
+      const c = b.getCenter(new THREE.Vector3());
       this.retros.push(new Plume(this.visual, new THREE.Vector3(c.x, c.y, b.min.z - 0.1), 0.32, 1.6, this.engineColor, true));
     }
     this.exhaustLights = (opts.lights === false ? [] : this.plumes.slice(0, 2)).map((p) => {
@@ -544,11 +617,14 @@ export class Ship {
     this.canopyT = 1;
     this.t = 0;
     this.trails = null;
-    // one draw per material for the static hull (a rival's clone copies the merged meshes and shares their geometry)
-    if (!base) this.mergeStatic();
+    // one draw per material for the static hull, then the small parts into two atlases (a rival's clone copies the
+    // merged meshes and shares their geometry)
+    if (!base) { this.mergeStatic(); this.buildParts(); }
+    this.setupParts();
     this.lod = 0;
-    this.lodMeshes = base ? (base.lods || []).map((l) => ({ mesh: this.model.getObjectByName(l.name), levels: l.levels }))
-      .filter((l) => l.mesh) : [];
+    this.lodMeshes = base ? (base.lods || []).filter((l) => !l.parts)
+      .map((l) => ({ mesh: this.model.getObjectByName(l.name), levels: l.levels })).filter((l) => l.mesh)
+      .concat(this.partMeshes.map((pm) => ({ mesh: pm.mesh, levels: pm.levels, parts: true }))) : [];
     this.lodErr = base ? base.lodErr : null;
     this.buildDetails();
   }
@@ -559,12 +635,13 @@ export class Ship {
   // draws a frame. A mesh is judged by its thickest connected piece (the export already merged every chip into one
   // object), by that piece's second-largest extent: how wide it draws, so a long thin cable counts as thin. Culled
   // under a third of a pixel (a quarter for glowing bits), through its layer (layer 0 off), so whatever else sets
-  // .visible (canopy, shields) is left alone. Glass and glows cast no sun shadow.
+  // .visible (canopy, shields) is left alone. Glass and glows cast no sun shadow. (The parts atlases cull each of
+  // their parts by the same rule through their draw range: setLod.)
   buildDetails() {
     this.details = [];
     this.model.updateMatrixWorld(true);
     this.model.traverse((o) => {
-      if (!o.isMesh || !o.material || o.material.isShaderMaterial) return;
+      if (!o.isMesh || !o.material || o.material.isShaderMaterial || o.userData.parts != null) return;
       const m = o.material, glow = (m.emissive && m.emissive.getHex() !== 0 && (m.emissiveIntensity ?? 1) > 0) || /glow|led|nav|lamp|light|screen/i.test(m.name);
       if (glow || /glass/i.test(m.name)) o.castShadow = false;
       const w = pieceWidth(o.geometry, o.matrixWorld);
@@ -605,6 +682,127 @@ export class Ship {
     this.merged = { from: merged, meshes };
   }
 
+  // The parts atlases. After mergeStatic a ship was still 32 draws in every pass, 22 of them small opaque parts each in
+  // a plain material of its own - alloy, cables, chips, copper, gold, boards, engine faces and cores, LEDs, bay lights,
+  // screens, nav lights and the five glow rings. They become two meshes: the parts that cast a sun shadow and the
+  // glowing ones that don't (as before), each one draw with one material (partsMaterial: every part keeps its own
+  // colour, roughness, metalness and emissive by its part id) - same triangles, same shading. Each atlas lists its parts
+  // widest first (width over culling threshold), so the parts still on at a distance are always the front of its index:
+  // buildDetails' per-part culling becomes a draw range (setLod), same widths, same thresholds; the distance level is
+  // built per part (buildLods), each part simplified exactly as when it was a mesh of its own.
+  buildParts() {
+    const moving = new Set([...this.rotors.map((r) => r.node), this.canopy && this.canopy.node].filter(Boolean));
+    this.model.updateMatrixWorld(true);
+    const inv = this.model.matrixWorld.clone().invert(), list = [];
+    this.model.traverse((o) => {
+      if (!o.isMesh || o.children.length) return;
+      const m = o.material, ring = this.ringMats.includes(m), n = m.name;
+      if (!m.isMeshStandardMaterial || m.isMeshPhysicalMaterial || m.transparent || MAPS.some((k) => m[k])) return;
+      if (!ring && m.onBeforeCompile !== THREE.Material.prototype.onBeforeCompile) return;
+      for (let p = o; p && p !== this.model; p = p.parent) if (moving.has(p)) return;
+      // (culled and shadowed exactly as buildDetails judged the mesh)
+      const glow = (m.emissive && m.emissive.getHex() !== 0 && (m.emissiveIntensity ?? 1) > 0) || /glow|led|nav|lamp|light|screen/i.test(n);
+      const w = pieceWidth(o.geometry, o.matrixWorld), M = inv.clone().multiply(o.matrixWorld);
+      list.push({ id: list.length, name: o.name, mat: m, mesh: o, matrix: M, w, thr: glow ? 0.25 : 0.34, cull: w < 0.6, cast: !glow,
+        geo: M.equals(IDENTITY) ? o.geometry : o.geometry.clone().applyMatrix4(M),
+        ring: ring ? RINGS[Object.keys(RINGS).find((k) => o.name.startsWith(k))] : null,
+        // how its emissive moves (update): engine glow and rings with the drive, avionics and bay fill with the
+        // avionics, the rest fixed; the engine glow and cores take each ship's engine colour (eng: the white mixed in)
+        kind: ring ? 'ring' : GLOWS.includes(n) ? 'glow' : AVIONICS.includes(n) ? 'avi' : BAY_FILL.includes(n) ? 'bay' : 'const',
+        base: ring ? this.glowBase.EngineGlow : this.glowBase[n] ?? m.emissiveIntensity,
+        eng: ring ? null : n === 'EngineGlow' ? 0 : n === 'EngineCore' ? 0.6 : null });
+    });
+    if (!list.length) return;
+    const groups = [], key = (p) => (p.cull ? p.w / p.thr : Infinity);
+    for (const [name, cast] of [['Parts_cast', true], ['Parts_glow', false]]) {
+      const parts = list.filter((p) => p.cast === cast).sort((a, b) => (key(a) === key(b) ? 0 : key(b) - key(a)));
+      if (!parts.length) continue;
+      let nv = 0, ni = 0;
+      for (const p of parts) { nv += p.geo.attributes.position.count; ni += p.geo.index ? p.geo.index.count : p.geo.attributes.position.count; }
+      const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), ID = new Float32Array(nv), RP = new Float32Array(nv * 2);
+      const I = new Uint32Array(ni), cum = [0];
+      let v = 0, i = 0;
+      for (const p of parts) {
+        const pa = p.geo.attributes.position, na = p.geo.attributes.normal, lp = p.mesh.geometry.attributes.position;
+        const c = pa.count, ix = p.geo.index ? p.geo.index.array : null, ci = ix ? ix.length : c;
+        for (let k = 0; k < c; k++) {
+          const o = (v + k) * 3;
+          P[o] = pa.getX(k); P[o + 1] = pa.getY(k); P[o + 2] = pa.getZ(k);
+          N[o] = na.getX(k); N[o + 1] = na.getY(k); N[o + 2] = na.getZ(k);
+          ID[v + k] = p.id;
+          if (p.ring) { RP[(v + k) * 2] = lp.getX(k); RP[(v + k) * 2 + 1] = lp.getY(k); }     // the ring's own space
+        }
+        for (let k = 0; k < ci; k++) I[i + k] = (ix ? ix[k] : k) + v;
+        Object.assign(p, { v0: v, nv: c, i0: i, ni: ci });
+        v += c; i += ci;
+        cum.push(i);
+      }
+      const attrs = { position: new THREE.BufferAttribute(P, 3), normal: new THREE.BufferAttribute(N, 3),
+        partId: new THREE.BufferAttribute(ID, 1), ringP: new THREE.BufferAttribute(RP, 2) };
+      const bs = new THREE.BufferGeometry().setAttribute('position', attrs.position);
+      bs.computeBoundingSphere();
+      // levels[k]: the index at distance level k (buildLods adds the far one); cum[k][j]: where part j ends in it
+      groups.push({ name, cast, parts, attrs, sphere: bs.boundingSphere, levels: [new THREE.BufferAttribute(I, 1)], cum: [cum] });
+    }
+    const A = new Float32Array(list.length * 4), R = new Float32Array(list.length * 2);
+    for (const p of list) {
+      A.set([p.mat.color.r, p.mat.color.g, p.mat.color.b, p.mat.roughness], p.id * 4);
+      if (p.ring) R.set(p.ring, p.id * 2);
+      p.mesh.removeFromParent();
+      if (p.geo !== p.mesh.geometry) p.geo.dispose();
+      p.mesh.geometry.dispose();
+      delete p.geo; delete p.mesh;
+    }
+    // the materials now drawn only through the atlases leave the ship's list (and the rings their own)
+    const used = new Set();
+    this.model.traverse((o) => { if (o.isMesh) used.add(o.material); });
+    for (const k of Object.keys(this.mats)) if (!used.has(this.mats[k])) delete this.mats[k];
+    this.ringMats = [];
+    this.parts = { list, groups, n: list.length, A, R };
+  }
+
+  // this ship's atlas meshes (the player's made here, a rival's cloned from it): its own material and uniforms (its
+  // engine colour, its glows), its own geometry per distance level (shared buffers, its own draw range)
+  setupParts() {
+    const S = this.parts, white = new THREE.Color(1, 1, 1);
+    this.partMeshes = [];
+    this.partE = [];
+    if (!S) return;
+    const B = new Float32Array(S.n * 4);
+    for (const p of S.list) {
+      const e = p.eng != null ? this.engineColor.clone().lerp(white, p.eng) : p.mat.emissive.clone();
+      B[p.id * 4 + 3] = p.mat.metalness;
+      if (p.kind === 'const') B.set([e.r * p.base, e.g * p.base, e.b * p.base], p.id * 4);
+      else this.partE.push({ o: p.id * 4, kind: p.kind, base: p.base, e });
+    }
+    this.partU = { partA: { value: S.A }, partB: { value: B }, partR: { value: S.R },
+      ringEng: { value: this.engineColor.clone() }, ringHot: { value: this.engineColor.clone().lerp(white, 0.8) } };
+    this.partMat = partsMaterial(S.n, this.partU);
+    S.groups.forEach((G, gi) => {
+      const levels = G.levels.map((idx) => partsGeometry(G, idx));
+      let mesh = this.model.getObjectByName(G.name);
+      if (mesh) { mesh.geometry = levels[0]; mesh.material = this.partMat; } else {
+        mesh = new THREE.Mesh(levels[0], this.partMat);
+        mesh.name = G.name;
+        mesh.userData.parts = gi;
+        this.model.add(mesh);
+      }
+      mesh.castShadow = G.cast;
+      mesh.receiveShadow = true;
+      this.partMeshes.push({ mesh, G, levels, c: -1, k: -1 });
+    });
+  }
+
+  // the atlas parts' emissive this frame (each exactly what its own material's emissive x intensity was):
+  // f the spool-up, drive the throttle / boost / brake, av the avionics
+  updateParts(f, drive, av) {
+    const B = this.partU.partB.value;
+    for (const q of this.partE) {
+      const I = q.kind === 'bay' ? av : q.kind === 'avi' ? q.base * av : q.base * f * drive;
+      B[q.o] = q.e.r * I; B[q.o + 1] = q.e.g * I; B[q.o + 2] = q.e.b * I;
+    }
+  }
+
   // A distance level for the big static meshes, by meshoptimizer with the error in metres: used only where its error
   // stays under ~0.6 px on screen (setLod; 2 cm: beyond ~40 m at 1440p). It shares the full mesh's vertex buffers -
   // only the index differs - and keeps its normals, UVs and seams; the atlas's UV seams hold it at about half the
@@ -613,7 +811,7 @@ export class Ship {
     this.lods = [];
     this.lodErr = errs;
     this.model.traverse((o) => {
-      const g = o.isMesh && o.geometry;
+      const g = o.isMesh && o.userData.parts == null && o.geometry;
       if (!g || !g.index || g.index.count < 9000) return;
       const idx = g.index.array instanceof Uint32Array ? g.index.array : new Uint32Array(g.index.array);
       const pos = g.attributes.position.array, levels = [g];
@@ -628,6 +826,32 @@ export class Ship {
       }
       this.lods.push({ name: o.name, mesh: o, levels });
     });
+    // the atlases: part by part (on its own vertices), the same rule - a part under 9000 indices stays whole
+    for (const pm of this.partMeshes || []) {
+      const G = pm.G;
+      if (G.levels.length === 1) {
+        const P = G.attrs.position.array, I0 = G.levels[0].array;
+        for (const e of errs) {
+          const outs = [], cum = [0];
+          for (const p of G.parts) {
+            let ix = I0.subarray(p.i0, p.i0 + p.ni);
+            if (p.ni >= 9000) {
+              const [out] = MeshoptSimplifier.simplify(Uint32Array.from(ix, (x) => x - p.v0), P.slice(p.v0 * 3, (p.v0 + p.nv) * 3), 3,
+                Math.floor(p.ni / 3 * 0.02) * 3, e, ['ErrorAbsolute']);
+              ix = Uint32Array.from(out, (x) => x + p.v0);
+            }
+            outs.push(ix);
+            cum.push(cum[cum.length - 1] + ix.length);
+          }
+          const all = new Uint32Array(cum[cum.length - 1]);
+          outs.forEach((a, j) => all.set(a, cum[j]));
+          G.levels.push(new THREE.BufferAttribute(all, 1));
+          G.cum.push(cum);
+        }
+      }
+      pm.levels = G.levels.map((idx, k) => pm.levels[k] || partsGeometry(G, idx));
+      this.lods.push({ name: pm.mesh.name, mesh: pm.mesh, levels: pm.levels, parts: true });
+    }
     this.lodMeshes = this.lods;
     this.lodTris = [0, 1].map((k) => this.lods.reduce((n, l) => n + l.levels[k].index.count / 3, 0));
   }
@@ -644,9 +868,20 @@ export class Ship {
       if (on !== p.on) { p.on = on; if (on) p.mesh.layers.enable(0); else p.mesh.layers.disable(0); }
     }
     for (let i = 0; i < errs.length; i++) if ((errs[i] * focalPx) / Math.max(dist, 1) < 0.6) k = i + 1;
+    // an atlas: its parts still on are the front of its index (widest first) - drawn up to there; none: off (layer 0)
+    for (const pm of this.partMeshes || []) {
+      let c = 0;
+      for (const p of pm.G.parts) { if (p.cull && !(p.w * px >= p.thr)) break; c++; }
+      const kk = Math.min(k, pm.levels.length - 1), g = pm.levels[kk];
+      if (c === pm.c && kk === pm.k && pm.mesh.geometry === g) continue;
+      if (c !== pm.c) { if (c) pm.mesh.layers.enable(0); else pm.mesh.layers.disable(0); }
+      pm.c = c; pm.k = kk;
+      pm.mesh.geometry = g;
+      g.setDrawRange(0, pm.G.cum[kk][c]);
+    }
     if (k === this.lod) return;
     this.lod = k;
-    for (const l of this.lodMeshes) l.mesh.geometry = l.levels[k];
+    for (const l of this.lodMeshes) if (!l.parts) l.mesh.geometry = l.levels[k];
   }
 
   // The GLB's baked material as a physical one: the paint gets the clear coat the Cycles look has (masked off the
@@ -800,6 +1035,7 @@ export class Ship {
       if (this.mats[n]) this.mats[n].emissiveIntensity = this.glowBase[n] * ease(this.avionics);
     }
     for (const n of BAY_FILL) if (this.mats[n]) this.mats[n].emissiveIntensity = ease(this.avionics);
+    if (this.partE.length) this.updateParts(0.03 + 0.97 * this.spin, drive, ease(this.avionics));     // (the same, atlased)
     // plumes and exhaust light
     const kick = Math.max(this.boostKick, this.accelKick * 0.6);   // a pad or a hard launch: the plumes flare, then settle
     // braking: the main jets collapse to a flicker, the retro-jets fire forward

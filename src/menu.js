@@ -32,7 +32,10 @@ const stats = (L) => [
   ['Racing line', clamp01(1 - (L.lane + L.wander) / 16)],
 ];
 
-const MAIN = [['race', 'Race'], ['free', 'Free flight'], ['settings', 'Settings'], ['controls', 'Controls']];
+const MAIN = [['race', 'Race'], ['free', 'Free flight'], ['settings', 'Settings'], ['controls', 'Controls'], ['support', 'Support']];
+// donations (the author's Revolut)
+const DONATE_URL = 'https://revolut.me/alexan_vic', DONATE_HANDLE = '@alexan_vic';
+const donate = () => window.open(DONATE_URL, '_blank', 'noopener');
 const PAUSE = [['resume', 'Resume'], ['restart', 'Restart race'], ['difficulty', 'Difficulty'], ['settings', 'Settings'],
   ['controls', 'Controls'], ['quit', 'Quit to menu']];
 const K = (keys, what) => `<span>${keys.map((k) => `<kbd>${k}</kbd>`).join('')}${what}</span>`;
@@ -42,6 +45,7 @@ const HINTS = {
   diff: K(['←', '→'], 'Choose') + K(['Enter'], 'Confirm') + K(['Esc'], 'Back'),
   settings: K(['↑', '↓'], 'Option') + K(['←', '→'], 'Change') + K(['Esc'], 'Back'),
   controls: K(['Esc'], 'Back'),
+  support: K(['Enter'], 'Donate on Revolut') + K(['Esc'], 'Back'),
   results: K(['←', '→'], 'Select') + K(['Enter'], 'Confirm') + K(['R'], 'Race again') + K(['Esc'], 'Main menu'),
 };
 const UP = new Set(['ArrowUp', 'KeyW']), DOWN = new Set(['ArrowDown', 'KeyS']);
@@ -125,6 +129,15 @@ export class Menu {
         <div class="c-grid">${controlsHTML()}</div>
         <div class="c-pad"><b>Gamepad</b>${GAMEPAD}</div>
       </section>
+      <section class="m-screen" data-s="support">
+        <header><div class="m-kicker">Keep it flying</div><h2 class="m-h2">Support</h2></header>
+        <div class="s-body">
+          <p class="s-text">Need4Space is free to play. If you enjoy it, a donation helps keep new tracks, ships and music coming.</p>
+          <button class="m-cta s-go" data-act="donate" tabindex="-1"><span>Donate on Revolut</span><kbd>Enter</kbd></button>
+          <div class="s-handle">revolut.me/<b>alexan_vic</b></div>
+          <p class="s-thanks">Thank you for flying.</p>
+        </div>
+      </section>
       <section class="m-screen" data-s="pause">
         <header><div class="m-kicker p-kicker">Race</div><h2 class="m-h2">Paused</h2><div class="p-status"></div></header>
         <nav class="m-list">${pause.map(item).join('')}</nav>
@@ -145,7 +158,7 @@ export class Menu {
     this.el.classList.toggle('on', !!screen);
     document.body.dataset.ui = screen ? this.ctx : 'game';
     this.h.settings.el.classList.toggle('hidden', screen !== 'settings');
-    if (!screen) return;                          // (the last screen stays drawn while the menu fades out)
+    if (!screen) { document.getElementById('support-toast')?.classList.remove('on'); return; }   // (the last screen stays drawn while the menu fades out)
     this.el.dataset.ctx = this.ctx;
     this.el.dataset.screen = screen;
     for (const s of this.el.querySelectorAll('.m-screen')) s.classList.toggle('active', s.dataset.s === screen);
@@ -166,6 +179,31 @@ export class Menu {
     this.h.input.unlock();
     this.prepareShots();
     this.show('main');
+    this.nudge('title');
+  }
+
+  // A quiet note about supporting the game: a few seconds into the title screen and after a race - once each per
+  // session, never over a race; it closes itself (or with its x)
+  nudge(where) {
+    try { if (sessionStorage.getItem('n4s-nudge-' + where)) return; sessionStorage.setItem('n4s-nudge-' + where, '1'); } catch { /* storage blocked */ }
+    clearTimeout(this.nudgeT);
+    this.nudgeT = setTimeout(() => {
+      if (this.ctx !== 'title' && this.ctx !== 'results') return;
+      let t = document.getElementById('support-toast');
+      if (!t) {
+        t = document.createElement('div');
+        t.id = 'support-toast';
+        t.className = 'm-toast';
+        t.innerHTML = `<div class="t-text"><b>Enjoying Need4Space?</b><span>Support it on Revolut <em>${DONATE_HANDLE}</em></span></div>`
+          + '<button class="t-go" type="button">Donate</button><button class="t-x" type="button" aria-label="Close">&times;</button>';
+        document.body.append(t);
+        t.querySelector('.t-x').onclick = () => t.classList.remove('on');
+        t.querySelector('.t-go').onclick = () => { ui('select'); donate(); t.classList.remove('on'); };
+      }
+      t.classList.add('on');
+      clearTimeout(this.nudgeHide);
+      this.nudgeHide = setTimeout(() => t.classList.remove('on'), 12000);
+    }, where === 'title' ? 6000 : 2500);
   }
 
   pause() {
@@ -201,6 +239,7 @@ export class Menu {
     if (!this.rigWas) { this.rigWas = rig.mode; rig.mode = 'cinematic'; rig.anchor = null; }
     this.h.input.unlock();
     this.show('results');
+    this.nudge('results');
   }
 
   restoreRig() {
@@ -268,6 +307,7 @@ export class Menu {
       free: 'Fly the circuit and the space round it at your own pace',
       settings: 'Picture, effects, audio and performance',
       controls: 'Keyboard, mouse and gamepad',
+      support: 'Donate to keep Need4Space flying',
       resume: free ? 'Back to free flight' : 'Back to the race',
       restart: free ? 'Back over the start line' : 'Back to the grid and the lights',
       difficulty: 'The rivals’ pace and racecraft, changed at once',
@@ -377,6 +417,7 @@ export class Menu {
       return;
     }
     if (s === 'controls') { this.back(); return; }
+    if (s === 'support') { this.act('donate'); return; }
     const it = this.items()[this.sel[s] || 0];
     if (it) this.act(it.dataset.act);
   }
@@ -406,7 +447,8 @@ export class Menu {
     const h = this.h;
     switch (a) {
       case 'race': ui('select'); this.go('diff', 'start'); break;
-      case 'settings': case 'controls': ui('select'); this.go(a); break;
+      case 'settings': case 'controls': case 'support': ui('select'); this.go(a); break;
+      case 'donate': ui('select'); donate(); break;
       case 'difficulty': ui('select'); this.go('diff', this.ctx === 'results' ? 'restart' : 'apply'); break;
       case 'confirm': this.confirmDiff(); break;
       case 'resume': ui('select'); this.resume(); break;
@@ -536,7 +578,7 @@ export class Menu {
     cam.up.copy(this.up);
     cam.lookAt(v.look);
     // the subject right of centre, clear of the menu on the left (the difficulty cards sit in the middle)
-    const side = this.screen === 'main' || this.screen === 'settings' || this.screen === 'controls' ? 1 : 0;
+    const side = this.screen === 'main' || this.screen === 'settings' || this.screen === 'controls' || this.screen === 'support' ? 1 : 0;
     this.offK = (this.offK ?? side) + (side - (this.offK ?? side)) * (1 - Math.exp(-3 * dt));
     cam.rotateY(THREE.MathUtils.degToRad(v.fov * cam.aspect * 0.16 * this.offK));
     cam.fov = v.fov;

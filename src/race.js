@@ -628,7 +628,9 @@ export class Race {
     }
     for (const e of this.entries) {
       const r = e.racer, ship = e.ship;
-      ship.setLod(camera.position.distanceTo(r.rPos || r.pos), focalPx);
+      // (the player's ship by where it is drawn: in free flight its race entry stays parked on the track, and the
+      // distance to that put the ship flown up close on its far detail level - "the meshes get downgraded")
+      ship.setLod(camera.position.distanceTo(e.player ? ship.root.position : (r.rPos || r.pos)), focalPx);
       if (!e.player) {
         ship.root.position.copy(r.rPos || r.pos);
         ship.root.quaternion.copy(r.rQ || r.q);

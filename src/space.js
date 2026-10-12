@@ -269,8 +269,8 @@ export class SpaceWorld {
     this.skyCam.fov = camera.fov;
     this.skyCam.aspect = camera.aspect;
     this.skyCam.updateProjectionMatrix();
-    this.stars.material.uniforms.pr.value = renderer.getPixelRatio();
-    this.dust.material.uniforms.pr.value = renderer.getPixelRatio();
+    this.stars.material.uniforms.pr.value = renderer.getPixelRatio() * (this.renderScale || 1);
+    this.dust.material.uniforms.pr.value = renderer.getPixelRatio() * (this.renderScale || 1);
     this.dust.material.uniforms.cam.value.copy(camera.position);
     this.track.update(t, shipPos, Math.max(0, t - (this.lastT ?? t)));
     this.scenery.update(t, Math.max(0, t - (this.lastT ?? t)));

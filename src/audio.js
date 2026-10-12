@@ -7,10 +7,11 @@
 //  - rivals: the nearest five engines, each its own pitch
 //  - the world: whooshes under gantries and light gates, echo inside the glass tunnel and the meteorite
 //  - the race: countdown beeps, GO, lap chime, finish; menu blips (ui())
-//  - music: music.js, rendered once off the main thread, looping
+//  - music: three songs composed in music.js, exported once to assets/music (Opus / AAC) and streamed as a playlist
 // Starts on the first key press or click (browsers block audio before a gesture). M mutes.
 import * as THREE from 'three';
-import { renderSegment, SEGMENTS, SONG_COUNT } from './music.js';
+// the songs (music.js composes them; profile.js exportMusic() + ffmpeg made the files)
+const SONGS = ['ring_runner', 'nebula_drift', 'hyperlane'];
 import { TRACK_W } from './track.js';
 
 const MUSIC_LV = { off: 0, low: 0.24, mid: 0.4, high: 0.58 };
@@ -37,7 +38,7 @@ export class GameAudio {
     this.ctx = null;
     this.muted = false;
     this.levels = { music: 'mid', sfx: 'high' };
-    this.songs = null; this.song = 0; this.segT = null; this.segK = 0; this.rendering = null; this.musicIn = null;
+    this.decks = null; this.song = 0; this.deck = 0; this.musicIn = null;
     this.L = new THREE.Vector3(); this.camPrev = new THREE.Vector3(); this.camVel = new THREE.Vector3(); this.hasPrev = false;
     this.lastCount = 0; this.passDone = -1; this.env = 'open'; this.airTime = 0; this.frame = {};
     this.gates = {};
@@ -110,8 +111,9 @@ export class GameAudio {
     this.voices = Array.from({ length: VOICES }, (_, k) => this.buildVoice(k));
     this.musicIn = this.gain(0, this.musicBus);
     this.musicIn.gain.setTargetAtTime(1, c.currentTime + 0.3, 1.0);       // fade in
-    this.pump = setInterval(() => this.pumpMusic(), 200);             // (a timer: frames stop in a hidden tab)
-    this.pumpMusic();
+    this.prepareMusic();
+    for (const el of this.decks) c.createMediaElementSource(el).connect(this.musicIn);
+    this.decks[this.deck].play().catch((e) => console.warn('music:', e));
   }
 
   gain(v, ...to) { const g = this.ctx.createGain(); g.gain.value = v; for (const x of to) g.connect(x); return g; }
@@ -245,48 +247,31 @@ export class GameAudio {
     return this.muted;
   }
 
-  // The music, a playlist of music.js's songs: the first one is rendered as soon as the page asks (no gesture needed
-  // for that) - its first segment alone, then the rest side by side; each next song while the one before plays. A
-  // segment is let go once it is queued, so only about one song is ever held (~40 MB).
+  // The music: the songs streamed from files, one after another (each ends on a fade into the next one's intro). Two
+  // audio elements take turns, the next song already loading in the idle one, so they follow without a gap. (They
+  // were synthesised in the page at runtime: ~5 s of work per song and pauses in the frames.)
   prepareMusic() {
-    if (this.rendering) return this.rendering;
-    this.songs = new Array(SONG_COUNT).fill(null);
-    this.rendering = this.renderSong(0);
-    return this.rendering;
+    if (this.decks) return;
+    const probe = document.createElement('audio');
+    this.ext = probe.canPlayType('audio/ogg; codecs="opus"') ? 'ogg' : 'm4a';
+    this.decks = [0, 1].map(() => { const el = new Audio(); el.preload = 'auto'; return el; });
+    this.decks.forEach((el, k) => el.addEventListener('ended', () => this.nextSong(k)));
+    this.load(0, this.song);
+    this.load(1, (this.song + 1) % SONGS.length);
   }
 
-  renderSong(si) {
-    if (this.songs[si]) return this.songs[si].ready;
-    const S = (this.songs[si] = { bufs: new Array(SEGMENTS).fill(null) }), t0 = performance.now();
-    S.ready = renderSegment(si, 0).then((b) => {
-      S.bufs[0] = b;
-      return Promise.all(Array.from({ length: SEGMENTS - 1 }, (_, i) => renderSegment(si, i + 1).then((x) => { S.bufs[i + 1] = x; })));
-    }).then(() => { S.ms = Math.round(performance.now() - t0); }).catch((e) => console.warn('music:', e));
-    return S.ready;
+  load(deck, song) {
+    const el = this.decks[deck];
+    el.src = `assets/music/${SONGS[song]}.${this.ext}`;
+    el.load();
   }
 
-  // queue the next segments ~2.5 s ahead, each starting exactly where the last one ends; song after song
-  pumpMusic() {
-    if (!this.ctx || this.ctx.state !== 'running' || !this.songs) return;
-    const now = this.ctx.currentTime;
-    if (this.segT === null) { if (!this.songs[this.song]?.bufs[0]) return; this.segT = now + 0.1; this.segK = 0; }
-    while (this.segT - now < 2.5) {
-      const S = this.songs[this.song], buf = S && S.bufs[this.segK];
-      if (!buf) { if (!S) this.renderSong(this.song); if (this.segT < now) this.segT = now + 0.05; break; }  // not ready: wait
-      const src = this.ctx.createBufferSource();
-      src.buffer = buf;
-      src.connect(this.musicIn);
-      const at = Math.max(this.segT, now + 0.01);
-      src.start(at);
-      this.segT = at + buf.length / buf.sampleRate;
-      S.bufs[this.segK] = null;                                        // queued: let it go
-      this.segK++;
-      if (this.segK === 4) this.renderSong((this.song + 1) % SONG_COUNT);   // the next song, while this one plays
-      if (this.segK >= SEGMENTS) {
-        if (SONG_COUNT > 1) this.songs[this.song] = null;               // rendered again when its turn comes round
-        this.song = (this.song + 1) % SONG_COUNT; this.segK = 0;
-      }
-    }
+  nextSong(deck) {
+    if (deck !== this.deck) return;
+    this.song = (this.song + 1) % SONGS.length;
+    this.deck ^= 1;
+    this.decks[this.deck].play().catch((e) => console.warn('music:', e));
+    this.load(deck, (this.song + 1) % SONGS.length);                  // the one after, into the deck just freed
   }
 
   // ---------------------------------------------------------------- per frame

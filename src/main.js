@@ -17,7 +17,7 @@ import { Input } from './input.js';
 import { FX } from './fx.js';
 import { HUD } from './hud.js';
 import { GameAudio } from './audio.js';
-import { agxPass, speedBlurPass, LayeredRenderPass, DeckSSRPass, StreakPass, BloomPass } from './post.js';
+import { agxPass, speedBlurPass, LayeredRenderPass, DeckSSRPass, StreakPass, BloomPass, ResamplePass } from './post.js';
 import { Settings } from './settings.js';
 import { Race, Driver } from './race.js';
 import { Menu } from './menu.js';
@@ -148,6 +148,11 @@ async function boot() {
   gtao.updateGtaoMaterial({ radius: 0.9, distanceExponent: 1.6, thickness: 2.0, scale: 1.15, samples: 16 });
   gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
   const gtaoRender = gtao.render.bind(gtao);
+  // AO at half resolution when asked (or by itself above 1440p): its own targets at half size, blended back onto the
+  // full frame (2.1 ms -> ~0.6 ms at 4K; AO is soft anyway)
+  const gtaoSetSize = gtao.setSize.bind(gtao);
+  let aoHalf = false;
+  gtao.setSize = (w, h) => { gtao.fullSize = [w, h]; gtaoSetSize(aoHalf ? Math.max(1, w >> 1) : w, aoHalf ? Math.max(1, h >> 1) : h); };
   const tp = track ? track.parts : null;
   const noAO = () => [...(world.noAO || []), ...ship.fxObjects(), ...fx.pools.map((p) => p.points), fx.streaks.lines, fx.ring, fx.marks.mesh,
     ...(tp ? [...tp.fields, ...tp.pads, ...tp.lanes, ...tp.gates.filter((m) => m.material.isShaderMaterial), tp.tunnel[0]].filter(Boolean) : []), ...(race ? race.noAO() : []), ...fx.waves,
@@ -182,14 +187,24 @@ async function boot() {
   // edges stepped); SMAA also takes the stair-steps off shading, highlights and thin glowing lines
   const smaa = new SMAAPass(innerWidth, innerHeight);
   composer.addPass(smaa);
-  let pixelRatio = Math.min(devicePixelRatio, 2), blurOn = true;
+  // the render scale: the frame drawn at a fraction (or a multiple) of the screen's pixels, resampled to it here
+  const resample = new ResamplePass();
+  composer.addPass(resample);
+  let pixelRatio = Math.min(devicePixelRatio, 2), renderScale = 1, blurOn = true, aoRes = 'auto';
+  // half-size AO: asked for, or 'auto' with more than ~1440p of pixels to fill
+  const applyAoRes = () => {
+    const half = aoRes === 'half' || (aoRes === 'auto' && innerWidth * innerHeight * (pixelRatio * renderScale) ** 2 > 2560 * 1440 * 1.1);
+    if (half !== aoHalf) { aoHalf = half; if (gtao.fullSize) gtao.setSize(...gtao.fullSize); }
+  };
   const resize = () => {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
-    renderer.setPixelRatio(pixelRatio);
-    composer.setPixelRatio(pixelRatio);
+    renderer.setPixelRatio(pixelRatio);                      // the canvas: the screen's own pixels
+    composer.setPixelRatio(pixelRatio * renderScale);       // the frame: at the render scale (resampled at the end)
     renderer.setSize(innerWidth, innerHeight);
     composer.setSize(innerWidth, innerHeight);
+    applyAoRes();
+    world.renderScale = renderScale;                         // (point sprites size themselves in frame pixels)
   };
   addEventListener('resize', resize);
   const fpsEl = document.getElementById('fps');
@@ -202,7 +217,7 @@ async function boot() {
     renderer.toneMappingExposure = 0.95 * Math.pow(2, v.exposure);
     gtao.enabled = v.ao;
     smaa.enabled = v.aa !== 'msaa';
-    const samples = v.aa === 'high' ? 8 : 4;                 // the scene's MSAA (a new target when it changes)
+    const samples = v.aa === 'high' ? 8 : v.aa === 'fast' ? 2 : 4;   // the scene's MSAA (a new target when it changes)
     if (scenePass.msaa.samples !== samples) { scenePass.msaa.samples = samples; scenePass.msaa.dispose(); }
     ssr.enabled = !!track && v.ao && v.reflections;
     streaks.enabled = v.streaks;
@@ -220,7 +235,12 @@ async function boot() {
         l.shadow.map = null;
       }
     }
-    pixelRatio = Math.min(devicePixelRatio, 2) * v.scale;
+    pixelRatio = Math.min(devicePixelRatio, 2);
+    renderScale = v.scale;
+    resample.enabled = v.scale !== 1;
+    resample.down = v.scale > 1;
+    resample.sharpen = v.scale < 1 ? 0.35 : 0;
+    aoRes = v.aoRes || 'auto';
     resize();
     fpsEl.style.display = v.fps ? '' : 'none';
     race?.setDifficulty(v.ai);                       // the rivals' AI difficulty (race.js AI_LEVELS)
@@ -237,7 +257,8 @@ async function boot() {
   {
     const keep = [];
     for (const e of race ? race.entries : [{ ship }]) e.ship.ensureTrails(scene);
-    scene.traverse((o) => { keep.push([o, o.visible, o.frustumCulled]); o.visible = true; o.frustumCulled = false; });
+    // (the sky's backdrop too: its hidden pieces - the sun's eruption and the like - compiled when they first showed)
+    for (const root of [scene, world.sky].filter(Boolean)) root.traverse((o) => { keep.push([o, o.visible, o.frustumCulled]); o.visible = true; o.frustumCulled = false; });
     const ships = race ? race.entries.map((e) => e.ship) : [ship];
     const lods = ships.flatMap((s) => (s.lodMeshes || []).map((l) => [l.mesh, l.mesh.geometry, l.levels]));
     const t0 = performance.now();
@@ -294,7 +315,7 @@ async function boot() {
     render();
     const blob = await new Promise((r) => renderer.domElement.toBlob(r, 'image/png'));
     renderer.setPixelRatio(pr);
-    renderer.setSize(ow, oh, false); composer.setPixelRatio(pr); composer.setSize(ow, oh); camera.aspect = ow / oh; camera.updateProjectionMatrix();
+    renderer.setSize(ow, oh, false); composer.setPixelRatio(pr * renderScale); composer.setSize(ow, oh); camera.aspect = ow / oh; camera.updateProjectionMatrix();
     await fetch('/shot/' + name, { method: 'POST', body: blob });
     return name;
   };

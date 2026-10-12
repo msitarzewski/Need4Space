@@ -76,7 +76,8 @@ function glowLights(list) {
   const pts = new THREE.Points(g, mat);
   const v = new THREE.Vector2();
   pts.onBeforeRender = (renderer, scene, camera) => {
-    renderer.getDrawingBufferSize(v);
+    const rt = renderer.getRenderTarget();
+    if (rt) v.set(rt.width, rt.height); else renderer.getDrawingBufferSize(v);
     mat.uniforms.scale.value = v.y / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov || 60) / 2));
   };
   pts.frustumCulled = false;
