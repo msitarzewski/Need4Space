@@ -49,12 +49,19 @@ kbd { display: inline-block; min-width: 0.9em; text-align: center; font: 700 0.7
 #loading h1 i, .m-logo i { font-style: normal; color: var(--accent); margin: 0 0.02em;
   text-shadow: 0 0 1.2rem color-mix(in srgb, var(--accent) 70%, transparent); }
 .l-bar { position: relative; width: 16rem; height: 2px; margin: 1.6rem auto 1rem; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
-.l-bar::after { content: ''; position: absolute; top: 0; bottom: 0; width: 35%; background: var(--accent); box-shadow: 0 0 0.8rem var(--accent);
-  animation: l-run 1.3s ease-in-out infinite; }
+/* the fill shows how far (main.js); the shimmer over it never stops - both transform-only, so they keep moving on the
+   compositor while the page's thread is busy (an animated "left" froze with it and the load looked stuck) */
+.l-bar #lfill { position: absolute; inset: 0; background: var(--accent); box-shadow: 0 0 0.8rem var(--accent); transform-origin: left;
+  transform: scaleX(0); transition: transform 0.4s ease-out; will-change: transform; }
+.l-bar::after { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 35%; will-change: transform;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.75), transparent); animation: l-run 1.3s ease-in-out infinite; }
+#loadpct { margin-top: 0.6rem; font: 700 0.8rem var(--display); letter-spacing: 0.14em; color: var(--accent); text-align: center; }
+#loading.error #loadpct { display: none; }
 #loadtext { font: 600 0.9rem var(--ui); letter-spacing: 0.24em; text-transform: uppercase; color: var(--dim); text-align: center; }
 #loading.error #loadtext { color: var(--bad); }
 #loading.error .l-bar::after { animation: none; width: 100%; background: var(--bad); }
-@keyframes l-run { from { left: -35%; } to { left: 100%; } }
+#loading.error .l-bar #lfill { background: var(--bad); transform: scaleX(1); }
+@keyframes l-run { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
 
 /* ---------------------------------------------------------------- HUD */
 #hud { position: fixed; inset: 0; pointer-events: none; z-index: 2; transition: opacity 0.6s ease; }

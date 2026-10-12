@@ -2,7 +2,7 @@
 <html lang="en" data-level="normal">
 <head>
 <meta charset="utf-8">
-<meta name="build" content="25fc6fc">
+<meta name="build" content="7bb33eb">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -10,8 +10,10 @@
 <title>Need4Space</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" href="assets/agx_punchy_lut65.bin" as="fetch" crossorigin>
+<link rel="preload" href="assets/agx_mhc_lut65.bin" as="fetch" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap">
-<link rel="stylesheet" href="src/ui.css?v=5eb7aa59">
+<link rel="stylesheet" href="src/ui.css?v=a140e923">
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
@@ -28,11 +30,11 @@
   "./src/hull.js": "./src/hull.js?v=1bbe42eb",
   "./src/input.js": "./src/input.js?v=8a25aa32",
   "./src/look.js": "./src/look.js?v=66d3ce71",
-  "./src/main.js": "./src/main.js?v=56c8cb89",
+  "./src/main.js": "./src/main.js?v=cfca864a",
   "./src/menu.js": "./src/menu.js?v=b183ced4",
   "./src/music.js": "./src/music.js?v=3c383f64",
   "./src/noise.js": "./src/noise.js?v=d8a13c89",
-  "./src/post.js": "./src/post.js?v=89a3fdec",
+  "./src/post.js": "./src/post.js?v=15a1238d",
   "./src/profile.js": "./src/profile.js?v=fca660b8",
   "./src/quality.js": "./src/quality.js?v=20a1d143",
   "./src/race.js": "./src/race.js?v=85f6a29d",
@@ -46,6 +48,51 @@
   "./src/world.js": "./src/world.js?v=07d44f5a"
 } }
 </script>
+<!-- preload:start -->
+<link rel="modulepreload" href="./src/audio.js?v=f6493d50">
+<link rel="modulepreload" href="./src/bake.js?v=3a28f16d">
+<link rel="modulepreload" href="./src/camera.js?v=c7c20c02">
+<link rel="modulepreload" href="./src/celestial.js?v=bd2c6125">
+<link rel="modulepreload" href="./src/deck.js?v=6b1aa44f">
+<link rel="modulepreload" href="./src/flight.js?v=062a69d3">
+<link rel="modulepreload" href="./src/fx.js?v=63c6ccc0">
+<link rel="modulepreload" href="./src/hud.js?v=112ad81d">
+<link rel="modulepreload" href="./src/hull.js?v=1bbe42eb">
+<link rel="modulepreload" href="./src/input.js?v=8a25aa32">
+<link rel="modulepreload" href="./src/look.js?v=66d3ce71">
+<link rel="modulepreload" href="./src/main.js?v=cfca864a">
+<link rel="modulepreload" href="./src/menu.js?v=b183ced4">
+<link rel="modulepreload" href="./src/music.js?v=3c383f64">
+<link rel="modulepreload" href="./src/noise.js?v=d8a13c89">
+<link rel="modulepreload" href="./src/post.js?v=15a1238d">
+<link rel="modulepreload" href="./src/quality.js?v=20a1d143">
+<link rel="modulepreload" href="./src/race.js?v=85f6a29d">
+<link rel="modulepreload" href="./src/rock.js?v=232e2ab8">
+<link rel="modulepreload" href="./src/scenery.js?v=fc1ed4ad">
+<link rel="modulepreload" href="./src/settings.js?v=bc000217">
+<link rel="modulepreload" href="./src/ship.js?v=ca476a90">
+<link rel="modulepreload" href="./src/space.js?v=eb12fee6">
+<link rel="modulepreload" href="./src/touch.js?v=8bc3070a">
+<link rel="modulepreload" href="./src/track.js?v=ce126ee2">
+<link rel="modulepreload" href="./src/world.js?v=07d44f5a">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/GLTFLoader.js">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/utils/BufferGeometryUtils.js">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/postprocessing/EffectComposer.js">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/shaders/CopyShader.js">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/postprocessing/ShaderPass.js">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/postprocessing/MaskPass.js">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/postprocessing/Pass.js">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/postprocessing/GTAOPass.js">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/shaders/GTAOShader.js">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/shaders/PoissonDenoiseShader.js">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/math/SimplexNoise.js">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/postprocessing/OutputPass.js">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/shaders/OutputShader.js">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/postprocessing/SMAAPass.js">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/shaders/SMAAShader.js">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/meshoptimizer@0.21.0/meshopt_simplifier.module.js">
+<!-- preload:end -->
 </head>
 <body data-ui="loading">
 <canvas id="view" tabindex="0"></canvas>
@@ -96,8 +143,30 @@
 <div id="results" class="hidden"></div>
 <div id="veil"></div>
 
-<div id="loading"><div><h1>NEED<i>4</i>SPACE</h1><div class="l-bar"></div><div id="loadtext">Starting</div></div></div>
+<div id="loading"><div><h1>NEED<i>4</i>SPACE</h1><div class="l-bar"><i id="lfill"></i></div><div id="loadtext">Starting</div><div id="loadpct">0 %</div></div></div>
+<script>
+// The first seconds, before the game's code runs: its files arriving (index.html preloads them all), the bar's first
+// tenth. main.js takes the bar over once it starts (window.__loadTaken).
+(function () {
+  var want = document.querySelectorAll('link[rel=modulepreload]').length || 40, got = 0, seen = {};
+  var fill = document.getElementById('lfill'), txt = document.getElementById('loadtext'), pct = document.getElementById('loadpct');
+  function show() {
+    if (window.__loadTaken) return;
+    var p = Math.min(1, got / want) * 10;
+    fill.style.transform = 'scaleX(' + (p / 100) + ')';
+    txt.textContent = 'Downloading the game';
+    pct.textContent = Math.round(p) + ' %';
+  }
+  try {
+    new PerformanceObserver(function (list) {
+      list.getEntries().forEach(function (e) { if (/\.js(\?|$)/.test(e.name) && !seen[e.name]) { seen[e.name] = 1; got++; } });
+      show();
+    }).observe({ type: 'resource', buffered: true });
+  } catch (e) { /* no observer: the bar still moves */ }
+  show();
+})();
+</script>
 
-<script type="module" src="src/main.js?v=56c8cb89"></script>
+<script type="module" src="src/main.js?v=cfca864a"></script>
 </body>
 </html>

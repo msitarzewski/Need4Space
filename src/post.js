@@ -30,9 +30,12 @@ export function sanitizePass() {
 export async function agxPass(urls) {
   const luts = [];
   let meta = null;
-  for (const url of urls) {
-    meta = await (await fetch(url.replace(/\.bin$/, '.json'))).json();
-    const data = new Uint8Array(await (await fetch(url)).arrayBuffer());
+  // (all four files at once - one after another they held the load ~2 s behind the ship's download)
+  const files = await Promise.all(urls.map((url) => Promise.all([
+    fetch(url.replace(/\.bin$/, '.json')).then((r) => r.json()), fetch(url).then((r) => r.arrayBuffer())])));
+  for (const [i, url] of urls.entries()) {
+    meta = files[i][0];
+    const data = new Uint8Array(files[i][1]);
     const N = meta.N;
     if (data.length !== N * N * N * 4) throw new Error(`AgX LUT ${url}: ${data.length} bytes, expected ${N * N * N * 4}`);
     const lut = new THREE.Data3DTexture(data, N, N, N);

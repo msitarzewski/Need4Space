@@ -29,6 +29,18 @@ const MAP = new URLSearchParams(location.search).get('map') === 'meadow' ? 'mead
 const SHIP_URL = { high: 'assets/racer_web.glb', mid: 'assets/racer_web_4k.glb', low: 'assets/racer_web_2k.glb' };   // (by memory tier)
 const LUTS = ['assets/agx_punchy_lut65.bin', 'assets/agx_mhc_lut65.bin'];   // Blender's AgX looks: Punchy, Medium High Contrast
 const status = (t) => (document.getElementById('loadtext').textContent = t);
+// The loading bar: each step's share of it (by how long it usually takes) and how far into it. The page's first script
+// had the first tenth (the files arriving); it only ever grows.
+const STEPS = { circuit: [10, 16], bakes: [16, 38], paint: [38, 46], ship: [46, 68], rivals: [68, 72], colour: [72, 74],
+  compile: [74, 90], textures: [90, 97], warm: [97, 100] };
+let shown = 0;
+const progress = (step, f = 0) => {
+  const [a, b] = STEPS[step], p = Math.max(shown, a + (b - a) * Math.min(1, Math.max(0, f)));
+  shown = p;
+  window.__loadTaken = true;
+  document.getElementById('lfill').style.transform = `scaleX(${p / 100})`;
+  document.getElementById('loadpct').textContent = `${Math.floor(p)} %`;
+};
 // let the loading text paint between steps (a timer too: a hidden tab never gets an animation frame)
 const nextFrame = () => new Promise((r) => { requestAnimationFrame(() => r()); setTimeout(r, 50); });
 async function boot() {
@@ -66,21 +78,26 @@ async function boot() {
   const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.2, 30000);
   scene.add(camera);                                       // the speed streaks ride on the camera
 
+  // the ship's download first: it runs on while the circuit is built and baked
+  let baking = true, got = '', gotF = 0;
+  const shipLoad = loadShip(SHIP_URL[Q.tier], (e) => {
+    if (!e.total) return;
+    got = `  ${(e.loaded / 1e6).toFixed(1)} / ${(e.total / 1e6).toFixed(1)} MB`;
+    gotF = e.loaded / e.total;
+    if (!baking) { status('Loading the Feather S1' + got); progress('ship', gotF); }
+  });
+  shipLoad.catch(() => {});
   status(MAP === 'space' ? 'Building the circuit' : 'Raising the hills');
+  progress('circuit');
   await nextFrame();
   deferBakes(true);
   const world = MAP === 'space' ? new SpaceWorld(scene, renderer, camera) : new MeadowWorld(scene, renderer);
   deferBakes(false);
-  let baking = true, got = '';
-  const shipLoad = loadShip(SHIP_URL[Q.tier], (e) => {
-    if (!e.total) return;
-    got = `  ${(e.loaded / 1e6).toFixed(1)} / ${(e.total / 1e6).toFixed(1)} MB`;
-    if (!baking) status('Loading the Feather S1' + got);
-  });
-  shipLoad.catch(() => {});
-  await runBakes(renderer, (what, k, n) => status(`${what}  ${k} / ${n}`));
+  progress('circuit', 1);
+  await runBakes(renderer, (what, k, n) => { status(`${what}  ${k} / ${n}`); progress(/Painting/.test(what) ? 'paint' : 'bakes', k / n); });
   baking = false;
   status('Loading the Feather S1' + got);
+  progress('ship', gotF);
   const ship = await shipLoad;
   ship.upgradeMaterials(renderer.capabilities.getMaxAnisotropy(), renderer);
   scene.add(ship.root);
@@ -93,6 +110,7 @@ async function boot() {
   const racer = track ? new TrackRacer(ship, track) : null;
   // eight rivals, cloned before the player's ship first animates (their canopies and rotors start at rest)
   status('Rolling out the rivals');
+  progress('rivals');
   const race = racer ? new Race(scene, track, ship, racer) : null;
   let mode = racer ? 'race' : 'free';
   let ctl = racer || flight;
@@ -205,6 +223,7 @@ async function boot() {
   const blur = speedBlurPass();
   composer.addPass(blur);
   status('Loading the colour transform');
+  progress('colour');
   const agx = await agxLoad;
   const output = new OutputPass();
   composer.addPass(agx);
@@ -304,7 +323,7 @@ async function boot() {
     renderer.setRenderTarget(scenePass.msaa);
     const jobs = [[scene, camera]];
     if (world.sky) jobs.push([world.sky, world.skyCam]);
-    await compileAll(renderer, jobs, (k, n) => status(`Compiling shaders  ${k} / ${n}`));
+    await compileAll(renderer, jobs, (k, n) => { status(`Compiling shaders  ${k} / ${n}`); progress('compile', k / n); });
     renderer.setRenderTarget(null);
     // the textures onto the GPU one at a time (an 8K map and its mips is one long job on a slow GPU)
     const texs = new Set();
@@ -319,10 +338,12 @@ async function boot() {
       renderer.initTexture(tx);
       await gpuIdle(renderer);
       status(`Uploading textures  ${++ti} / ${texs.size}`);
+      progress('textures', ti / texs.size);
     }
     // the warm-up draws themselves at an eighth of the size: what they are for (programs, buffers) does not depend on
     // it, and a slow GPU drew three full frames of everything at once
     status('Warming up the shaders');
+    progress('warm');
     composer.setPixelRatio(pixelRatio * renderScale / 8);
     composer.setSize(innerWidth, innerHeight);
     await nextFrame();
@@ -338,6 +359,7 @@ async function boot() {
     liteFiltering(renderer, [scene, world.sky]);           // (the shaders' own maps, now compiled and uploaded)
     console.info(`warm-up: ${renderer.info.programs.length} programs, ${Math.round(performance.now() - t0)} ms`);
   }
+  progress('warm', 1);
   document.getElementById('loading').classList.add('done');
   audio.prepareMusic();                              // (the songs load once the game has: not over the ship's download)
 
