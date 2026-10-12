@@ -130,9 +130,9 @@ ${GLSL_N}`)
     float shoulder = 1.0 - smoothstep(0.0, 0.01 + fwidth(vCy) * 1.5, abs(vCy - 0.8));
     float base = exp(-vCy * 4.5);                             // fed from the ice below: bright at its foot
     float tip = smoothstep(0.84, 1.0, vCy);
-    float planes = smoothstep(0.6, 0.85, spN(vec3(vCL.x * 2.5, vCL.y * 11.0, vCL.z * 2.5) + vCC * 9.0));
+    float planes = smoothstep(0.55, 0.9, spN(vec3(vCL.x * 1.5, vCL.y * 14.0, vCL.z * 1.5) + vCC * 9.0));
     float inner = pow(ndv, 3.0);                              // looking straight in: into its depth
-    vec3 c = vCC * (inner * (0.12 + 1.3 * base + 0.45 * planes) + edge * (0.35 + 1.6 * base + 1.0 * tip) + shoulder * 0.7 + tip * inner * 0.8);
+    vec3 c = vCC * (inner * (0.12 + 1.3 * base + 0.18 * planes) + edge * (0.35 + 1.6 * base + 1.0 * tip) + shoulder * 0.7 + tip * inner * 0.8);
     c += vec3(0.85, 0.97, 1.0) * (tip * tip * 0.35 + edge * tip * 0.5);
     totalEmissiveRadiance += c * 0.7;
   }`);

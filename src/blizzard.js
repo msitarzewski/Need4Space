@@ -90,10 +90,10 @@ export class Blizzard {
           float a = on * slab * smoothstep(${(BOX * 0.5).toFixed(1)}, ${(BOX * 0.22).toFixed(1)}, d) * smoothstep(1.5, 6.0, d);
           float kk;
           float size = veil > 0.5 ? 0.5 + 1.1 * fract(seed.w * 13.1) : 0.12 + 0.12 * fract(seed.w * 5.7);
-          gl_Position = a > 0.003 ? bzStreak(p, wind * spd - camVel, size, veil > 0.5 ? 0.3 : 0.05, veil > 0.5 ? 12.0 : 9.0, kk) : vec4(0.0, 0.0, -2.0, 1.0);
+          gl_Position = a > 0.003 ? bzStreak(p, wind * spd - camVel, size, veil > 0.5 ? 0.3 : 0.035, veil > 0.5 ? 12.0 : 5.0, kk) : vec4(0.0, 0.0, -2.0, 1.0);
           vK = kk; vVeil = veil;
-          vA = a * (veil > 0.5 ? 0.5 : 1.0) * (1.0 + 0.35 * kk) / (1.0 + kk) * k;
-          vC = bzLight(normalize(rel)) * (veil > 0.5 ? 1.6 : 3.2);
+          vA = a * (veil > 0.5 ? 0.5 : 0.75) * (1.0 + 0.35 * kk) / (1.0 + kk) * k;
+          vC = bzLight(normalize(rel)) * (veil > 0.5 ? 1.6 : 2.4);
         }`,
       fragmentShader: /* glsl */`
         varying vec2 vUv; varying float vA; varying float vK; varying vec3 vC; varying float vVeil;
