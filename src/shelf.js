@@ -1,4 +1,4 @@
-// The ice shelf: a slab of glacier ice ~210 m thick standing out of the frozen sea south of the circuit, split from
+// The ice shelf: a slab of glacier ice ~270 m thick standing out of the frozen sea south of the circuit, split from
 // top to bottom by the crevasse the track runs down. Its walls stand a few metres off the barriers - banded blue ice,
 // scalloped by meltwater, veined with light - leaning in overhead until the sky is a slit, and closing under the deck
 // to a slot lit from the water far below; bridges of ice span it. Round the outside, sheer calving cliffs with frozen
@@ -14,7 +14,7 @@ import { fbm, noise2, mulberry32, smoothstep } from './noise.js';
 
 const EDGE = TRACK_W / 2 + 0.7;            // the barrier's outer face from the centre line (m)
 const BOT = -40;                           // the faces' foot, under the sea ice
-const LEVELS = 46;                         // rows up a face
+const LEVELS = 54;                         // rows up a face
 
 export function inPoly(poly, x, z) {
   let c = false;
@@ -28,7 +28,7 @@ export function inPoly(poly, x, z) {
 export class IceShelf {
   // outline: [[x, z]] round the shelf (coarse - the coast is roughened); span: [s0, s1] on the lap, where the track
   // crosses the outline (in at one face, out at another)
-  constructor(track, outline, span, { top = 210, seed = 5 } = {}) {
+  constructor(track, outline, span, { top = 265, seed = 5 } = {}) {
     this.track = track;
     this.top = top;
     const f = {};
@@ -132,7 +132,7 @@ export class IceShelf {
     const { yd, w, wk } = p;
     let dw = smoothstep(yd - 18, yd - 115, h) * (w - 15);
     const up = smoothstep(yd + 24, tp - 6, h);
-    dw += this.lean(p.s, p.sd) * up * up * (tp - yd) * 0.32;
+    dw += Math.min(this.lean(p.s, p.sd) * up * up * (tp - yd) * 0.3, w - 11);     // (a slit of sky left between them)
     let dc = 7 * smoothstep(10, -14, h) - 6 * Math.pow(smoothstep(tp - 30, tp - 2, h), 2);
     dc += 5 * (fbm3(p.x * 0.028, h * 0.009, p.z * 0.028, 3) - 0.5) * 2;
     let d = wk * dw + (1 - wk) * dc + 2.8 * (fbm3(p.x * 0.05 + 3, h * 0.06, p.z * 0.05, 3) - 0.5) * 2;

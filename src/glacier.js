@@ -307,11 +307,11 @@ vec2 iceG = vec2(0.0);`)
       vec2 fm = texture2D(floeMask, fu).rg;
       if (fm.x > 0.01) {
         vec2 q = vTW.xz / 62.0;
-        float e = ihCell(q + 0.2 * vec2(sin(q.y * 1.7), sin(q.x * 1.3))), aw = fwidth(e) + 0.003, gw = 0.3 * fm.x * fm.x;
+        float e = ihCell(q + 0.2 * vec2(sin(q.y * 1.7), sin(q.x * 1.3))), aw = fwidth(e) + 0.003, gw = 0.2 * fm.x * fm.x;
         iceWater = 1.0 - smoothstep(gw - aw, gw + aw, e);
         iceLead = (1.0 - smoothstep(gw, gw + 0.06, e)) * (1.0 - iceWater) * step(0.002, gw);
 #ifndef ICE_LITE
-        float e2 = ihCell(vTW.xz / 19.0 + 7.3), aw2 = fwidth(e2) + 0.003, g2 = 0.16 * smoothstep(0.45, 1.0, fm.x);
+        float e2 = ihCell(vTW.xz / 19.0 + 7.3), aw2 = fwidth(e2) + 0.003, g2 = 0.12 * smoothstep(0.6, 1.0, fm.x);
         iceWater = max(iceWater, (1.0 - smoothstep(g2 - aw2, g2 + aw2, e2)) * step(0.001, g2));
 #endif
       }

@@ -33,7 +33,7 @@ const CAVE_R = 52, CAVE_MOUTH = 50;
 const SHELF = [[330, 1760], [740, 1790], [1150, 1790], [1300, 2300], [1280, 2900], [1150, 3400], [800, 3640], [400, 3600],
   [130, 3450], [150, 3200], [220, 2700], [300, 2200]];
 const BERGS = { c: new THREE.Vector3(-450, 0, 2500), r: 1000 };
-const FLOES = [[-450, 2500, 1300], [700, 2700, 1250]];
+const FLOES = [[-450, 2500, 1300], [700, 2700, 1250], [780, 1450, 650]];
 const calm = (x, z) => FLOES.reduce((k, [cx, cz, r]) => Math.max(k, smoothstep(r, r * 0.55, Math.hypot(x - cx, z - cz))), 0);
 
 // The circuit (x east, y up, z south; the ice at y = 0). The grid faces north up the causeway toward the aurora.
@@ -282,6 +282,21 @@ export class IceWorld {
       if (grid.geometryClear(g, 4, 3) < 0) continue;
       spires.push(g);
     }
+    // and needles of it right by the track, their tips over the deck (the speed against them)
+    const rn = mulberry32(5150);
+    let needles = 0;
+    for (let s = 200; s < tr.length - 100; s += 90 + rn() * 110) {
+      if (tr.inGap(s, 120) || tr.inLoop(s, 160) || tr.inCave(s, 120)) continue;
+      tr.frame(s, f);
+      const R = f.R.clone().setY(0).normalize(), sd = rn() < 0.5 ? -1 : 1;
+      const h = Math.min(260, Math.max(30, f.P.y) * (0.9 + 1.4 * rn()) + 20), r = h * (0.08 + 0.05 * rn()), lat = TRACK_W_HALF + 16 + r + 40 * rn();
+      const x = f.P.x + R.x * sd * lat, z = f.P.z + R.z * sd * lat;
+      if (this.byShelf(x, z, r + 40) || G.sample(x, z).rift > 0.05) continue;
+      const g = spireGeometry(h, r, 300 + needles, { seg: 14, rows: 28 }).translate(x, G.height(x, z), z);
+      if (grid.geometryClear(g, 3, 2) < 0) continue;
+      spires.push(g);
+      needles++;
+    }
     for (let k = 0; k < 26; k++) {
       const a = rnd() * Math.PI * 2, d = 2600 + rnd() * 2600, x = ctr.x + Math.cos(a) * d, z = ctr.z + Math.sin(a) * d;
       const h = 300 + 500 * rnd();
@@ -374,7 +389,7 @@ export class IceWorld {
       this.plumeTips.push(...sh.plumeTips(WIND));
       console.info(`shelf: ${(sh.tris / 1000).toFixed(0)} k tris, crevasse ${(sh.sOut - sh.sIn).toFixed(0)} m, ${br.length} bridges, ${fl.length} falls, ${bergs.length} bergs`);
     }
-    console.info(`crystals: ${cf.mats.length} (+${cg.mats.length} far, ${cf.dropped} dropped clear of the track), spires ${spires.length} + ${farSpires.length}`);
+    console.info(`crystals: ${cf.mats.length} (+${cg.mats.length} far, ${cf.dropped} dropped clear of the track), spires ${spires.length} (${needles} by the track) + ${farSpires.length}`);
   }
 
   // on the shelf or in its bergs' field (within m)
@@ -504,11 +519,11 @@ export class IceWorld {
   ventSpots() {
     const tr = this.track, rnd = mulberry32(4040), f = {}, out = [];
     for (const [a, b] of [[tr.at('back', 300), tr.at('canyonIn', -120)], [tr.at('dive', 200), tr.at('flipD', 300)]]) {
-      for (let s = a; s < b; s += 260 + rnd() * 200) {
+      for (let s = a; s < b; s += 200 + rnd() * 160) {
         tr.frame(s, f);
-        const R = f.R.clone().setY(0).normalize(), sd = rnd() < 0.5 ? -1 : 1, lat = 75 + rnd() * 70;
+        const R = f.R.clone().setY(0).normalize(), sd = rnd() < 0.5 ? -1 : 1, lat = 75 + rnd() * 80;
         const x = f.P.x + R.x * sd * lat, z = f.P.z + R.z * sd * lat;
-        if (calm(x, z) < 0.4 || this.shelf.near(x, z, 60) || this.bergs.some((g) => Math.hypot(g.x - x, g.z - z) < g.r + 25)) continue;
+        if (calm(x, z) < 0.3 || this.shelf.near(x, z, 60) || this.bergs.some((g) => Math.hypot(g.x - x, g.z - z) < g.r + 25)) continue;
         out.push({ p: new THREE.Vector3(x, this.ground.height(x, z) - 1, z), s: 0.8 + 0.5 * rnd() });
       }
     }

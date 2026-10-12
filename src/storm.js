@@ -124,7 +124,7 @@ export class Storm {
             if (f.z <= 0.0) continue;
             vec3 fd = vec3(sin(f.x) * cos(f.y), sin(f.y), -cos(f.x) * cos(f.y));
             float a = acos(clamp(dot(d, fd), -1.0, 1.0));
-            col += vec3(0.55, 0.62, 1.0) * f.z * exp(-a * a / 0.0035) * (0.3 + 0.7 * (1.0 - c.g)) * (0.4 + 0.6 * c.b) * 3.5 * flashK;
+            col += vec3(0.55, 0.62, 1.0) * f.z * exp(-a * a / 0.006) * (0.3 + 0.7 * (1.0 - c.g)) * (0.4 + 0.6 * c.b) * 5.0 * flashK;
           }
           // far down at the horizon the air hides it
           float haze = smoothstep(0.0, 0.08, el);
@@ -146,7 +146,7 @@ export class Storm {
       transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
       uniforms: { I: { value: 0 } },
       vertexShader: /* glsl */`attribute float k; varying float vK; void main() { vK = k; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-      fragmentShader: /* glsl */`uniform float I; varying float vK; void main() { gl_FragColor = vec4(vec3(0.75, 0.8, 1.0) * I * vK * 9.0, 1.0); }`,
+      fragmentShader: /* glsl */`uniform float I; varying float vK; void main() { gl_FragColor = vec4(vec3(0.75, 0.8, 1.0) * I * vK * 32.0, 1.0); }`,
     });
     this.bolt = new THREE.Mesh(this.boltG, this.boltMat);
     this.bolt.renderOrder = 13;
@@ -178,7 +178,7 @@ export class Storm {
         a = a1; e = e1;
       }
     };
-    walk(az, el, -0.01, 34, 1, 0);
+    walk(az, el, -0.01, 45, 1, 0);
     this.boltG.attributes.position.needsUpdate = this.boltG.attributes.k.needsUpdate = true;
     this.boltG.setDrawRange(0, n * 6);
   }
@@ -187,7 +187,7 @@ export class Storm {
     const rnd = this.rnd;
     if (t > this.next) {
       // a strike: somewhere along the front, two to four pulses over half a second, a bolt one time in three
-      const az = AZ0 + (rnd() - 0.5) * AZW * 1.4, el = 0.03 + 0.08 * rnd(), pulses = [];
+      const az = AZ0 + (rnd() - 0.5) * AZW * 1.4, el = 0.07 + 0.08 * rnd(), pulses = [];
       let dt = 0;
       for (let k = 0, n = 2 + Math.floor(rnd() * 3); k < n; k++) { pulses.push([dt, 0.5 + 0.5 * rnd()]); dt += 0.05 + 0.14 * rnd(); }
       const bolt = rnd() < 0.35;

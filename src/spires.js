@@ -102,10 +102,12 @@ float gSnow = 0.0, gBand = 0.0, gSeam = 0.0;`)
   gSnow = smoothstep(0.55, 0.75, gn.y + (vGA.w - 0.5) * 0.5) * ${snow.toFixed(2)};
 #ifdef SP_WALLS
   // ledges along the strata, snow lying on them; seams of clear ice the light comes through
-  float ledge = spLine(y + 7.0, 23.0, 0.55), seam = spLine(y, 37.0, 0.3) * smoothstep(0.3, 0.6, vGA.z);
+  // (not every band has one, and each comes and goes along the face)
+  float ledge = spLine(y + 7.0, 23.0, 0.55) * step(0.45, fract(sin(floor((y + 7.0) / 23.0) * 91.7) * 437.5)) * smoothstep(0.3, 0.55, vGA.y);
+  float seam = spLine(y, 37.0, 0.3) * smoothstep(0.35, 0.6, vGA.z) * step(0.3, fract(sin(floor(y / 37.0) * 47.3) * 437.5));
   gSnow = max(gSnow, ledge * 0.85 * ${snow.toFixed(2)});
   gSeam = seam;
-  alb = mix(alb, vec3(0.012, 0.012, 0.016), spLine(y + 3.0, 11.0, 0.18) * 0.6);
+  alb = mix(alb, vec3(0.012, 0.012, 0.016), spLine(y + 3.0, 11.0, 0.18) * 0.6 * smoothstep(0.35, 0.6, vGA.w));
 #endif
   alb = mix(alb, vec3(0.62, 0.78, 1.0), gSnow);
   diffuseColor.rgb = alb;

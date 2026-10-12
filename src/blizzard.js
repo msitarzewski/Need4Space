@@ -294,24 +294,24 @@ export class Blizzard {
         varying vec2 vUv; varying float vA; varying vec3 vC; varying float vR;
         void main() {
           vUv = uv; vR = gb.y;
-          float S = ga.w, life = 4.5;
+          float S = ga.w, life = 5.5;
           float f = fract(gb.x + time / life), age = f * life, born = time - age;
           // the vent's state when this puff left it: an eruption ~3 s long every period, a quiet steam between
           float ph = mod(born + gb.w, gb.z);
           float burst = smoothstep(0.0, 0.25, ph) * (1.0 - smoothstep(2.0, 3.2, ph));
-          float v0 = mix(9.0, 62.0 + 30.0 * fract(gb.y * 7.1), burst) * S;
+          float v0 = mix(9.0, 80.0 + 40.0 * fract(gb.y * 7.1), burst) * S;
           // up and slowing (the air's drag), a little buoyancy, spreading out, carried off downwind more as it slows
           float rise = v0 * (1.0 - exp(-age * 0.9)) / 0.9 + 3.0 * age;
           float a0 = gb.y * 6.2832, spread = (1.5 + 5.0 * age) * S * (0.4 + 0.6 * fract(gb.y * 13.7));
           vec3 p = ga.xyz + vec3(cos(a0) * spread, rise, sin(a0) * spread) + wind * 0.45 * age * (0.3 + 0.7 * smoothstep(0.0, 2.0, age));
-          float size = S * (4.0 + 9.0 * age) * (0.7 + 0.5 * burst) * (0.7 + 0.6 * fract(gb.y * 3.3));
+          float size = S * (6.0 + 12.0 * age) * (0.7 + 0.5 * burst) * (0.7 + 0.6 * fract(gb.y * 3.3));
           vec4 mv = viewMatrix * vec4(p, 1.0);
           float rot = gb.y * 6.28 + time * 0.3;
           vec2 c = vec2(cos(rot), sin(rot));
           mv.xy += mat2(c.x, c.y, -c.y, c.x) * position.xy * size;
           gl_Position = projectionMatrix * mv;
           // (faded near the camera: a puff filling the screen costs its every pixel)
-          vA = smoothstep(0.0, 0.06, f) * pow(1.0 - f, 1.4) * (0.07 + 0.3 * burst) * k * smoothstep(8.0, 60.0, -mv.z);
+          vA = smoothstep(0.0, 0.06, f) * pow(1.0 - f, 1.4) * (0.1 + 0.45 * burst) * k * smoothstep(8.0, 60.0, -mv.z);
           vC = bzLight(normalize(p - cam)) * 1.6 + vec3(0.0, 0.16, 0.34) * exp(-rise / (25.0 * S)) * 0.6;
         }`,
       fragmentShader: /* glsl */`
