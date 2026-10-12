@@ -156,7 +156,9 @@ export class IceWorld {
     this.ground = new IceSheet(C, rifts);
     iceMaps(renderer);
     const mat = (this.groundMat = iceSheetMaterial());
-    const near = this.ground.build(0, 3800, 480, 16, mat), far = this.ground.build(3800, 20000, 640, 8, mat);
+    // (an integrated GPU or a phone: fewer segments round - the drifts are tens of metres across)
+    const seg = this.dens < 1 ? 0.7 : 1;
+    const near = this.ground.build(0, 3800, Math.round(480 * seg), 16, mat), far = this.ground.build(3800, 20000, Math.round(640 * seg), 8, mat);
     for (const m of near.meshes) { m.layers.set(2); m.name = 'ice-sheet'; scene.add(m); }
     for (const m of far.meshes) { m.layers.set(3); m.name = 'ice-peaks'; scene.add(m); }
     this.groundMeshes = [...near.meshes, ...far.meshes];

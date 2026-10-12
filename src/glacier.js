@@ -265,7 +265,11 @@ vec2 iceG = vec2(0.0);`)
   vec4 im = vec4(0.14, 0.48, 0.51, 0.63), ib;
   // the fine tile only where its texels can show (a pixel under ~1.5 m): beyond, its average
   float iceFp = length(fwidth(vTW.xz));
+#ifdef ICE_LITE
+  float iceFine = 0.0;                                    // (Laptop mode: the broad scale alone)
+#else
   float iceFine = 1.0 - smoothstep(0.6, 1.5, iceFp);
+#endif
   if (iceFine > 0.0) {
     vec4 m; vec2 g;
     iceHex(vTW.xz / ${ICE_TILE.toFixed(1)}, m, g);
