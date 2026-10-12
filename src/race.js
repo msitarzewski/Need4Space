@@ -124,7 +124,9 @@ class Driver {
   // tunables (searched by simulating laps: a lone ship's lap time and wall touches, then whole races)
   static tune = { lead: 0, tauE: 0.6, tauTh: 0.18, tauPsi: 0.2, ffLag: 0.3, airOn: 1.0, airOff: 0.8, lineM: 3, A: 1.8,
     brakeD: 110, boostRoom: 2.0, boostHi: 0.35, boostLo: 0.04, boostVmax: 400, wallEdge: 2.0, horizon: 0.45, aimRate: 5,
-    airCorr: 0.7, airMinOn: 0.12, airMinOff: 0.08, driftOn: 1.0, driftOff: 0.7, driftLong: 0.6 };
+    airCorr: 0.7, airMinOn: 0.12, airMinOff: 0.08, driftOn: 9, driftOff: 0.6, driftLong: 0.6 };
+  // (driftOn 9: the rivals don't drift - through the slide they ran wide into the walls and lost time; it is the
+  // player's)
 
   constructor(entry, race, rnd, slot) {
     this.e = entry;
@@ -267,7 +269,7 @@ class Driver {
     // velocity follows the nose at the grip's rate (a heading that turns it there in ~tauTh, plus the slip the bend
     // needs), the nose follows the steering at the turn rate (in ~tauPsi, slower than the 0.12 s the stick takes to
     // answer); the bend ahead is fed forward. Gains fixed in steer units over-steered slowly and under-damped fast.
-    const tRate = turnRate(v), g = gripAt(v) * (this.drifting ? DRIFT.grip : 1), slope = plan.slope[iA];
+    const tRate = turnRate(v), g = gripAt(v), slope = plan.slope[iA];
     const slip = clamp((v * cFF) / g, -0.3, 0.3), th = Math.atan2(r.vx, v);
     const thD = Math.atan(slope) - clamp((r.x - xT) / (v * T.tauE), -0.3, 0.3);
     let psiDes = clamp(th + (thD - th) / (g * T.tauTh) + slip, -0.45, 0.45);
@@ -281,8 +283,8 @@ class Driver {
     let steer = ff + (psiDes - r.psi) / (tRate * T.tauPsi);
     const need = Math.max(Math.abs(ff), Math.abs(steer) - T.airCorr), sgn = Math.sign(Math.abs(ff) > 0.5 ? ff : steer);
     // a drift, for a bend that asks most of what the airbrakes give (they cost far more speed): said outright
-    // (inp.drift), the throttle held, the stick set for the yaw the cascade wants (TrackRacer.driftQ: a share of 2.3 x
-    // the turn rate), out of it as the bend eases - with the charge's kick
+    // (inp.drift), the throttle held, the stick set for the turn of its path it wants (TrackRacer.driftQ: a share of
+    // 1.3 x the turn rate), out of it as the bend eases - with the charge's kick
     const canDrift = TrackRacer.drifting && !jump && !loop && !air && v > DRIFT.v + 20 && esc < 0.5 && this.odo > 700;
     // (the side from the track's own bend just ahead: the line's swing out wide before a corner bends the other way)
     let cT = 0;
@@ -290,10 +292,11 @@ class Driver {
     cT /= 6;
     const bend = Math.abs(cT) * v / tRate > T.driftOn * 0.7 ? Math.sign(cT) : 0;
     this.postDrift = Math.max(0, (this.postDrift || 0) - dt);
-    if (this.drifting && (!canDrift || need < T.driftOff || Math.sign(ff) === -this.drifting || (bend && bend !== this.drifting))) {
+    // (a bend past what the slide turns - 1.3x the hull - is the airbrakes')
+    if (this.drifting && (!canDrift || need < T.driftOff || need > DRIFT.rate * 1.1 || Math.sign(ff) === -this.drifting || (bend && bend !== this.drifting))) {
       this.drifting = 0;
       this.postDrift = 0.3;
-    } else if (!this.drifting && canDrift && Math.abs(ff) > T.driftOn && Math.sign(ff) === bend) {
+    } else if (!this.drifting && canDrift && Math.abs(ff) > T.driftOn && Math.abs(ff) < DRIFT.rate * 0.95 && Math.sign(ff) === bend) {
       // only into a bend long enough to charge the slide (a short one it takes on the airbrakes)
       let long = true;
       for (let d = 15; d < v * T.driftLong; d += 15) if (Math.abs(plan.c[at(d)]) * v / tRate < T.driftOn * 0.7 || Math.sign(plan.c[at(d)]) !== Math.sign(ff)) { long = false; break; }
@@ -312,7 +315,9 @@ class Driver {
     if (jump || loop || air || this.drifting || this.postDrift > 0) air1 = 0;
     if (air1 !== this.airOn) { this.airHold = air1 ? T.airMinOn : T.airMinOff; this.airOn = air1; }
     if (this.drifting) {
-      this.inp.yaw = this.drifting * TrackRacer.driftU(steer * this.drifting / DRIFT.rate);
+      // (the slide turns the way it goes: the line's bend fed forward, the gap to the aim's angle closed in tauTh)
+      const wv = v * cFF + (thD - th) / T.tauTh;
+      this.inp.yaw = this.drifting * TrackRacer.driftU(wv * this.drifting / (tRate * DRIFT.rate));
       this.inp.airL = this.inp.airR = 0;
     } else {
       if (this.airOn) steer = steer / 1.9 - 0.8 * this.airOn;

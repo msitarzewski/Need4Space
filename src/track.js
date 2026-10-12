@@ -1610,12 +1610,12 @@ export const gripAt = (v) => 4.0 * (1 - 0.4 * smoothstep(100, 320, v));
 // let go of under 0.4 s ago) with the stick thrown hard over, on the deck from ~200 km/h. The side it starts on is
 // kept while the stick stays over (into the turn the tightest, against it wide) and the throttle or the brake is
 // held; let the stick go and it ends - with its kick. "make the drift stronger, so it can actually take turns", then
-// "the drift is way too powerful": the nose swings in at up to 2.3x the turn rate (the airbrakes 3.4x, at a far
-// higher price in speed) on 90 % grip, so the path follows the nose round instead of sliding wide; the slide drags,
-// the brake only feathers. Held through the bend in a real slide it charges; straighten up and the charge kicks the
-// ship on - three steps (the sparks and trails under it show which), lost to a wall knock. (A rival says when it
-// drifts: inp.drift.)
-export const DRIFT = { v: 55, tap: 0.4, release: 0.2, rate: 2.3, grip: 0.9, keep: 0.9, brake: 0.1, tiers: [0.5, 1.1, 1.8], kick: [12, 22, 32], snap: 0.6, drag: 0.22 };
+// "it literally goes on an engine and does a huge turn, that's not how drift works": a slide, not a spin. The way the
+// ship goes turns steadily, building over ~0.3 s to 1.3x the hull's turn rate (the airbrakes swing the nose at 3.4x,
+// and cost far more speed); the nose is held up to ~30 deg into the bend, the tail out; the slide drags with its angle, the brake
+// only feathers. Held through the bend it charges; straighten up and the charge kicks the ship on - three steps (the
+// sparks and trails under it show which), lost to a wall knock. (A rival says when it drifts: inp.drift.)
+export const DRIFT = { v: 55, tap: 0.4, release: 0.2, rate: 1.3, slip: 0.52, brake: 0.1, tiers: [0.5, 1.1, 1.8], kick: [12, 22, 32], drag: 0.3 };
 const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck
 
@@ -1657,7 +1657,6 @@ export class TrackRacer {
 
   startDrift(side) {
     this.drift = this.driftSide = side; this.driftCharge = 0; this.driftLetGo = 0;
-    this.steerS = side * Math.max(Math.abs(this.steerS), DRIFT.snap);       // the nose snaps into it
     this.emit({ type: 'driftStart', side });
   }
 
@@ -1733,10 +1732,10 @@ export class TrackRacer {
     // steering (A/D, arrows, mouse, stick), airbrakes (Z / X, bumpers): a sharper turn, more drag. Drifting: held to
     // the side it started on, the stick setting how hard
     const want = this.drift ? this.drift * TrackRacer.driftQ(clamp(steer * this.drift, -1, 1)) : steer + (brakeR - brakeL) * 0.8;
-    this.steerS += (want - this.steerS) * damp(this.drift ? 12 : 8, dt);
+    this.steerS += (want - this.steerS) * damp(this.drift ? 5 : 8, dt);
     const grip = air ? 0.25 : 1;
-    const rateK = this.drift ? DRIFT.rate : brakeL || brakeR ? 1 + AIRBRAKE : 1;
-    this.yawRate = this.steerS * turnRate(Math.abs(this.vs)) * rateK * grip * power;
+    const rateK = brakeL || brakeR ? 1 + AIRBRAKE : 1, psi0 = this.psi;
+    this.yawRate = this.drift ? 0 : this.steerS * turnRate(Math.abs(this.vs)) * rateK * grip * power;
     this.psi += this.yawRate * dt;
     if (this.assist && Math.abs(steer) < 0.1 && !air && !this.drift) this.psi -= this.psi * 1.1 * dt;   // eases back along the track
     this.airIn = brakeR - brakeL;
@@ -1760,32 +1759,38 @@ export class TrackRacer {
     const thrust = (this.throttle * THRUST + this.boosting * BOOST) * power * this.thrustScale * (1 + 0.07 * (this.draft || 0));
     const sp = Math.hypot(this.vs, this.vx);
     const drag = DRAG_L + DRAG_Q * sp + (brakeL + brakeR) * 0.25;
-    this.vs += (hs * thrust - this.vs * drag) * dt;
-    this.vx += (hx * thrust - this.vx * drag) * dt;
+    const ts = this.drift && sp > 1 ? this.vs / sp * Math.cos(this.slip) : hs, tx = this.drift && sp > 1 ? this.vx / sp * Math.cos(this.slip) : hx;
+    this.vs += (ts * thrust - this.vs * drag) * dt;
+    this.vx += (tx * thrust - this.vx * drag) * dt;
     // the brake: ~6 g plus a share of the speed (15 g at top speed), never into reverse (drifting: a feather of it)
     const bk = this.brakeS * (60 + 0.3 * Math.abs(this.vs)) * dt * power * (this.drift ? (pressing ? DRIFT.brake : 0.5) : 1);
     this.vs -= Math.sign(this.vs) * Math.min(Math.abs(this.vs), bk);
-    // grip: slip across the heading bleeds away (into the heading while on the deck; drifting, less grip and most of
-    // the slide's speed kept)
-    const along = this.vs * hs + this.vx * hx, across = -this.vs * hx + this.vx * hs;
-    let kept = across * Math.exp(-(air ? 0.4 : gripAt(sp) * (this.drift ? DRIFT.grip : 1)) * dt);
-    let al2 = along + (air ? 0 : Math.abs(across - kept) * (this.drift ? DRIFT.keep : 0.5) * Math.sign(along || 1));
     if (this.drift) {
-      // a slide never gains speed (what the grip turns is capped at what came in), and it drags with its angle
-      const was = Math.hypot(along, across), now = Math.hypot(al2, kept);
-      const k = Math.min(1, was / Math.max(1e-6, now)) * Math.exp(-DRIFT.drag * Math.abs(kept) / Math.max(1, now) * dt);
-      al2 *= k; kept *= k;
-    }
-    this.vs = al2 * hs - kept * hx; this.vx = al2 * hx + kept * hs;
-    this.slip = Math.atan2(kept, Math.max(1, Math.abs(al2)));          // the slide: the way it goes off the nose (rad)
-    if (this.drift) {
-      this.driftCharge += dt * smoothstep(0.1, 0.35, Math.abs(this.slip));
+      // the slide: the way it goes turns at the drift's rate, the nose held the slip angle further into the bend, the
+      // speed dragged by that angle
+      const q = Math.abs(this.steerS), a = this.drift * q * turnRate(Math.abs(this.vs)) * DRIFT.rate * power * dt;
+      const ca = Math.cos(a), sa = Math.sin(a), v0 = this.vs;
+      this.vs = v0 * ca - this.vx * sa; this.vx = v0 * sa + this.vx * ca;
+      const th = Math.atan2(this.vx, Math.max(1, this.vs)), beta = this.drift * DRIFT.slip * (0.55 + 0.45 * q);
+      this.psi = clamp(this.psi + (th + beta - this.psi) * damp(10, dt), -1.3, 1.3);
+      this.slip = this.psi - th;
+      const k = Math.exp(-DRIFT.drag * Math.abs(Math.sin(this.slip)) * dt);
+      this.vs *= k; this.vx *= k;
+      this.yawRate = (this.psi - psi0 + turn) / dt;
+      this.driftCharge += dt * (0.4 + 0.6 * q);
       if (this.driftTier > tierWas) this.emit({ type: 'driftTier', tier: this.driftTier, at: this.pos.clone() });
+    } else {
+      // grip: slip across the heading bleeds away (into the heading while on the deck)
+      const along = this.vs * hs + this.vx * hx, across = -this.vs * hx + this.vx * hs;
+      const kept = across * Math.exp(-(air ? 0.4 : gripAt(sp)) * dt);
+      const al2 = along + (air ? 0 : Math.abs(across - kept) * 0.5 * Math.sign(along || 1));
+      this.vs = al2 * hs - kept * hx; this.vx = al2 * hx + kept * hs;
+      this.slip = Math.atan2(kept, Math.max(1, Math.abs(al2)));          // the way it goes off the nose (rad)
     }
-    // a drift's kick, paid over ~0.2 s along the nose
+    // a drift's kick, paid over ~0.2 s along the way it goes
     if (this.driftKick > 0) {
-      const d = Math.min(this.driftKick, 180 * dt);
-      this.vs = Math.min(PAD_MAX, this.vs + hs * d); this.vx += hx * d;
+      const d = Math.min(this.driftKick, 180 * dt), v = Math.max(1, Math.hypot(this.vs, this.vx));
+      this.vs = Math.min(PAD_MAX, this.vs + this.vs / v * d); this.vx += this.vx / v * d;
       this.driftKick -= d;
     }
     // boost pads
@@ -1931,7 +1936,7 @@ export class TrackRacer {
     this.camQ.copy(this.q);
     // drifting, the chase camera looks along the way the ship is going more than along its nose: the slide shows
     if (this.driftS > 0.01) {
-      const pv = Math.atan2(this.vx, Math.max(1, this.vs)), pc = this.psi + (pv - this.psi) * 0.6;
+      const pv = Math.atan2(this.vx, Math.max(1, this.vs)), pc = this.psi + (pv - this.psi) * 0.8;
       const Hc = _H.copy(f.T).multiplyScalar(Math.cos(pc)).addScaledVector(f.R, Math.sin(pc));
       _Q.setFromRotationMatrix(_M.makeBasis(_R.crossVectors(Hc, f.U), f.U, _B.copy(Hc).negate()));
       this.camQ.slerp(_Q, this.driftS * (1 - this.airT));
