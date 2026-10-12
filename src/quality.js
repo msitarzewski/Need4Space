@@ -3,7 +3,7 @@
 // lit pixel ...). Lite: the heaviest shaders in cheaper versions - rocks one texture scale of their three (18 taps a
 // pixel, not 54), the structure's plates without their relief normal (one evaluation of the layout, not three), the
 // ships without clear coat - fewer lights, 4x texture filtering, no blur behind the HUD (settings.js sets the rest:
-// 50 % scale, SMAA only, effects off).
+// 100 % scale, SMAA only, effects off).
 // Shaders read Q.lite as they compile and key their programs by it.
 export const Q = { lite: false };
 
