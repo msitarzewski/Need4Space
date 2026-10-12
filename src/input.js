@@ -87,7 +87,7 @@ export class Input {
       this.padPrev = p.buttons.map((x) => x.value);
     }
     // touch: left stick steer / roll and pitch, right stick the throttle lever (up / down, as W / S) and the airbrakes
-    const t = this.touch?.state;
+    const t = this.touch?.on && this.touch.state;
     if (t) {
       s.roll += t.lx;
       s.pitch -= t.ly;                          // pushed up: as the up arrow

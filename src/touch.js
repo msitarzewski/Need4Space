@@ -4,7 +4,15 @@
 //  - Boost (held), Engines (free flight), pause, camera
 // A stick appears where the thumb lands in its half of the screen (a faint ring shows where it rests). The first tap
 // asks for full screen in landscape where the browser allows it; held upright, the page asks to be turned.
-export const isTouch = () => matchMedia('(hover: none) and (pointer: coarse)').matches;
+// On by the setting (Auto / On / Off): Auto is a phone or tablet - a touch screen and a mobile browser - or, failing
+// that, the first finger on the screen. (A Galaxy S24 Ultra's S Pen makes it report a fine pointer that hovers: the
+// first test, "(hover: none) and (pointer: coarse)", took it for a desktop - no sticks.)
+export const isTouch = () => {
+  const ua = navigator.userAgent || '';
+  const screenTouch = navigator.maxTouchPoints > 0 || matchMedia('(any-pointer: coarse)').matches;
+  const mobile = navigator.userAgentData?.mobile || /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  return (screenTouch && mobile) || matchMedia('(hover: none) and (pointer: coarse)').matches;
+};
 
 const DEAD = 0.12;
 const dz = (v) => (Math.abs(v) < DEAD ? 0 : (v - Math.sign(v) * DEAD) / (1 - DEAD));
@@ -15,7 +23,9 @@ export class TouchControls {
     input.touch = this;
     this.state = { lx: 0, ly: 0, rx: 0, ry: 0, boost: false };
     this.mode = null;
-    document.body.classList.add('touch');
+    this.on = false;
+    this.pref = 'auto';
+    this.auto = isTouch();
     const el = (this.el = document.createElement('div'));
     el.id = 'touch';
     el.innerHTML = `
@@ -33,12 +43,18 @@ export class TouchControls {
     for (const z of el.querySelectorAll('.t-zone')) this.stick(z);
     for (const b of el.querySelectorAll('.t-btn')) this.button(b);
     // full screen and landscape on the first tap (a user gesture is needed; iPhones have no full screen for pages)
+    let asked = false;
     const full = () => {
       const d = document.documentElement;
-      if (document.fullscreenElement || !d.requestFullscreen) return;
+      if (asked || !this.on || document.fullscreenElement || !d.requestFullscreen) return;
+      asked = true;
       d.requestFullscreen({ navigationUI: 'hide' }).then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
     };
-    addEventListener('pointerup', full, { once: true });
+    addEventListener('pointerup', full);
+    // Auto: a finger on the screen is enough (whatever the browser said it was)
+    addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch' && !this.auto) { this.auto = true; this.setPref(this.pref); }
+    }, true);
     // no pinch or double-tap zoom (Safari ignores the viewport's user-scalable)
     document.addEventListener('gesturestart', (e) => e.preventDefault());
   }
@@ -93,6 +109,17 @@ export class TouchControls {
     });
     const up = () => { b.classList.remove('on'); if (k === 'boost') this.state.boost = false; };
     for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(ev, up);
+  }
+
+  // the setting: 'auto' | 'on' | 'off'
+  setPref(p) {
+    this.pref = p || 'auto';
+    const on = this.pref === 'on' || (this.pref === 'auto' && this.auto);
+    if (on === this.on) return;
+    this.on = on;
+    document.body.classList.toggle('touch', on);
+    if (!on) for (const k of ['lx', 'ly', 'rx', 'ry']) this.state[k] = 0;
+    this.state.boost = false;
   }
 
   // race or free flight (the Engines button is free flight's)
