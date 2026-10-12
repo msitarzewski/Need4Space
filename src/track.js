@@ -1615,8 +1615,12 @@ export const gripAt = (v) => 4.0 * (1 - 0.4 * smoothstep(100, 320, v));
 // the angle and the brake only feathers; it charges the more angle it holds. Caught - the slide back within ~8 deg
 // for a moment - the grip comes back and the charge kicks the ship on (three steps: the sparks and
 // trails under it show which; lost to a wall knock). (A rival says when it drifts: inp.drift.)
+// "make double tap drift, like drifting once and if i drift again fast enough i get a bigger drift": a chain. A drift
+// started within 0.9 s of catching one that kicked - or the brake tapped again mid-drift, the stick still over - is a
+// step bigger (up to three): it slides deeper (7 % less grip a step) and livelier, starts with a share of charge,
+// charges a quarter faster and kicks 30 % harder a step.
 export const DRIFT = { v: 55, tap: 0.4, rate: 1.3, grip: 0.55, keep: 0.8, drag: 0.12, brake: 0.1, onset: 2.2, caught: 0.14,
-  settle: 0.15, tiers: [0.5, 1.1, 1.8], kick: [12, 22, 32] };
+  settle: 0.15, tiers: [0.5, 1.1, 1.8], kick: [12, 22, 32], chainWindow: 0.9, chainMax: 3 };
 const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck
 
@@ -1652,16 +1656,27 @@ export class TrackRacer {
 
   startDrift(side) {
     this.drift = this.driftSide = side; this.driftCharge = 0; this.driftAge = 0; this.driftCalm = 0;
+    this.chain = this.chainT > 0 ? Math.min(DRIFT.chainMax, (this.chain || 0) + 1) : 0;
+    this.chainT = 0;
     this.emit({ type: 'driftStart', side });
+    if (this.chain) this.chainUp();
+  }
+
+  // a step up the chain: a head start on the charge
+  chainUp() {
+    this.driftCharge += 0.3;
+    this.emit({ type: 'driftChain', tier: this.chain, at: this.pos.clone() });
   }
 
   // the drift ends: let go on the deck, its charge kicks the ship on (paid over ~0.2 s)
   endDrift(go) {
     const tier = this.driftTier;
     if (go && tier) {
-      this.driftKick += DRIFT.kick[tier - 1];
+      this.driftKick += DRIFT.kick[tier - 1] * (1 + 0.3 * (this.chain || 0));
       this.emit({ type: 'drift', tier, at: this.pos.clone() });
     }
+    this.chainT = go && tier ? DRIFT.chainWindow : 0;       // the window to chain the next one
+    if (!this.chainT) this.chain = 0;
     this.drift = 0;
     this.driftCharge = 0;
   }
@@ -1669,7 +1684,7 @@ export class TrackRacer {
   place(s, hover) {
     this.s = s; this.x = 0; this.y = hover ? HOVER : 0.002; this.vy = 0; this.vs = 0; this.vx = 0; this.psi = 0; this.slow = 0;
     this.throttle = 0; this.steerS = 0; this.yawRate = 0; this.boosting = 0;
-    this.drift = 0; this.driftCharge = 0; this.driftKick = 0; this.driftK = 0;
+    this.drift = 0; this.driftCharge = 0; this.driftKick = 0; this.driftK = 0; this.chain = 0; this.chainT = 0;
     this.pose(0);
   }
 
@@ -1704,6 +1719,9 @@ export class TrackRacer {
     // pedal is down, ended by catching it (or a rival saying so)
     const pressing = inp.throttleAxis != null ? inp.throttleAxis > 0.5 : inp.throttleUp > 0.5;
     this.brakeAgo = braking ? 0 : (this.brakeAgo ?? 9) + dt;
+    const tapped = braking && !this.brakeWas;
+    this.brakeWas = braking;
+    if (!this.drift && this.chainT > 0 && (this.chainT -= dt) <= 0) this.chain = 0;
     const onDeck = !air && !tr.inGap(this.s) && !tr.inLoop(this.s);
     const ok = TrackRacer.drifting && ship.ready && onDeck && Math.abs(this.vs) > DRIFT.v * (this.drift ? 0.6 : 1);
     if (inp.drift != null) {
@@ -1713,6 +1731,7 @@ export class TrackRacer {
       if (ok && (braking || this.brakeAgo < DRIFT.tap) && Math.abs(steer) > 0.55) this.startDrift(Math.sign(steer));
     } else {
       this.driftAge += dt;
+      if (tapped && Math.abs(steer) > 0.55 && this.driftAge > 0.25 && this.chain < DRIFT.chainMax) { this.chain++; this.chainUp(); }
       this.driftCalm = this.driftAge > 0.6 && Math.abs(this.slip) < DRIFT.caught ? this.driftCalm + dt : 0;
       if (!ok) this.endDrift(false);
       else if (this.driftCalm > DRIFT.settle || !(pressing || braking)) this.endDrift(true);
@@ -1731,7 +1750,7 @@ export class TrackRacer {
     // livelier nose
     this.steerS += (steer + (brakeR - brakeL) * 0.8 - this.steerS) * damp(8, dt);
     const grip = air ? 0.25 : 1, dk = this.driftK;
-    const rateK = (brakeL || brakeR ? 1 + AIRBRAKE : 1) * (1 + (DRIFT.rate - 1) * dk);
+    const ch = this.chain || 0, rateK = (brakeL || brakeR ? 1 + AIRBRAKE : 1) * (1 + (DRIFT.rate + 0.1 * ch - 1) * dk);
     this.yawRate = this.steerS * turnRate(Math.abs(this.vs)) * rateK * grip * power;
     this.psi += this.yawRate * dt;
     if (this.assist && Math.abs(steer) < 0.1 && !air && !this.drift) this.psi -= this.psi * 1.1 * dt;   // eases back along the track
@@ -1765,7 +1784,7 @@ export class TrackRacer {
     // the slide's speed turned forward - a slide never gains speed, it drags with its angle
     const along = this.vs * hs + this.vx * hx, across = -this.vs * hx + this.vx * hs;
     const push = this.drift ? clamp(steer * this.drift, 0, 1) : 0;    // steered into the slide (else it grips again)
-    let kept = across * Math.exp(-(air ? 0.4 : gripAt(sp) * (1 - (1 - DRIFT.grip) * dk * (0.35 + 0.65 * push))) * dt);
+    let kept = across * Math.exp(-(air ? 0.4 : gripAt(sp) * (1 - (1 - DRIFT.grip + 0.07 * ch) * dk * (0.35 + 0.65 * push))) * dt);
     let al2 = along + (air ? 0 : Math.abs(across - kept) * (0.5 + (DRIFT.keep - 0.5) * dk) * Math.sign(along || 1));
     if (dk > 0) {
       const was = Math.hypot(along, across), now = Math.hypot(al2, kept);
@@ -1776,7 +1795,7 @@ export class TrackRacer {
     this.slip = Math.atan2(kept, Math.max(1, Math.abs(al2)));          // the way it goes off the nose (rad)
     if (this.drift) {
       if (Math.abs(this.slip) > 0.03) this.drift = this.driftSide = -Math.sign(this.slip);   // the side the tail is out
-      this.driftCharge += dt * smoothstep(0.12, 0.4, Math.abs(this.slip)) * dk;
+      this.driftCharge += dt * smoothstep(0.12, 0.4, Math.abs(this.slip)) * dk * (1 + 0.25 * ch);
       if (this.driftTier > tierWas) this.emit({ type: 'driftTier', tier: this.driftTier, at: this.pos.clone() });
     }
     // a drift's kick, paid over ~0.2 s along the way it goes

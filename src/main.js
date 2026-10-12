@@ -600,6 +600,9 @@ async function boot() {
         } else if (e.type === 'driftTier') {
           if (camera.position.distanceTo(e.at) < 220) fx.driftTier(e.entry.ship, e.entry.racer, track.frame(e.s), e.tier);
           if (e.player && mode === 'race') { audio.driftTier(e.tier); hud.pulse('dft'); }
+        } else if (e.type === 'driftChain') {
+          if (camera.position.distanceTo(e.at) < 220) fx.driftChain(e.entry.ship, e.entry.racer, track.frame(e.s), e.tier);
+          if (e.player && mode === 'race') { audio.driftChain(e.tier); hud.pulse('dft'); rig.shake = Math.max(rig.shake, 0.12); }
         } else if (e.type === 'flip') {
           if (e.player && mode === 'race') { audio.flip(); hud.flash('rgba(150,70,255,0.22)', 0.6); }
         } else if (e.type === 'go') { hud.message('GO!', 1.2); audio.go(); }
@@ -734,7 +737,7 @@ async function boot() {
     const f = ctl.forward;
     hud.update(dt, { speed: ctl.speed, agl: MAP !== 'meadow' && mode === 'free' ? NaN : ctl.agl, throttle: ctl.throttle,
       boostEnergy: ctl.boostEnergy, boosting: ctl.boosting, state, stateClass: cls, camera: rig.name, assist: ctl.assist,
-      drifting: mode === 'race' && !!ctl.drift, driftCharge: ctl.driftCharge, driftTier: ctl.driftTier || 0,
+      drifting: mode === 'race' && !!ctl.drift, driftCharge: ctl.driftCharge, driftTier: ctl.driftTier || 0, driftChain: ctl.chain || 0,
       invert: input.invert, lapTime: lap.started ? lap.time : NaN, lastLap: lap.last, bestLap: lap.best, lap: lap.lap,
       x: ctl.pos.x, z: ctl.pos.z, fx: f.x, fz: f.z, race: race ? race.hud() : null, mode });
     audio.update(dt, { camera, ship, ctl, race, track, mode, inp, world });

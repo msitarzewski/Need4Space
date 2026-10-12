@@ -667,6 +667,14 @@ export class GameAudio {
     this.tone(t, 0.35, o, { type: 'triangle', f, f1: f * 1.02, v: 0.3, tau: 0.12, attack: 0.005 });
     this.tone(t + 0.05, 0.3, o, { f: f * 1.5, v: 0.15, tau: 0.1, attack: 0.005 });
   }
+  // a drift chained: two quick rising notes, higher up the chain
+  driftChain(chain) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, o = this.out(null, 0, 0.35), f = 660 * Math.pow(1.26, chain);
+    this.tone(t, 0.18, o, { type: 'triangle', f, v: 0.25, tau: 0.06, attack: 0.004 });
+    this.tone(t + 0.07, 0.3, o, { type: 'triangle', f: f * 1.5, v: 0.28, tau: 0.1, attack: 0.004 });
+    this.burst(t, 0.3, o, { f: 1200, f1: 4000, q: 1.2, v: 0.2, buf: this.pink });
+  }
   // a gravity flip: the field taking hold - a deep swell under a tone rising through the half turn
   flip() {
     if (!this.ctx || !this.gate('flip', 0.5)) return;

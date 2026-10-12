@@ -7,7 +7,7 @@ import { mulberry32, smoothstep } from './noise.js';
 const TRACK_HALF = TRACK_W / 2;           // the walls' inner faces
 // a drift's sparks, trails and glow by the charge's step: building, then blue, orange, violet (linear, over 1 to glow)
 const DRIFT_COL = [new THREE.Color(1.1, 1.15, 1.3), new THREE.Color(0.35, 0.75, 2.4), new THREE.Color(2.4, 0.9, 0.18), new THREE.Color(1.9, 0.45, 2.4)];
-const VAPOUR = new THREE.Color(0.85, 0.88, 0.95), _c = new THREE.Color(), _v = new THREE.Vector3();
+const VAPOUR = new THREE.Color(0.85, 0.88, 0.95), CHAIN_COL = new THREE.Color(2.4, 2.0, 1.1), _c = new THREE.Color(), _v = new THREE.Vector3();
 
 function canvas(n, draw) {
   const c = document.createElement('canvas');
@@ -456,6 +456,7 @@ export class FX {
   // the deck under it in the same colour (glow).
   drift(ship, r, f, dt, player = false) {
     const tier = r.driftTier, col = DRIFT_COL[tier], side = -(r.drift || 0), V = new THREE.Vector3(), P = new THREE.Vector3();
+    const ch = 1 + 0.35 * (r.chain || 0);              // a chained drift: wider, hotter, more of everything
     const plane = { P: f.P, N: f.U }, M = ship.root.matrixWorld, sk = (r.skids ||= { on: false, p: [new THREE.Vector3(), new THREE.Vector3()] });
     // the ribbons: each skid's point dropped onto the deck, joined to where it was last frame
     for (let k = 0; k < 2; k++) {
@@ -463,12 +464,12 @@ export class FX {
       P.set(sd * ship.halfSpan * 0.42, -ship.bottom, 2.2).applyMatrix4(M);
       P.addScaledVector(f.U, 0.04 - P.clone().sub(f.P).dot(f.U));
       const last = sk.p[k];
-      if (sk.on && last.distanceToSquared(P) < 3600) this.trails.add(last, P, f.U, k === 0 ? 0.8 : 0.5, _c.copy(col).multiplyScalar((k === 0 ? 1 : 0.6) * (tier ? 1 : 0.35)));
+      if (sk.on && last.distanceToSquared(P) < 3600) this.trails.add(last, P, f.U, (k === 0 ? 0.8 : 0.5) * ch, _c.copy(col).multiplyScalar((k === 0 ? 1 : 0.6) * (tier ? 1 : 0.35) * ch));
       last.copy(P);
     }
     sk.on = true;
     // sparks off the outer skid, thrown back and out, skipping along the deck
-    const n = Math.min(30, Math.ceil(dt * (300 + 180 * tier)));
+    const n = Math.min(40, Math.ceil(dt * (300 + 180 * tier) * ch));
     for (let i = 0; i < n; i++) {
       P.set(side * ship.halfSpan * (0.3 + Math.random() * 0.25), -ship.bottom + 0.1, 1.5 + Math.random() * 3).applyMatrix4(M);
       V.copy(r.vel).multiplyScalar(0.8 + Math.random() * 0.12).addScaledVector(f.R, side * (3 + Math.random() * 9)).addScaledVector(f.U, 1 + Math.random() * 4);
@@ -493,6 +494,19 @@ export class FX {
       }
     }
     if (player) this.glow = { at: P.set(0, -ship.bottom + 0.4, 0.5).applyMatrix4(M), tier, k: Math.min(1, r.driftS * 1.5) };
+  }
+
+  // a drift chained (a step bigger): a white-gold burst off both skids, a ring on the deck growing with the chain
+  driftChain(ship, r, f, chain) {
+    const V = new THREE.Vector3(), P = new THREE.Vector3();
+    for (let i = 0; i < 50 + 30 * chain; i++) {
+      P.set((Math.random() < 0.5 ? -1 : 1) * ship.halfSpan * 0.42, -ship.bottom + 0.2, 2).applyMatrix4(ship.root.matrixWorld);
+      V.set(Math.random() - 0.5, Math.random() * 0.9, Math.random() - 0.5).normalize().multiplyScalar(8 + Math.random() * 18).add(_v.copy(r.vel).multiplyScalar(0.85));
+      this.sparks.emit(P, V, CHAIN_COL, { size: 0.1 + Math.random() * 0.12, life: 0.3 + Math.random() * 0.4, alpha: 2.8, drag: 1.2, grav: 10, fadeIn: 0.01,
+        stretch: 0.03, plane: { P: f.P, N: f.U }, bounce: 0.3 });
+    }
+    this.wave(_v.copy(ship.root.position).addScaledVector(f.U, -ship.bottom + 0.1), new THREE.Matrix4().makeBasis(f.R, f.U, f.T.clone().negate()),
+      CHAIN_COL, 7 + 3 * chain, 0.35);
   }
 
   // the drift's charge reaching a step: a burst of its colour off both skids and a small ring on the deck

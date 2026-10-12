@@ -14,6 +14,7 @@ export const CONTROLS = [
   ['Flight', [
     [['W', 'S'], 'Throttle up / down (S at zero: brake)'],
     [['S', 'A', 'D'], 'Drift: touch S and turn hard at speed; steer the slide with A / D (and W), catch it straight to kick out'],
+    [['S', 'S'], 'Drift again soon after a kick, or tap S again mid-drift: a bigger drift (up to three steps)'],
     [['A', 'D'], 'Steer (race), yaw (free flight)'],
     [['←', '→', '↑', '↓'], 'Steer (race; in the air ↓ nose down, ↑ up), pitch and roll (free)'],
     [['Shift'], 'Boost (orange pads on the track kick too)'],
@@ -229,6 +230,7 @@ export class HUD {
     if (dr) {
       $('dft').style.transform = `scaleX(${Math.min(1, (s.driftCharge || 0) / 1.8)})`;
       if (s.driftTier !== this.driftTier) { $('dft').dataset.t = s.driftTier; this.driftTier = s.driftTier; }
+      if (s.driftChain !== this.driftChain) { $('dchain').dataset.c = s.driftChain; this.driftChain = s.driftChain; }
     }
     const sp = $('hud-speed'), boosting = s.boosting > 0.5, low = s.boostEnergy < 0.2;
     if (boosting !== this.boosting) { sp.classList.toggle('boost', boosting); this.boosting = boosting; }

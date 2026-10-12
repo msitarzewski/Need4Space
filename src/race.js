@@ -413,7 +413,7 @@ export class Race {
     if (ev.type === 'fall') { this.events.push({ type: 'fall', at: ev.at, player: e.player }); if (this.stats) this.stats.falls++; }
     if (ev.type === 'drift') e.ship.boostKick = Math.max(e.ship.boostKick || 0, 0.4 + 0.2 * ev.tier);
     if (ev.type === 'driftStart') e.ship.driftHop = 1;
-    if (ev.type === 'drift' || ev.type === 'flip' || ev.type === 'driftTier') {
+    if (ev.type === 'drift' || ev.type === 'flip' || ev.type === 'driftTier' || ev.type === 'driftChain') {
       this.events.push({ type: ev.type, tier: ev.tier, at: ev.at, s: e.racer.s, player: e.player, entry: e });
       if (this.stats && ev.type === 'drift') this.stats.drifts = (this.stats.drifts || 0) + 1;
     }
