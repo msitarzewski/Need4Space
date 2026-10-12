@@ -1,0 +1,89 @@
+// Settings (O): every look feature has a switch that changes the picture and costs what it costs; saved per browser.
+const KEY = 'feather.settings.v4';
+export const DEFAULTS = { tonemap: 'aces', ao: true, bloom: true, shadows: 'high', scale: 1, exposure: 0, fps: true,
+  blur: true, reflections: true, streaks: true, ai: 'normal', music: 'mid', sfx: 'high', aa: 'smaa' };
+// (AI difficulty: the rivals, race.js AI_LEVELS - Normal a fair fight, Hard close to a flawless lap, Brutal at it)
+const ROWS = [
+  ['ai', 'AI difficulty', [['normal', 'Normal'], ['hard', 'Hard'], ['brutal', 'Brutal']]],
+  ['music', 'Music', [['off', 'Off'], ['low', 'Low'], ['mid', 'Medium'], ['high', 'High']]],
+  ['sfx', 'Sound effects', [['low', 'Low'], ['mid', 'Medium'], ['high', 'High']]],
+  ['tonemap', 'Tone mapping', [['punchy', 'AgX Punchy'], ['agx', 'AgX Medium'], ['aces', 'ACES']]],
+  ['exposure', 'Exposure', [[-1.5, '-1.5'], [-1, '-1'], [-0.5, '-0.5'], [0, '0'], [0.5, '+0.5']]],
+  ['aa', 'Anti-aliasing', [['msaa', 'MSAA 4x'], ['smaa', 'MSAA 4x + SMAA'], ['high', 'MSAA 8x + SMAA']]],
+  ['ao', 'Ambient occlusion', [[true, 'On'], [false, 'Off']]],
+  ['bloom', 'Bloom', [[true, 'On'], [false, 'Off']]],
+  ['reflections', 'Deck reflections (needs AO)', [[true, 'On'], [false, 'Off']]],
+  ['streaks', 'Light streaks', [[true, 'On'], [false, 'Off']]],
+  ['blur', 'Speed blur', [[true, 'On'], [false, 'Off']]],
+  ['shadows', 'Shadows', [['high', 'High'], ['medium', 'Medium'], ['off', 'Off']]],
+  ['scale', 'Render scale', [[0.75, '75%'], [1, '100%'], [1.25, '125%'], [1.5, '150%']]],
+  ['fps', 'FPS readout', [[true, 'On'], [false, 'Off']]],
+];
+
+// the headings the rows fall under (in the menu's Settings screen)
+const GROUPS = { ai: 'Race', music: 'Audio', tonemap: 'Picture', ao: 'Effects', shadows: 'Performance' };
+
+export class Settings {
+  constructor(apply) {
+    this.apply = apply;
+    this.v = { ...DEFAULTS };
+    try { Object.assign(this.v, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch { /* private window */ }
+    // Normal is the default difficulty: a Hard saved before the player ever chose one goes back to it
+    if (!this.v.aiPicked) this.v.ai = DEFAULTS.ai;
+    this.focus = 0;                                  // the row the keyboard / gamepad is on
+    this.onSet = null;                               // (k, value) after every change (menu.js: the difficulty accent)
+    this.el = document.getElementById('settings');
+    this.el.addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-k]');
+      if (!b) return;
+      this.focus = +b.closest('.srow').dataset.r;
+      this.set(b.dataset.k, JSON.parse(b.dataset.v));
+    });
+    this.el.addEventListener('mousemove', (e) => {
+      const row = e.target.closest('.srow');
+      if (row && +row.dataset.r !== this.focus) { this.focus = +row.dataset.r; this.mark(); }
+    });
+    this.draw();
+    apply(this.v);
+  }
+
+  set(k, val) {
+    this.v[k] = val;
+    if (k === 'ai') this.v.aiPicked = true;
+    try { localStorage.setItem(KEY, JSON.stringify(this.v)); } catch { /* storage blocked */ }
+    this.apply(this.v);
+    this.draw();
+    this.onSet?.(k, val);
+  }
+
+  get open() { return !this.el.classList.contains('hidden'); }
+
+  toggle() { this.el.classList.toggle('hidden'); return this.open; }
+
+  get focusKey() { return ROWS[this.focus][0]; }
+
+  // keyboard / gamepad: the next row up or down, the focused row's option one step left or right
+  move(d) {
+    this.focus = (this.focus + d + ROWS.length) % ROWS.length;
+    this.mark();
+    this.el.querySelector('.srow.focus')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  cycle(d, wrap = false) {
+    const [k, , opts] = ROWS[this.focus], n = opts.length;
+    const i = opts.findIndex(([val]) => val === this.v[k]);
+    let j = i + d;
+    if (wrap) j = (j + n) % n; else j = Math.max(0, Math.min(n - 1, j));
+    if (j !== i) this.set(k, opts[j][0]);
+    return j !== i;
+  }
+
+  mark() { this.el.querySelectorAll('.srow').forEach((r) => r.classList.toggle('focus', +r.dataset.r === this.focus)); }
+
+  draw() {
+    this.el.innerHTML = ROWS.map(([k, label, opts], r) => (GROUPS[k] ? `<div class="s-group">${GROUPS[k]}</div>` : '') +
+      `<div class="srow${r === this.focus ? ' focus' : ''}" data-r="${r}"><span>${label}</span><div class="seg">${opts.map(([val, t]) =>
+        `<button tabindex="-1" data-k="${k}" data-v='${JSON.stringify(val)}'${k === 'ai' ? ` data-lv="${val}"` : ''} class="${this.v[k] === val ? 'on' : ''}">${t}</button>`)
+        .join('')}</div></div>`).join('');
+  }
+}

@@ -1,0 +1,194 @@
+// Engine-look shader patches, applied to three's chunks before any material compiles:
+//  - PCSS sun shadows: a blocker search, then a filter as wide as the sun's penumbra at that distance - sharp where
+//    a part touches, soft under the wings (HDRP's "High" filtering). Fixed spiral, no per-pixel noise: no grain.
+//  - Height fog with sun in-scatter: thicker low down, thinner over the peaks, warm toward the sun (aerial perspective).
+import * as THREE from 'three';
+
+const v3 = (v) => { const [a, b, c] = v.isColor ? [v.r, v.g, v.b] : [v.x, v.y, v.z]; return `vec3(${a.toFixed(5)}, ${b.toFixed(5)}, ${c.toFixed(5)})`; };
+
+// The meteorite tunnel's dark: every lit material tests its pixel against the cave's centre line (a polyline, baked
+// into the shader as constants - the cave never moves). Inside, the sun and all sky light (ambient, hemisphere,
+// environment) go to nothing, fading in over the mouths; lamps and the ships' own lights are untouched. Must run
+// before the first lit material compiles.
+export function setCave(lines, R, mouth) {
+  const C = THREE.ShaderChunk;
+  if (C.common.includes('vCaveW') || !lines.length) return;
+  const f = (v) => `vec3(${v.x.toFixed(2)}, ${v.y.toFixed(2)}, ${v.z.toFixed(2)})`;
+  let fn = 'float caveLight( vec3 w ) {\n\tfloat k = 1.0;\n';
+  lines.forEach(({ pts, len }, c) => {
+    const ctr = pts.reduce((a, p) => a.add(p), new THREE.Vector3()).divideScalar(pts.length);
+    const bound = Math.max(...pts.map((p) => p.distanceTo(ctr))) + R + 10;
+    fn += `\tif ( distance( w, ${f(ctr)} ) < ${bound.toFixed(1)} ) {
+\t\tvec3 P${c}[${pts.length}] = vec3[${pts.length}]( ${pts.map(f).join(', ')} );
+\t\tfloat dmin = 1e9, t = 0.0;
+\t\tfor ( int i = 0; i < ${pts.length - 1}; i ++ ) {
+\t\t\tvec3 a = P${c}[ i ], ab = P${c}[ i + 1 ] - a;
+\t\t\tfloat h = clamp( dot( w - a, ab ) / dot( ab, ab ), 0.0, 1.0 ), d = length( w - a - ab * h );
+\t\t\tif ( d < dmin ) { dmin = d; t = ( float( i ) + h ) / ${(pts.length - 1).toFixed(1)}; }
+\t\t}
+\t\tfloat inside = 1.0 - smoothstep( ${(R - 4).toFixed(1)}, ${(R + 2).toFixed(1)}, dmin );
+\t\tfloat ends = smoothstep( 0.0, ${mouth.toFixed(1)}, min( t, 1.0 - t ) * ${len.toFixed(1)} );
+\t\tk = min( k, 1.0 - inside * ends );
+\t}
+`;
+  });
+  fn += '\treturn k;\n}\n';
+  C.common += '\nvarying vec3 vCaveW;\n';
+  C.project_vertex += '\n\tvCaveW = ( vec4( mvPosition.xyz - viewMatrix[ 3 ].xyz, 0.0 ) * viewMatrix ).xyz;\n';
+  C.lights_pars_begin += '\n' + fn;
+  const L = C.lights_fragment_begin;
+  const a = 'getDirectionalLightInfo( directionalLight, directLight );';
+  if (!L.includes(a)) throw new Error('lights chunk changed: cave patch not applied');
+  C.lights_fragment_begin = 'float caveK = caveLight( vCaveW );\n' + L.replace(a, a + '\n\t\tdirectLight.color *= caveK;');
+  C.lights_fragment_end = `{
+	float caveAmb = mix( 0.012, 1.0, caveK );
+	irradiance *= caveAmb;
+	iblIrradiance *= caveAmb;
+	#if defined( RE_IndirectSpecular )
+		radiance *= caveAmb;
+		clearcoatRadiance *= caveAmb;
+	#endif
+}
+` + C.lights_fragment_end;
+}
+
+export function patchShaders({ sunDir, sunFog, shadowHalf, shadowDepth, cascades = null, sunAngleDeg = 1.6, fogFalloff = 1 / 420 }) {
+  const C = THREE.ShaderChunk;
+  // Every light has a size: the sun's disc (and a lamp's bulb) widens the specular lobe a little (alpha + 0.014, the
+  // sun's ~0.8 deg radius). On glass and clear coat at roughness 0.03 the sun's highlight was a 2-pixel spike thousands
+  // of times too bright, which the bloom turned into a square ("the light in reflective stuff looks squary").
+  // Direct light only: the sky's reflections keep their sharpness.
+  if (!C.lights_physical_pars_fragment.includes('LIGHT_SIZE_ALPHA')) {
+    C.lights_physical_pars_fragment = '#define LIGHT_SIZE_ALPHA 0.014\n' + C.lights_physical_pars_fragment.replace(
+      /float alpha = pow2\( roughness \);(\s*)vec3 halfDir/g, 'float alpha = pow2( roughness ) + LIGHT_SIZE_ALPHA;$1vec3 halfDir');
+  }
+  const pen = (half, depth) => ((depth * Math.tan(THREE.MathUtils.degToRad(sunAngleDeg))) / (2 * half)).toFixed(6);
+  // ---- PCSS (one map), and the sun's three cascades: a tight map round the ship (hull detail), one round the pack, a
+  // wide one ahead
+  const pcss = /* glsl */`
+	vec2 pcssSpiral( int i, float n ) {
+		float r = sqrt( ( float( i ) + 0.5 ) / n ), a = float( i ) * 2.39996323;
+		return r * vec2( cos( a ), sin( a ) );
+	}
+	float pcssLerp( sampler2D map, vec2 size, vec2 uv, float z ) {
+		vec2 t = 1.0 / size, c = uv * size - 0.5, f = fract( c ), b = ( floor( c ) + 0.5 ) * t;
+		float a = step( z, unpackRGBAToDepth( textureLod( map, b, 0.0 ) ) );
+		float bx = step( z, unpackRGBAToDepth( textureLod( map, b + vec2( t.x, 0.0 ), 0.0 ) ) );
+		float by = step( z, unpackRGBAToDepth( textureLod( map, b + vec2( 0.0, t.y ), 0.0 ) ) );
+		float bxy = step( z, unpackRGBAToDepth( textureLod( map, b + t, 0.0 ) ) );
+		return mix( mix( a, bx, f.x ), mix( by, bxy, f.x ), f.y );
+	}
+	float pcssCore( sampler2D map, vec2 size, vec3 sc, float penK ) {
+		// blockers: within the widest penumbra this map can show (24 texels)
+		float search = 24.0 / size.x, zsum = 0.0, nb = 0.0;
+		for ( int i = 0; i < 16; i ++ ) {
+			float d = unpackRGBAToDepth( textureLod( map, sc.xy + pcssSpiral( i, 16.0 ) * search, 0.0 ) );
+			if ( d < sc.z ) { zsum += d; nb += 1.0; }
+		}
+		if ( nb < 0.5 ) return 1.0;
+		// penumbra (shadow-map uv) = blocker-to-receiver depth x tan(sun angle), at least 2.5 texels of filtering (less
+		// let the caster's outline, drawn in texels, show through as a wavy staircase)
+		float pen = clamp( ( sc.z - zsum / nb ) * penK, 2.5 / size.x, search );
+		// each tap a bilinear blend of its four texels' tests: binary taps snapped every edge to the texel grid and a
+		// hull's shadow edges came out as staircases ("a way to fix this aa?"); a wide penumbra gets more taps
+		int n = pen * size.x < 4.0 ? 12 : 24;
+		float lit = 0.0;
+		for ( int i = 0; i < 24; i ++ ) {
+			if ( i >= n ) break;
+			lit += pcssLerp( map, size, sc.xy + pcssSpiral( i, float( n ) ) * pen, sc.z );
+		}
+		return lit / float( n );
+	}
+	float pcssShadow( sampler2D map, vec2 size, vec3 sc ) {
+		// fade out toward the box's border: a caster half inside the box (a gantry ahead) was cut into a dark
+		// triangle that grew and shrank as the box followed the ship
+		float border = min( min( sc.x, 1.0 - sc.x ), min( sc.y, 1.0 - sc.y ) );
+		return mix( 1.0, pcssCore( map, size, sc, ${pen(shadowHalf, shadowDepth)} ), smoothstep( 0.0, 0.14, border ) );
+	}
+	float getShadow(`;
+  let s = C.shadowmap_pars_fragment;
+  if (!s.includes('float getShadow(') || s.split('if ( frustumTest ) {').length !== 2) throw new Error('shadow chunk changed: PCSS patch not applied');
+  s = s.replace('\tfloat getShadow(', pcss);
+  s = s.replace('if ( frustumTest ) {',
+    'if ( frustumTest ) {\n\t\t\treturn mix( 1.0, pcssShadow( shadowMap, shadowMapSize, shadowCoord.xyz ), shadowIntensity );');
+  if (cascades) {
+    s += /* glsl */`
+#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS >= 3
+	float cascadeLevel( sampler2D map, vec2 size, vec4 coord, float bias, float penK, out float inside ) {
+		vec3 sc = coord.xyz / coord.w;
+		sc.z += bias;
+		float border = min( min( sc.x, 1.0 - sc.x ), min( sc.y, 1.0 - sc.y ) );
+		inside = ( sc.z <= 1.0 ) ? smoothstep( 0.0, 0.1, border ) : 0.0;
+		if ( inside <= 0.0 ) return 1.0;
+		return pcssCore( map, size, sc, penK );
+	}
+	// the finest map that covers the point, blending to the next one out across its outer 10 %: the ship's, then the
+	// mid box round the pack, then the wide one ahead (each looked up only where it is needed)
+	float cascadeShadow() {
+		float in0, in1, in2;
+		float s0 = cascadeLevel( directionalShadowMap[ 0 ], directionalLightShadows[ 0 ].shadowMapSize, vDirectionalShadowCoord[ 0 ],
+			directionalLightShadows[ 0 ].shadowBias, ${pen(cascades[0].half, cascades[0].depth)}, in0 );
+		if ( in0 >= 0.999 ) return s0;
+		float s1 = cascadeLevel( directionalShadowMap[ 1 ], directionalLightShadows[ 1 ].shadowMapSize, vDirectionalShadowCoord[ 1 ],
+			directionalLightShadows[ 1 ].shadowBias, ${pen(cascades[1].half, cascades[1].depth)}, in1 );
+		if ( in1 >= 0.999 ) return mix( s1, s0, in0 );
+		float s2 = cascadeLevel( directionalShadowMap[ 2 ], directionalLightShadows[ 2 ].shadowMapSize, vDirectionalShadowCoord[ 2 ],
+			directionalLightShadows[ 2 ].shadowBias, ${pen(cascades[2].half, cascades[2].depth)}, in2 );
+		return mix( mix( mix( 1.0, s2, in2 ), s1, in1 ), s0, in0 );
+	}
+#endif`;
+    const L = C.lights_fragment_begin;
+    const old = `\t\t#if defined( USE_SHADOWMAP ) && ( UNROLLED_LOOP_INDEX < NUM_DIR_LIGHT_SHADOWS )
+\t\tdirectionalLightShadow = directionalLightShadows[ i ];
+\t\tdirectLight.color *= ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;
+\t\t#endif`;
+    if (!L.includes(old)) throw new Error('lights chunk changed: cascade patch not applied');
+    // light 0 is the sun (all three cascades), lights 1 and 2 only carry the mid and far maps (intensity 0: no light)
+    C.lights_fragment_begin = L.replace(old, `\t\t#if defined( USE_SHADOWMAP ) && ( UNROLLED_LOOP_INDEX < NUM_DIR_LIGHT_SHADOWS )
+\t\t#if NUM_DIR_LIGHT_SHADOWS >= 3
+\t\t#if UNROLLED_LOOP_INDEX == 0
+\t\tdirectLight.color *= ( directLight.visible && receiveShadow ) ? cascadeShadow() : 1.0;
+\t\t#endif
+\t\t#else
+\t\tdirectionalLightShadow = directionalLightShadows[ i ];
+\t\tdirectLight.color *= ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;
+\t\t#endif
+\t\t#endif`);
+  }
+  C.shadowmap_pars_fragment = s;
+
+  // ---- height fog with sun in-scatter (fogDensity = extinction per metre at y = 0)
+  C.fog_pars_vertex = '#ifdef USE_FOG\n\tvarying float vFogDepth;\n\tvarying vec3 vFogWorld;\n#endif';
+  C.fog_vertex = /* glsl */`#ifdef USE_FOG
+	vFogDepth = - mvPosition.z;
+	vFogWorld = ( vec4( mvPosition.xyz - viewMatrix[ 3 ].xyz, 0.0 ) * viewMatrix ).xyz;
+#endif`;
+  C.fog_pars_fragment = /* glsl */`#ifdef USE_FOG
+	uniform vec3 fogColor;
+	varying float vFogDepth;
+	varying vec3 vFogWorld;
+	#ifdef FOG_EXP2
+		uniform float fogDensity;
+	#else
+		uniform float fogNear;
+		uniform float fogFar;
+	#endif
+#endif`;
+  C.fog_fragment = /* glsl */`#ifdef USE_FOG
+	#ifdef FOG_EXP2
+		vec3 fogRay = vFogWorld - cameraPosition;
+		float fogDist = length( fogRay );
+		vec3 fogDir = fogRay / max( fogDist, 1e-3 );
+		float fogK = ${fogFalloff.toFixed(6)}, fogY = fogDir.y * fogDist * fogK;
+		float fogOD = fogDensity * exp( - fogK * max( cameraPosition.y, 0.0 ) ) * fogDist *
+			( abs( fogY ) > 1e-4 ? ( 1.0 - exp( - fogY ) ) / fogY : 1.0 );
+		float fogFactor = 1.0 - exp( - fogOD );
+		float fogSun = pow( max( dot( fogDir, ${v3(sunDir)} ), 0.0 ), 6.0 );
+		vec3 fogCol = mix( fogColor, ${v3(sunFog)}, fogSun * 0.65 );
+	#else
+		float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+		vec3 fogCol = fogColor;
+	#endif
+	gl_FragColor.rgb = mix( gl_FragColor.rgb, fogCol, fogFactor );
+#endif`;
+}

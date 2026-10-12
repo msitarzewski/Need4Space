@@ -1,0 +1,548 @@
+// Feather S1 flight test: boots the map (the space circuit, or ?map=meadow), loads the ship, runs the loop.
+// Space has two modes: RACE (anti-grav on the track, WipEout-style) and FREE flight (G toggles).
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { MeadowWorld, SUN_DIR as MEADOW_SUN, SUN_FOG } from './world.js';
+import { SpaceWorld, SUN_DIR as SPACE_SUN, SHADOW_HALF, SHADOW_NEAR, SHADOW_FAR, MID_HALF, MID_NEAR, MID_FAR, FAR_HALF, FAR_NEAR, FAR_FAR } from './space.js';
+import { TrackRacer, TRACK_W } from './track.js';
+import { patchShaders } from './look.js';
+import { smoothstep } from './noise.js';
+import { loadShip } from './ship.js';
+import { Flight } from './flight.js';
+import { CameraRig } from './camera.js';
+import { Input } from './input.js';
+import { FX } from './fx.js';
+import { HUD } from './hud.js';
+import { GameAudio } from './audio.js';
+import { agxPass, speedBlurPass, LayeredRenderPass, DeckSSRPass, StreakPass, BloomPass } from './post.js';
+import { Settings } from './settings.js';
+import { Race, Driver } from './race.js';
+import { Menu } from './menu.js';
+
+const MAP = new URLSearchParams(location.search).get('map') === 'meadow' ? 'meadow' : 'space';
+const SHIP_URL = 'assets/racer_web.glb';
+const LUTS = ['assets/agx_punchy_lut65.bin', 'assets/agx_mhc_lut65.bin'];   // Blender's AgX looks: Punchy, Medium High Contrast
+const status = (t) => (document.getElementById('loadtext').textContent = t);
+// let the loading text paint between steps (a timer too: a hidden tab never gets an animation frame)
+const nextFrame = () => new Promise((r) => { requestAnimationFrame(() => r()); setTimeout(r, 50); });
+
+async function boot() {
+  const sunDir = MAP === 'space' ? SPACE_SUN : MEADOW_SUN;
+  patchShaders({ sunDir, sunFog: SUN_FOG, shadowHalf: MAP === 'space' ? FAR_HALF : 22, shadowDepth: 200,
+    cascades: MAP === 'space' ? [{ half: SHADOW_HALF, depth: SHADOW_FAR - SHADOW_NEAR }, { half: MID_HALF, depth: MID_FAR - MID_NEAR },
+      { half: FAR_HALF, depth: FAR_FAR - FAR_NEAR }] : null });
+  const canvas = document.getElementById('view');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;    // used only by the ACES setting (OutputPass)
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;           // the filtering is PCSS (look.js)
+
+  const scene = new THREE.Scene();
+  // world matrices are brought up to date once a frame (render()), not by each of the frame's six scene renders
+  scene.matrixWorldAutoUpdate = false;
+  const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.2, 30000);
+  scene.add(camera);                                       // the speed streaks ride on the camera
+
+  status(MAP === 'space' ? 'Building the circuit' : 'Raising the hills');
+  await nextFrame();
+  const world = MAP === 'space' ? new SpaceWorld(scene, renderer, camera) : new MeadowWorld(scene, renderer);
+
+  status('Loading the Feather S1');
+  const ship = await loadShip(SHIP_URL, (e) => {
+    if (e.total) status(`Loading the Feather S1  ${(e.loaded / 1e6).toFixed(1)} / ${(e.total / 1e6).toFixed(1)} MB`);
+  });
+  ship.upgradeMaterials(renderer.capabilities.getMaxAnisotropy(), renderer);
+  scene.add(ship.root);
+  console.info(`ship: ${Math.round(ship.tris)} tris, ${ship.rotors.length} rotors, canopy ${!!ship.canopy}, ` +
+    `plumes ${ship.plumes.length}, tangents repaired ${ship.tangentsFixed}`);
+
+  const flight = new Flight(ship, world, world);
+  if (MAP === 'space') flight.gravity = 0;
+  const track = world.track || null;
+  const racer = track ? new TrackRacer(ship, track) : null;
+  // eight rivals, cloned before the player's ship first animates (their canopies and rotors start at rest)
+  status('Rolling out the rivals');
+  const race = racer ? new Race(scene, track, ship, racer) : null;
+  let mode = racer ? 'race' : 'free';
+  let ctl = racer || flight;
+  const rig = new CameraRig(camera, world);
+  const START = world.startIndex;
+  const mm = world.minimap;
+  const heading = (i) => { const j = (i + 15) % mm.n; return Math.atan2(-(mm.px[j] - mm.px[i]), -(mm.pz[j] - mm.pz[i])); };
+  const placeStart = (hover) => {
+    if (mode === 'race') race.reset();
+    else if (MAP === 'meadow') flight.place(mm.px[START], mm.pz[START], heading(START), hover);
+    else {                                               // free flight in space starts over the start line
+      flight.place(0, 0, 0, false);
+      flight.pos.copy(track.P[track.start]).addScaledVector(track.U[track.start], 6);
+      flight.q.setFromRotationMatrix(new THREE.Matrix4().makeBasis(track.R[track.start], track.U[track.start], track.T[track.start].clone().negate()));
+    }
+    ship.clearTrails();
+    rig.snap(ctl);
+  };
+  const setMode = (m) => {
+    if (!racer || m === mode) return;
+    if (m === 'free') {                                  // leave the track with the racer's pose and speed
+      flight.pos.copy(racer.pos); flight.q.copy(racer.q); flight.vel.copy(racer.vel);
+      flight.throttle = racer.throttle; flight.rate.set(0, 0, 0);
+    } else {                                             // back onto the deck nearest the ship
+      const i = track.nearestIndex(flight.pos);
+      racer.place(i * track.step, ship.engineOn);
+      racer.vs = Math.max(0, flight.vel.dot(track.T[i]));
+      racer.throttle = flight.throttle;
+    }
+    mode = m;
+    ctl = m === 'race' ? racer : flight;
+    rig.rollFollow = m === 'race' ? 1 : 0.6;
+    rig.anchorFn = m === 'race' ? trackAnchor : null;
+    rig.snap(ctl);
+    ship.clearTrails();
+  };
+  // the fly-by camera on the track: ahead along the circuit, outside a wall, above the deck there
+  const trackAnchor = (lead) => {
+    const f = track.frame(racer.s + lead);
+    return f.P.clone().addScaledVector(f.R, (Math.random() < 0.5 ? -1 : 1) * (TRACK_W / 2 + 12 + Math.random() * 10))
+      .addScaledVector(f.U, 6 + Math.random() * 10);
+  };
+  rig.rollFollow = mode === 'race' ? 1 : 0.6;
+  rig.anchorFn = mode === 'race' ? trackAnchor : null;
+  // the chase camera stays at least 2.4 m over the deck behind the ship (inside a loop the deck curves up behind it)
+  const camF = {};
+  rig.deckFn = (p) => {
+    if (mode !== 'race' || !track) return;
+    const back = racer.s - 15;
+    if (track.inGap(back)) return;
+    track.frame(back, camF);
+    const d = p.clone().sub(camF.P), h = d.dot(camF.U);
+    if (Math.abs(d.dot(camF.R)) < 40 && h < 2.4) p.addScaledVector(camF.U, 2.4 - h);
+  };
+  placeStart(false);
+  // ship lights for the meteorite tunnel: the player's headlight (faint in daylight, full in the dark) and three
+  // lights that follow the nearest rivals' engines through it (a fixed number: no shader recompiles mid-race)
+  const headlight = new THREE.SpotLight(0xe4ecff, 0, 300, 0.45, 0.6, 1.5);
+  headlight.position.set(0, 0.9, -6.5);
+  headlight.target.position.set(0, -4, -70);
+  ship.root.add(headlight, headlight.target);
+  const rivalLights = [0, 1, 2].map(() => { const l = new THREE.PointLight(0xffffff, 0, 70, 1.6); scene.add(l); return l; });
+  const input = new Input(canvas);
+  const fx = new FX(scene, camera);
+  fx.track = track;
+  const hud = new HUD(mm, START);
+  const audio = new GameAudio();
+  audio.prepareMusic();                              // rendered off the main thread while the game loads
+
+  // post: sky + scene (HDR, 4x MSAA in the first pass only) + NaN guard -> AO -> deck reflections -> bloom -> streaks
+  // -> speed blur -> Blender's AgX (or ACES); the chain's own targets are plain (no samples, no depth)
+  const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, depthBuffer: false });
+  const composer = new EffectComposer(renderer, rt);
+  const scenePass = new LayeredRenderPass(world.sky || null, world.skyCam || null, scene, camera);
+  composer.addPass(scenePass);
+  const gtao = new GTAOPass(scene, camera, innerWidth, innerHeight);
+  gtao.output = GTAOPass.OUTPUT.Default;
+  gtao.blendIntensity = 1.0;
+  gtao.updateGtaoMaterial({ radius: 0.9, distanceExponent: 1.6, thickness: 2.0, scale: 1.15, samples: 16 });
+  gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
+  const gtaoRender = gtao.render.bind(gtao);
+  const tp = track ? track.parts : null;
+  const noAO = () => [...(world.noAO || []), ...ship.fxObjects(), ...fx.pools.map((p) => p.points), fx.streaks.lines, fx.ring, fx.marks.mesh,
+    ...(tp ? [...tp.fields, ...tp.pads, ...tp.lanes, ...tp.gates.filter((m) => m.material.isShaderMaterial), tp.tunnel[0]].filter(Boolean) : []), ...(race ? race.noAO() : []), ...fx.waves,
+    ...(world.dust ? [world.dust] : [])];
+  gtao.render = (...a) => {        // glows, plumes, trails, particles, fields and decals must not occlude anything
+    const hide = noAO().filter((o) => o.visible);
+    hide.forEach((o) => (o.visible = false));
+    gtaoRender(...a);
+    hide.forEach((o) => (o.visible = true));
+  };
+  composer.addPass(gtao);
+  // reflections on the deck (uses the AO pass's depth and normals: off with AO)
+  const ssr = new DeckSSRPass(scene, camera, gtao);
+  if (track) {
+    track.parts.deck.layers.enable(5);
+    composer.addPass(ssr);
+  } else ssr.enabled = false;
+  // only what is really bright, a tight halo (at 0.45 / threshold 1.1 every light strip hazed into white); the
+  // dual-filter bloom (post.js): no squares round a glint
+  const bloom = new BloomPass({ threshold: 2.6, knee: 1.0, strength: 0.9, radius: 0.62 });
+  composer.addPass(bloom);
+  const streaks = new StreakPass();
+  composer.addPass(streaks);
+  const blur = speedBlurPass();
+  composer.addPass(blur);
+  status('Loading the colour transform');
+  const agx = await agxPass(LUTS);
+  const output = new OutputPass();
+  composer.addPass(agx);
+  composer.addPass(output);
+  // SMAA on the finished, tone-mapped picture: MSAA smooths geometry edges only (and its HDR resolve leaves bright
+  // edges stepped); SMAA also takes the stair-steps off shading, highlights and thin glowing lines
+  const smaa = new SMAAPass(innerWidth, innerHeight);
+  composer.addPass(smaa);
+  let pixelRatio = Math.min(devicePixelRatio, 2), blurOn = true;
+  const resize = () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setPixelRatio(pixelRatio);
+    composer.setPixelRatio(pixelRatio);
+    renderer.setSize(innerWidth, innerHeight);
+    composer.setSize(innerWidth, innerHeight);
+  };
+  addEventListener('resize', resize);
+  const fpsEl = document.getElementById('fps');
+  const sunLights = world.sun ? [world.sun, world.sunMid, world.sunFar] : [world.sunL.sun];
+  const settings = new Settings((v) => {
+    agx.enabled = v.tonemap !== 'aces';
+    agx.setLook(v.tonemap === 'agx' ? 1 : 0);
+    output.enabled = !agx.enabled;
+    agx.uniforms.exposure.value = Math.pow(2, v.exposure);
+    renderer.toneMappingExposure = 0.95 * Math.pow(2, v.exposure);
+    gtao.enabled = v.ao;
+    smaa.enabled = v.aa !== 'msaa';
+    const samples = v.aa === 'high' ? 8 : 4;                 // the scene's MSAA (a new target when it changes)
+    if (scenePass.msaa.samples !== samples) { scenePass.msaa.samples = samples; scenePass.msaa.dispose(); }
+    ssr.enabled = !!track && v.ao && v.reflections;
+    streaks.enabled = v.streaks;
+    bloom.enabled = v.bloom;
+    blurOn = v.blur;
+    const size = { high: 4096, medium: 2048 }[v.shadows];
+    if (renderer.shadowMap.enabled !== !!size) {
+      renderer.shadowMap.enabled = !!size;
+      scene.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => (m.needsUpdate = true)); });
+    }
+    for (const l of sunLights) {
+      if (size && l.shadow.mapSize.x !== size) {
+        l.shadow.mapSize.set(size, size);
+        l.shadow.map?.dispose();
+        l.shadow.map = null;
+      }
+    }
+    pixelRatio = Math.min(devicePixelRatio, 2) * v.scale;
+    resize();
+    fpsEl.style.display = v.fps ? '' : 'none';
+    race?.setDifficulty(v.ai);                       // the rivals' AI difficulty (race.js AI_LEVELS)
+    audio.setLevels(v.music, v.sfx);                 // music and effects volume
+  });
+
+  const lap = { started: false, time: 0, last: Infinity, best: Infinity, lap: 1, idx: START, progress: 0, s: 0 };
+  let autoChase = false, wasCrashed = false, t = 0;
+  document.getElementById('loading').classList.add('done');
+
+  const FIXED = 1 / 120;
+  let acc = 0, last = performance.now();
+  const render = () => { scene.updateMatrixWorld(); composer.render(); };
+  // drawn between the last two physics steps: at 144 Hz a frame got 0, 1 or 2 steps of 8.3 ms, and everything that
+  // moves juddered against the camera
+  const keep = (m) => {
+    (m.pPos ||= new THREE.Vector3()).copy(m.pos);
+    (m.pQ ||= new THREE.Quaternion()).copy(m.q);
+    (m.pCamQ ||= new THREE.Quaternion()).copy(m.camQ || m.q);
+  };
+  const between = (m, a) => {
+    if (!m.pPos || m.pPos.distanceToSquared(m.pos) > 400) keep(m);     // a reset or a respawn: nothing in between
+    (m.rPos ||= new THREE.Vector3()).lerpVectors(m.pPos, m.pos, a);
+    (m.rQ ||= new THREE.Quaternion()).slerpQuaternions(m.pQ, m.q, a);
+    (m.rCamQ ||= new THREE.Quaternion()).slerpQuaternions(m.pCamQ, m.camQ || m.q, a);
+  };
+  // test hooks: __feather.state(), __feather.advance(seconds) (ticks without frames), __feather.shot(name)
+  window.__feather = { ship, flight, racer, race, rig, world, track, input, lap, THREE, scene, renderer, composer, bloom, gtao, ssr, streaks,
+    agx, camera, fx, settings, render, audio,
+    get ctl() { return ctl; }, get mode() { return mode; }, setMode,
+    state: () => ({ mode, x: ctl.pos.x, y: ctl.pos.y, z: ctl.pos.z, s: racer ? racer.s : 0, lat: racer ? racer.x : 0,
+      speed: ctl.speed, agl: ctl.agl, power: ship.power, spin: ship.spin, canopy: ship.canopyT, throttle: ctl.throttle,
+      cam: rig.mode, crashed: ctl.crashed, lap: lap.lap, lapTime: lap.time }) };
+
+  let fpsN = 0, fpsT = 0;
+  function frame(now) {
+    const raw = (now - last) / 1000, dt = Math.min(0.05, raw);
+    last = now;
+    tick(menu.paused ? 0 : dt);                          // paused: a frame with no time in it (no physics, nothing moves)
+    render();
+    fpsN++; fpsT += raw;
+    if (fpsT > 0.5) { fpsEl.textContent = `${Math.round(fpsN / fpsT)} fps  ${(1000 * fpsT / fpsN).toFixed(1)} ms`; fpsN = fpsT = 0; }
+    requestAnimationFrame(frame);
+  }
+  window.__feather.shot = async (name, w = 1920, h = 1080) => {
+    const ow = innerWidth, oh = innerHeight, pr = renderer.getPixelRatio();
+    renderer.setPixelRatio(1);
+    renderer.setSize(w, h, false); composer.setPixelRatio(1); composer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+    world.update?.(t, camera, ship.root.position, racer ? racer.s : 0, renderer);
+    render();
+    const blob = await new Promise((r) => renderer.domElement.toBlob(r, 'image/png'));
+    renderer.setPixelRatio(pr);
+    renderer.setSize(ow, oh, false); composer.setPixelRatio(pr); composer.setSize(ow, oh); camera.aspect = ow / oh; camera.updateProjectionMatrix();
+    await fetch('/shot/' + name, { method: 'POST', body: blob });
+    return name;
+  };
+  window.__feather.advance = (sec, step = 1 / 60) => {
+    for (let k = 0; k < sec; k += step) tick(step);
+    render();
+    return window.__feather.state();
+  };
+
+  // the menus (menu.js): the title over the grid, difficulty, pause (Esc), settings (O), controls, the results' actions
+  const resetLap = () => Object.assign(lap, { started: false, time: 0, idx: START, progress: 0 });
+  const engines = () => {                                // the engines on, as E does; the chase camera takes over once ready
+    if (ship.engineOn) return;
+    ship.setEngine(true);
+    hud.hideHelp();
+    autoChase = true;
+    hud.message(ship.canopyT > 0.05 ? 'Canopy closing  -  engines starting' : 'Engines starting');
+  };
+  const heroOrbit = () => { rig.mode = 'orbit'; Object.assign(rig.orbit, { yaw: 2.35, pitch: 0.16, dist: 22 }); rig.anchor = null; rig.idle = 0; };
+  let pilot = null;                                      // past the flag the rivals' AI flies the player's cool-down lap
+  const menu = new Menu({ settings, hud, input, rig, camera, race, track, ship, world,
+    mode: () => mode, engineOn: () => ship.engineOn, focus: () => ship.root.position,
+    status: () => ({ race: race && mode === 'race' ? race.hud() : null }),
+    startRace: () => { hud.hideResults(); setMode('race'); placeStart(false); resetLap(); heroOrbit(); engines(); },
+    freeFlight: (fromTitle) => {
+      hud.hideResults();
+      setMode('free');
+      if (fromTitle) { placeStart(false); resetLap(); heroOrbit(); engines(); } else hud.message('Free flight', 1.6);
+    },
+    restart: () => {
+      if (race && mode === 'race') hud.hideResults();
+      placeStart(ship.engineOn);
+      resetLap();
+      hud.message(race && mode === 'race' ? 'Back on the grid' : 'Back at the start', 1.5);
+    },
+    quit: () => {                                        // back to the title: the grid, engines winding down, canopies open
+      hud.hideResults();
+      hud.hideHelp();
+      setMode('race');
+      for (const e of race ? race.entries : [{ ship }]) { e.ship.setEngine(false); e.ship.canopyOpen = true; }
+      wasCrashed = autoChase = false;
+      placeStart(false);
+      resetLap();
+      rig.mode = 'orbit';
+    } });
+  window.__feather.menu = menu;
+  Object.defineProperty(window.__feather, 'paused', { get: () => menu.paused, enumerable: true });
+  menu.showTitle();
+
+  function tick(dt) {
+    t += dt;
+    const inp = input.read(dt);
+    menu.filter(inp);                                    // a menu up: the keys and buttons are its, not the game's
+    if (race && mode === 'race' && race.player.finished) {
+      if (!pilot) { pilot = new Driver(race.player, race, () => 0.5, race.player.slot); pilot.odo = 1e4; }
+      Object.assign(inp, pilot.coast(dt));               // past the flag: the AI flies the cool-down lap
+    } else pilot = null;
+    if (inp.engine || inp.click || inp.canopy) audio.start();
+
+    if (inp.engine && ctl.crashed <= 0) {
+      if (!ship.engineOn) {
+        ship.setEngine(true);
+        hud.hideHelp();                          // H brings it back
+        autoChase = rig.mode === 'orbit';
+        hud.message(ship.canopyT > 0.05 ? 'Canopy closing  -  engines starting' : 'Engines starting');
+      } else if (ctl.speed < 15 && (mode === 'race' || ctl.agl < 4)) {
+        ship.setEngine(false);
+        hud.message('Engines shutting down');
+      } else hud.message(mode === 'race' ? 'Slow down to shut the engines down' : 'Slow down and descend to shut the engines down');
+    }
+    if (inp.canopy && !ship.toggleCanopy()) hud.message('The canopy is locked while the engines run');
+    if (inp.camera) {
+      rig.next();
+      autoChase = false;
+      if (rig.mode === 'orbit') input.unlock();
+      hud.message(rig.name, 1.2);
+    }
+    if (inp.mode && racer) {
+      if (mode === 'race' && (race.state === 'countdown' || race.state === 'racing')) hud.message('Finish the race first (R restarts it)', 2);
+      else {
+        setMode(mode === 'race' ? 'free' : 'race');
+        hud.message(mode === 'race' ? 'Race: on the track' : 'Free flight', 1.6);
+      }
+    }
+    if (inp.click && rig.mode !== 'orbit' && !settings.open) input.lock();
+    if (inp.help) hud.toggleHelp();
+    if (inp.settings) menu.openSettings();             // O: the settings over the paused game
+    if (inp.mute) hud.message(audio.toggleMute() ? 'Sound off' : 'Sound on', 1.2);
+    if (inp.assist) { ctl.assist = !ctl.assist; hud.message(`Assist ${ctl.assist ? 'on' : 'off'}`, 1.5); }
+    if (inp.invert) { input.invert = !input.invert; hud.message(`Pitch ${input.invert ? 'flight-sim (inverted)' : 'arcade'}`, 1.5); }
+    if (inp.reset) {
+      if (race) { setMode('race'); hud.hideResults(); }
+      placeStart(ship.engineOn);
+      Object.assign(lap, { started: false, time: 0, idx: START, progress: 0 });
+      hud.message('Back at the start', 1.5);
+    }
+    if (inp.respawn) {
+      if (mode === 'race') { racer.place(racer.s, ship.engineOn); }
+      else if (MAP === 'meadow') { const n = world.road.nearest(flight.pos.x, flight.pos.z); flight.place(mm.px[n.i], mm.pz[n.i], heading(n.i), ship.engineOn); }
+      else setMode('race');
+      ship.clearTrails();
+      rig.snap(ctl);
+      hud.message(MAP === 'meadow' ? 'Back on the road' : 'Back on the track', 1.5);
+    }
+    if (autoChase && ship.ready) {
+      autoChase = false;
+      if (rig.mode === 'orbit') { menu.blend(1.3); rig.mode = 'chase'; rig.snap(ctl); hud.message('Ready  -  W throttle, A / D steer, Shift boost', 3); }
+    }
+
+    // physics at a fixed 120 Hz
+    const movers = race ? race.entries.map((e) => e.racer) : [];
+    if (!movers.includes(ctl)) movers.push(ctl);
+    acc += dt;
+    while (acc >= FIXED) {
+      for (const m of movers) keep(m);
+      if (race && mode === 'race') race.step(FIXED, inp, true);
+      else { ctl.step(FIXED, inp); race?.step(FIXED, null, false); }
+      acc -= FIXED;
+    }
+    if (race) {
+      for (const e of race.events) {
+        if (e.type === 'padfx') {
+          const pad = track.pads[e.i];
+          track.padFlash(e.i);
+          if (camera.position.distanceTo(e.at) < 400) fx.padBurst(pad.at, pad.basis, e.player && mode === 'race');
+          if (!(e.player && mode === 'race')) audio.pad(pad.at);
+          if (e.player && mode === 'race') {
+            ship.boostKick = 1;
+            rig.shake = Math.max(rig.shake, 0.4);
+            audio.whoosh();
+            hud.flash('rgba(255,140,30,0.55)');
+          }
+        } else if (e.type === 'wallfx') {
+          track.fieldHit(e.at, e.v / 14);
+          audio.wall(e.at, e.v, e.player && mode === 'race');
+          if (e.player && mode === 'race') hud.flash('rgba(90,170,255,0.35)', 0.35);
+        } else if (e.type === 'fall') {
+          audio.fall(e.player && mode === 'race');
+          if (e.player && mode === 'race') {
+            hud.message('Fell into the gap!', 2);
+            hud.flash('rgba(255,60,40,0.4)', 0.5);
+            ship.clearTrails();
+            rig.snap(ctl);
+          }
+        } else if (e.type === 'go') { hud.message('GO!', 1.2); audio.go(); }
+        else if (e.type === 'lap') { audio.lap(); hud.message(`Lap ${e.lap}: ${e.time.toFixed(2)} s${e.clean ? '  -  clean lap +5' : ''}`, 3); }
+        else if (e.type === 'finish') { audio.finish(); hud.message(`Finished P${e.pos}!`, 3); }
+        else if (e.type === 'bump') { fx.scrape(e.at, ctl.vel, e.v / 15); rig.shake = Math.max(rig.shake, Math.min(0.7, e.v / 15)); audio.bump(e.at, e.v); }
+        else if (e.type === 'scrape') {
+          if (camera.position.distanceTo(e.at) < 200) fx.scrape(e.at, new THREE.Vector3(), e.v / 20);
+          audio.scrape(e.at, e.v);
+        }
+      }
+      race.events.length = 0;
+      if (race.state === 'finished' && !race.shown && race.time - race.finishedAt > 2) {
+        race.shown = true;
+        hud.showResults(race.results(), race.score, race.total);
+      }
+    }
+    for (const e of ctl.events) {
+      if (e.type === 'crash') {
+        fx.explode(e.at, ctl.vel);
+        rig.shake = 1.4;
+        audio.crash(e.at);
+        ship.engineOn = false;
+        wasCrashed = true;
+        hud.message(e.kind === 'tree' ? 'Hit a tree!' : 'Crashed!', 2.5);
+      } else if (e.type === 'scrape') {
+        fx.scrape(e.at, ctl.vel, e.v / 20);
+        rig.shake = Math.max(rig.shake, Math.min(0.6, e.v / 20));
+        audio.thud(Math.min(0.6, e.v / 20));
+      }
+    }
+    ctl.events.length = 0;
+    if (wasCrashed && ctl.crashed <= 0) {
+      wasCrashed = false;
+      if (MAP === 'meadow') { const n = world.road.nearest(flight.pos.x, flight.pos.z); flight.place(mm.px[n.i], mm.pz[n.i], heading(n.i), true); }
+      else setMode('race');
+      ship.engineOn = true;
+      ship.power = ship.spin = ship.avionics = 1;
+      ship.canopyOpen = false;
+      ship.canopyT = 0;
+      rig.snap(ctl);
+      hud.message('Respawned', 2);
+    }
+
+    for (const m of movers.includes(ctl) ? movers : [...movers, ctl]) between(m, acc / FIXED);
+    const view = Object.create(ctl);                     // the controller as drawn: its in-between pose
+    view.pos = ctl.rPos; view.q = ctl.rQ; view.camQ = ctl.rCamQ;
+    ship.root.position.copy(ctl.rPos);
+    ship.root.quaternion.copy(ctl.rQ);
+    ship.root.updateMatrixWorld(true);
+    ship.update(dt, { throttle: ctl.throttle, boost: ctl.boosting, speed: ctl.speed, turn: ctl.turn,
+      ...(mode === 'race' ? racer.animState() : {}) }, scene, camera);
+    if (MAP === 'meadow') fx.hover(flight, world, world.road.distance(flight.pos.x, flight.pos.z) < 12, dt);
+    const focalPx = renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+    race?.visuals(dt, camera, fx, scene, focalPx);
+    fx.exhaust(ship, ctl, dt);
+    fx.update(dt, camera, ctl);
+    const sb = blurOn ? 0.035 * smoothstep(160, 330, ctl.speed) + 0.03 * ctl.boosting + 0.04 * fx.kick : 0;
+    blur.uniforms.strength.value = sb;
+    blur.enabled = sb > 0.001;
+    rig.kick = fx.kick;
+    if (track) {
+      const dark = 1 - track.caveLight(ship.root.position);
+      headlight.intensity = ship.power * 16000 * dark;          // only in the meteorite ("start flashlights only in the meteorite")
+      for (const l of ship.exhaustLights) l.intensity *= 1 + 4 * dark;
+      const inCave = race ? race.entries.filter((e) => !e.player && track.caveLight(e.ship.root.position) < 0.7)
+        .sort((a, b) => a.ship.root.position.distanceToSquared(camera.position) - b.ship.root.position.distanceToSquared(camera.position)) : [];
+      rivalLights.forEach((l, k) => {
+        const e = inCave[k];
+        if (!e) { l.intensity = 0; return; }
+        l.position.set(0, 0.8, 7).applyMatrix4(e.ship.root.matrixWorld);
+        l.color.copy(e.ship.engineColor).lerp(new THREE.Color(1, 1, 1), 0.35);
+        l.intensity = 900 * e.ship.power * (1 - track.caveLight(e.ship.root.position));
+      });
+    }
+    rig.update(dt, view, inp, ctl.boosting);
+    menu.camera(dt);                                     // the title's shots, or a blend between two camera views
+    world.follow(ctl.rPos, camera);
+    world.update?.(t, camera, ship.root.position, racer ? racer.s : 0, renderer);
+
+    // lap timing: progress along the circuit (the track's arc length, or the road's samples near the road)
+    if (!race && !lap.started && ship.ready && ctl.speed > 3) { lap.started = true; lap.time = 0; }
+    if (!race && lap.started && ctl.crashed <= 0) {
+      lap.time += dt;
+      let d = 0, total = 1;
+      if (MAP === 'meadow') {
+        const n = world.road.nearest(flight.pos.x, flight.pos.z);
+        if (n.d < 160) {
+          d = n.i - lap.idx;
+          if (d > mm.n / 2) d -= mm.n;
+          if (d < -mm.n / 2) d += mm.n;
+          if (Math.abs(d) > 250) d = 0;
+          lap.idx = n.i;
+        }
+        total = mm.n;
+      }
+      lap.progress += d;
+      if (lap.progress >= total) {
+        lap.progress -= total;
+        lap.last = lap.time;
+        const best = lap.time < lap.best;
+        lap.best = Math.min(lap.best, lap.time);
+        hud.message(`Lap ${lap.lap}: ${lap.time.toFixed(2)} s${best ? '  -  best!' : ''}`, 4);
+        lap.lap++;
+        lap.time = 0;
+      }
+    }
+
+    let state = 'ENGINES OFF  -  press E', cls = 'off';
+    if (ctl.crashed > 0) { state = 'CRASHED'; cls = 'bad'; }
+    else if (ship.engineOn && !ship.ready) { state = ship.canopyT > 0.02 ? 'CANOPY CLOSING' : 'ENGINES STARTING'; cls = 'warn'; }
+    else if (race && mode === 'race' && race.state === 'grid' && ship.engineOn) { state = 'ON THE GRID'; cls = 'warn'; }
+    else if (race && mode === 'race' && race.state === 'countdown') { state = 'GET READY'; cls = 'warn'; }
+    else if (ship.engineOn) { state = ctl.boosting > 0.5 ? 'BOOST' : (mode === 'race' ? 'RACE' : 'FREE FLIGHT'); cls = 'ok'; }
+    else if (ship.power > 0.01) { state = 'SHUTTING DOWN'; cls = 'warn'; }
+    const f = ctl.forward;
+    hud.update(dt, { speed: ctl.speed, agl: MAP === 'space' && mode === 'free' ? NaN : ctl.agl, throttle: ctl.throttle,
+      boostEnergy: ctl.boostEnergy, boosting: ctl.boosting, state, stateClass: cls, camera: rig.name, assist: ctl.assist,
+      invert: input.invert, lapTime: lap.started ? lap.time : NaN, lastLap: lap.last, bestLap: lap.best, lap: lap.lap,
+      x: ctl.pos.x, z: ctl.pos.z, fx: f.x, fz: f.z, race: race ? race.hud() : null, mode });
+    audio.update(dt, { camera, ship, ctl, race, track, mode, inp });
+  }
+  requestAnimationFrame(frame);
+}
+
+boot().catch((e) => {
+  console.error(e);
+  status(`Failed to start: ${e.message || e}`);
+  document.getElementById('loading').classList.add('error');
+});

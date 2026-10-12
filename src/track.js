@@ -1,0 +1,1596 @@
+// The circuit in space: an anti-grav race track (WipEout-like) floating over a gas giant - a 3-D spline with climbs,
+// dives, banked hairpins, a jump crest and a corkscrew; a deck with kerbs, solid walls topped by energy barriers, lit
+// gantries, boost pads, a start gantry, an asteroid field. TrackRacer rides it: magnetic hold, hover cushion, air on
+// crests, walls you scrape along.
+import * as THREE from 'three';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { clamp, damp, smoothstep, mulberry32, noise2, fbm } from './noise.js';
+import { bakeDeckMaps } from './deck.js';
+import { rockMaterial } from './rock.js';
+import { hullMaterial, hullBox, HULL_SIDE, HULL_UNDER, HULL_GIRDER } from './hull.js';
+
+export const TRACK_W = 44;           // between the walls (m): the Feather spans 10.3 m - three abreast
+const STEP = 2;                      // frame spacing (m)
+const DECK = 1.8;                    // deck thickness
+const WALL_H = 1.2, WALL_T = 0.7;    // solid wall
+const FIELD_H = 5.0;                 // energy barrier top
+const GANTRY_EVERY = 300;            // m
+
+// The circuit, as control points: x, y, z (m) and bank (deg, + = right edge down, eased the short way round between
+// points). Named points carry the features: the gaps follow the two crests (a kicker throws the ship over the cut),
+// the vertical loop runs between loopIn and loopOut (its deck frame is carried round without twist - a world-up frame
+// cannot turn over), the tunnel between tunIn and tunOut. "make the track longer ... add cuts in the track where ships
+// will jump over with speed, add ships having to rotate like crazy in some parts, over the head".
+const CTRL = [], AT = {};
+const pt = (x, y, z, bank = 0, name = null) => { if (name) AT[name] = CTRL.length; CTRL.push([x, y, z, bank]); };
+pt(0, 0, 700); pt(0, 0, 380, 0, 'start'); pt(0, 0, 70);
+pt(0, 15, -25, 0, 'crest1');                                         // the first jump: a cut in the deck past the crest
+pt(0, 0, -120); pt(0, 20, -700, 0, 'tunIn');
+pt(60, 60, -1300, 12, 'tunOut'); pt(420, 120, -1760, 30); pt(900, 160, -1830, 34); pt(1320, 120, -1470, 34);
+pt(1370, 40, -900, 8, 'north'); pt(1160, -80, -440, -24); pt(1220, -230, 120, 0, 'dive');
+// the east loop: a left-hander onto a long straight that rolls twice round the ship (120 deg a point), then the loop
+pt(1380, -238, 330, -20);
+pt(1650, -240, 400, 0, 'rollIn'); pt(1820, -240, 405, 120); pt(1990, -240, 410, 240); pt(2160, -240, 415, 0);
+pt(2330, -240, 420, 120); pt(2500, -240, 425, 240); pt(2670, -240, 430, 0, 'rollOut');
+pt(2850, -240, 435, 0, 'preLoop');
+for (let k = 0; k <= 12; k++) {                                      // R 80 m, stepping 80 m sideways over the turn
+  const a = (k / 12) * Math.PI * 2;
+  pt(3000 + 80 * Math.sin(a), -160 - 80 * Math.cos(a), 440 + 80 * k / 12, 0, k === 0 ? 'loopIn' : k === 12 ? 'loopOut' : null);
+}
+pt(3160, -240, 525); pt(3420, -225, 620, 20); pt(3560, -210, 850, 28); pt(3600, -195, 1050, 10);
+pt(3605, -195, 1150); pt(3610, -180, 1245, 0, 'crest2'); pt(3615, -195, 1340);   // the second jump
+pt(3610, -190, 1700, 0, 'back'); pt(3480, -150, 2000, 25); pt(3150, -90, 2200, 30); pt(2600, -20, 2250, 10);
+pt(2050, 60, 2150, 6, 'caveIn'); pt(1500, 160, 1950, 12, 'caveOut');      // the meteorite tunnel
+pt(1010, 220, 1770, 0, 'west'); pt(520, 200, 1730, 18); pt(240, 135, 1350, 0);
+pt(180, 100, 1150, 120); pt(120, 65, 960, 240); pt(60, 30, 800, 0, 'cork');     // the corkscrew home
+const LOOPS = [['loopIn', 'loopOut']];
+const GAPS = [['crest1', 35, 105], ['crest2', 35, 108]];             // (after point, from m, to m)
+const TUNNELS = [['tunIn', 'tunOut']];
+const CAVES = [['caveIn', -40, 'caveOut', 40]];                     // (from point, m, to point, m)
+// boost pads: (point, metres after it, lateral x)
+const PADS = [['start', 360, 0], ['tunIn', -160, -10], ['tunIn', -160, 10], ['north', 120, 0], ['dive', -260, 12],
+  ['preLoop', 30, 0], ['back', 90, -12], ['west', -300, 10], ['west', 260, -10]];
+// light gates over the deck: (point, metres after it, colour)
+const GATES = [['start', -60, 0x40c8ff], ['crest1', -90, 0xffb020], ['rollIn', -40, 0xb040ff], ['preLoop', -60, 0xff3a6a],
+  ['crest2', -90, 0xffb020], ['west', 120, 0x40c8ff], ['cork', -330, 0x40ff9a]];
+
+function mergeTwo(a, b) {
+  const g = new THREE.BufferGeometry(), A = a.toNonIndexed(), B = b.toNonIndexed();
+  for (const k of ['position', 'normal', 'uv']) {
+    const x = A.attributes[k], y = B.attributes[k], arr = new Float32Array(x.array.length + y.array.length);
+    arr.set(x.array); arr.set(y.array, x.array.length);
+    g.setAttribute(k, new THREE.BufferAttribute(arr, x.itemSize));
+  }
+  return g;
+}
+
+// Geometric specular anti-aliasing (Kaplanyan & Hoffman 2016): the normal's variation inside a pixel widens the
+// highlight's lobe. The deck plates' relief and grit made highlights and reflections crawl and flicker in the distance.
+const SPECULAR_AA = /* glsl */`
+  {
+    vec3 ndx = dFdx(normal), ndy = dFdy(normal);
+    float kr = min(0.5 * (dot(ndx, ndx) + dot(ndy, ndy)), 0.18);
+    material.roughness = sqrt(min(material.roughness * material.roughness + kr, 1.0));
+  }`;
+
+function canvasTex(w, h, draw, srgb = true) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 16;
+  return t;
+}
+
+function speckle(g, w, h, n, cols, size, seed = 7) {
+  const r = mulberry32(seed);
+  for (let i = 0; i < n; i++) {
+    g.fillStyle = cols[(r() * cols.length) | 0];
+    const s = size * (0.5 + r());
+    g.fillRect(r() * w, r() * h, s, s);
+  }
+}
+
+function chevronTexture() {
+  return canvasTex(256, 512, (g, w, h) => {
+    g.clearRect(0, 0, w, h);
+    g.fillStyle = 'rgba(255,255,255,1)';
+    for (let k = 0; k < 4; k++) {
+      const y = h - (k + 0.6) * h / 4;
+      g.beginPath();
+      g.moveTo(w * 0.08, y + h * 0.1); g.lineTo(w * 0.5, y - h * 0.03); g.lineTo(w * 0.92, y + h * 0.1);
+      g.lineTo(w * 0.92, y + h * 0.17); g.lineTo(w * 0.5, y + h * 0.04); g.lineTo(w * 0.08, y + h * 0.17);
+      g.closePath(); g.fill();
+    }
+  }, false);
+}
+
+// the energy barrier above the walls: a hex field, scrolling, brighter where the ship is near
+function fieldMaterial() {
+  return new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    uniforms: { time: { value: 0 }, shipPos: { value: new THREE.Vector3() }, hitN: { value: 0 },
+      hits: { value: [0, 1, 2, 3].map(() => new THREE.Vector4(0, -1e6, 0, -100)) }, hitS: { value: [0, 0, 0, 0] } },
+    vertexShader: /* glsl */`
+      varying vec2 vUv; varying vec3 vW;
+      void main() { vUv = uv; vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+    fragmentShader: /* glsl */`
+      uniform float time; uniform vec3 shipPos; uniform vec4 hits[4]; uniform float hitS[4]; varying vec2 vUv; varying vec3 vW;
+      float hexEdge(vec2 p) {     // 0 on a cell edge
+        p.x *= 1.1547; p.y += mod(floor(p.x), 2.0) * 0.5;
+        vec2 f = abs(fract(p) - 0.5);
+        return abs(max(f.x * 1.5 + f.y, f.y * 2.0) - 1.0);
+      }
+      void main() {
+        float h = vUv.y;                                   // 0 at the wall top, 1 at the field top
+        vec2 p = vec2(vUv.x * 0.6, h * 3.2);
+        float e = hexEdge(p), aa = fwidth(e);
+        float far = smoothstep(450.0, 140.0, distance(vW, cameraPosition));   // thin lines shimmer far away: fade them
+        float edge = (1.0 - smoothstep(0.06, 0.06 + 1.5 * aa, e)) * far * clamp(0.1 / max(aa, 0.1), 0.0, 1.0);
+        float fade = (1.0 - h) * (1.0 - h);
+        float near = exp(-pow(distance(vW, shipPos) / 22.0, 2.0));
+        float scan = 0.5 + 0.5 * sin(vUv.x * 0.8 - time * 6.0);
+        // impacts: a bright ring racing out through the cells, a white-hot flash at the point of contact
+        float ring = 0.0, flash = 0.0;
+        for (int k = 0; k < 4; k++) {
+          float age = time - hits[k].w, d = distance(vW, hits[k].xyz);
+          if (age < 0.0 || age > 1.2) continue;
+          ring += exp(-pow((d - age * 22.0) / 1.6, 2.0)) * exp(-age * 2.5) * hitS[k];
+          flash += exp(-d * d / 6.0) * exp(-age * 7.0) * hitS[k];
+        }
+        vec3 c = vec3(0.15, 0.55, 1.0) * (edge * (0.16 + 1.0 * near + 3.0 * ring) + 0.03 + 0.07 * scan * fade + ring * 0.6) * fade;
+        c += vec3(0.7, 0.85, 1.0) * flash * 2.0 * (1.0 - h);
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+  });
+}
+
+export const CAVE_R = 40, CAVE_MOUTH = 45;            // the cave's reach round its centre line, its mouths' light fade (m)
+const _cv = new THREE.Vector3(), _cw = new THREE.Vector3();
+
+export class Track {
+  constructor() {
+    const pts = CTRL.map(([x, y, z]) => new THREE.Vector3(x, y, z));
+    this.curve = new THREE.CatmullRomCurve3(pts, true, 'centripetal');
+    // an arc-length table fine enough for 2 m samples (three's default is 200 divisions: ~70 m on this lap, and the
+    // samples' spacing and direction wandered - harmless on the deck, but 25 m up a jump the deck's up vector levers
+    // that into a ship lurching 1.6-3.7 m a step: "the enemy ships still bug out in jumps")
+    this.curve.arcLengthDivisions = 20000;
+    this.length = this.curve.getLength();
+    const n = (this.n = Math.round(this.length / STEP));
+    this.step = this.length / n;
+    const sp = this.curve.getSpacedPoints(n);
+    sp.length = n;                                   // (closed: the last spaced point repeats the first)
+    // round the centreline off over ~6 m: the sharp crests were kinks that a ship 20 m up a jump turned into lurches
+    for (let pass = 0; pass < 3; pass++) {
+      const q = sp.map((v) => v.clone());
+      for (let i = 0; i < n; i++) sp[i].copy(q[(i + n - 1) % n]).add(q[i]).add(q[i]).add(q[(i + 1) % n]).multiplyScalar(0.25);
+    }
+    this.P = []; this.T = []; this.U = []; this.R = [];
+    for (let i = 0; i < n; i++) {
+      this.P.push(sp[i].clone());
+      this.T.push(sp[(i + 1) % n].clone().sub(sp[(i + n - 1) % n]).normalize());
+    }
+    // bank: per control point, eased between them the short way round
+    const kIdx = CTRL.map(([x, y, z]) => {
+      let best = 1e18, bi = 0;
+      for (let i = 0; i < n; i++) { const d = this.P[i].distanceToSquared(new THREE.Vector3(x, y, z)); if (d < best) { best = d; bi = i; } }
+      return bi;
+    });
+    const bank = new Float32Array(n);
+    for (let j = 0; j < CTRL.length; j++) {
+      const a = kIdx[j], b = kIdx[(j + 1) % CTRL.length], len = (b - a + n) % n;
+      const b0 = CTRL[j][3], d = ((CTRL[(j + 1) % CTRL.length][3] - b0 + 540) % 360) - 180;
+      for (let k = 0; k < len; k++) bank[(a + k) % n] = b0 + d * (0.5 - 0.5 * Math.cos(Math.PI * k / len));
+    }
+    const Y = new THREE.Vector3(0, 1, 0);
+    for (let i = 0; i < n; i++) {
+      const T = this.T[i], u0 = Y.clone().addScaledVector(T, -T.dot(Y)).normalize(), r0 = new THREE.Vector3().crossVectors(T, u0);
+      const b = THREE.MathUtils.degToRad(bank[i]), c = Math.cos(b), s = Math.sin(b);
+      this.U.push(u0.clone().multiplyScalar(c).addScaledVector(r0, s));
+      this.R.push(r0.clone().multiplyScalar(c).addScaledVector(u0, -s));
+    }
+    // inside a loop the deck's up is carried along without twist (rotation-minimising frame, double reflection) from
+    // the frame at its entry; what it misses the exit frame by is spread evenly back through the loop
+    this.at = (name, off = 0) => this.wrap(kIdx[AT[name]] * this.step + off);
+    this.loops = LOOPS.map(([a, b]) => [kIdx[AT[a]], kIdx[AT[b]]]);
+    for (const [i0, i1] of this.loops) {
+      const len = (i1 - i0 + n) % n, Us = [this.U[i0].clone()];
+      for (let k = 0; k < len; k++) {
+        const ia = (i0 + k) % n, ib = (ia + 1) % n, v1 = this.P[ib].clone().sub(this.P[ia]), c1 = v1.dot(v1);
+        const r = Us[k], rL = r.clone().addScaledVector(v1, -2 / c1 * v1.dot(r));
+        const tL = this.T[ia].clone().addScaledVector(v1, -2 / c1 * v1.dot(this.T[ia]));
+        const v2 = this.T[ib].clone().sub(tL), c2 = v2.dot(v2);
+        Us.push(c2 > 1e-12 ? rL.addScaledVector(v2, -2 / c2 * v2.dot(rL)) : rL);
+      }
+      const ie = i1 % n, Te = this.T[ie], ue = Us[len].clone().addScaledVector(Te, -Te.dot(Us[len])).normalize();
+      const miss = Math.atan2(new THREE.Vector3().crossVectors(ue, this.U[ie]).dot(Te), ue.dot(this.U[ie]));
+      for (let k = 1; k < len; k++) {
+        const i = (i0 + k) % n, T = this.T[i];
+        const u = Us[k].addScaledVector(T, -T.dot(Us[k])).normalize().applyAxisAngle(T, miss * k / len);
+        this.U[i].copy(u);
+        this.R[i].crossVectors(T, u);
+      }
+    }
+    // the cuts in the deck: from / to arc length, a per-segment mask the meshes skip, and the lips
+    this.gaps = GAPS.map(([a, f, t]) => [this.at(a, f), this.at(a, t)]);
+    this.solid = new Uint8Array(n).fill(1);
+    for (const [s0, s1] of this.gaps) {
+      for (let i = 0; i < n; i++) { const s = (i + 0.5) * this.step; if (this.inSpan(s, s0, s1)) this.solid[i] = 0; }
+    }
+    this.tunnels = TUNNELS.map(([a, b]) => [this.at(a), this.at(b)]);
+    this.caves = CAVES.map(([a, fa, b, fb]) => [this.at(a, fa), this.at(b, fb)]);
+    // the cave's centre line (a polyline the shaders test every pixel against: inside it, no sun and no sky light)
+    this.caveLines = this.caves.map(([s0, s1]) => {
+      const len = this.wrap(s1 - s0), pts = [];
+      for (let k = 0; k <= 15; k++) {                    // (the raw samples: frame() needs the curvature, not made yet)
+        const i = Math.round(this.wrap(s0 + (len * k) / 15) / this.step) % n;
+        pts.push(this.P[i].clone().addScaledVector(this.U[i], 5));
+      }
+      return { pts, len };
+    });
+    // curvature in the deck's own frame: kv > 0 where it dips (presses the ship down), kh > 0 turning right
+    this.kv = new Float32Array(n); this.kh = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const dT = this.T[(i + 1) % n].clone().sub(this.T[(i + n - 1) % n]).divideScalar(2 * this.step);
+      this.kv[i] = dT.dot(this.U[i]);
+      this.kh[i] = dT.dot(this.R[i]);
+    }
+    // minimap / HUD arrays (x, z)
+    this.px = new Float32Array(n); this.pz = new Float32Array(n);
+    for (let i = 0; i < n; i++) { this.px[i] = this.P[i].x; this.pz[i] = this.P[i].z; }
+    this.start = this.nearestIndex(new THREE.Vector3(0, 0, 430));
+    this.pads = PADS.map(([a, off, x]) => ({ s: this.at(a, off), x }));
+    this.gates = GATES.map(([a, off, col]) => ({ s: this.at(a, off), col }));
+  }
+
+  // s within [s0, s1] on the lap (wrapping)
+  inSpan(s, s0, s1) { const d = this.wrap(s - s0); return d <= this.wrap(s1 - s0); }
+
+  // a cut in the deck at s (pad: metres of margin either side)
+  inGap(s, pad = 0) {
+    for (const [s0, s1] of this.gaps) if (this.inSpan(s, s0 - pad, s1 + pad)) return true;
+    return false;
+  }
+
+  inLoop(s, pad = 0) {
+    for (const [i0, i1] of this.loops) if (this.inSpan(s, i0 * this.step - pad, i1 * this.step + pad)) return true;
+    return false;
+  }
+
+  inCave(s, pad = 0) {
+    for (const [s0, s1] of this.caves) if (this.inSpan(s, s0 - pad, s1 + pad)) return true;
+    return false;
+  }
+
+  // how much daylight reaches p (1 out in the open .. 0 deep in the cave) - the same test the shaders make
+  caveLight(p, R = CAVE_R, mouth = CAVE_MOUTH) {
+    let k = 1;
+    for (const { pts, len } of this.caveLines) {
+      let dmin = 1e9, t = 0;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i], ab = _cv.subVectors(pts[i + 1], a), h = clamp(_cw.subVectors(p, a).dot(ab) / ab.lengthSq(), 0, 1);
+        const d = _cw.subVectors(p, a).addScaledVector(ab, -h).length();
+        if (d < dmin) { dmin = d; t = (i + h) / (pts.length - 1); }
+      }
+      const inside = 1 - smoothstep(R - 4, R + 2, dmin), ends = smoothstep(0, mouth, Math.min(t, 1 - t) * len);
+      k = Math.min(k, 1 - inside * ends);
+    }
+    return k;
+  }
+
+  inTunnel(s, pad = 0) {
+    for (const [s0, s1] of this.tunnels) if (this.inSpan(s, s0 - pad, s1 + pad)) return true;
+    return false;
+  }
+
+  // the deck's colour, relief and finish, generated on the GPU (deck.js)
+  bakeDeck(renderer) {
+    const m = bakeDeckMaps(renderer), mat = this.deckMat;
+    mat.map = m.map; mat.normalMap = m.normal; mat.roughnessMap = m.rough;
+    this.deckDetail.map.value = m.detailAlbedo;
+    this.deckDetail.normal.value = m.detailNormal;
+    mat.needsUpdate = true;
+  }
+
+  // the fastest a ship can take each metre: the yaw rate it can turn at over the curvature there, then a braking
+  // pass backwards round the lap (twice, so the line before the start sees the first corner)
+  speedProfile(brake = 40, vMax = 390, airbrake = 1.35) {
+    const n = this.n, v = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      let k = 0;
+      for (let j = -6; j <= 6; j++) k = Math.max(k, Math.abs(this.kh[(i + j + n) % n]));
+      let lo = 10, hi = vMax;                              // the fastest v with v * k <= turnRate(v) * airbrake
+      for (let it = 0; it < 24; it++) { const m = (lo + hi) / 2; if (m * k <= turnRate(m) * airbrake) lo = m; else hi = m; }
+      v[i] = lo;
+    }
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = n - 1; i >= 0; i--) v[i] = Math.min(v[i], Math.sqrt(v[(i + 1) % n] ** 2 + 2 * brake * this.step));
+    }
+    return v;
+  }
+
+  // a racing line (lateral offset per metre): wide before a corner, the inside at its apex, wide again after
+  racingLine(margin = 9) {
+    const n = this.n, W = TRACK_W / 2 - margin;
+    const smooth = (a, win) => {
+      const out = new Float32Array(n);
+      let acc = 0;
+      for (let j = -win; j <= win; j++) acc += a[(j + n) % n];
+      for (let i = 0; i < n; i++) {
+        out[i] = acc / (2 * win + 1);
+        acc += a[(i + win + 1) % n] - a[(i - win + n) % n];
+      }
+      return out;
+    };
+    const k = smooth(this.kh, 15), L = Math.round(110 / this.step), line = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const around = (k[(i + L) % n] + k[(i - L + n) % n]) / 2;
+      line[i] = clamp((k[i] - 0.9 * around) * 1500, -1, 1) * W;
+    }
+    return smooth(line, 20);
+  }
+
+  nearestIndex(p) {
+    let best = 1e18, bi = 0;
+    for (let i = 0; i < this.n; i++) { const d = this.P[i].distanceToSquared(p); if (d < best) { best = d; bi = i; } }
+    return bi;
+  }
+
+  wrap(s) { return ((s % this.length) + this.length) % this.length; }
+
+  // the frame at arc length s, interpolated: { P, T, U, R, kv, kh }
+  frame(s, out = {}) {
+    const f = this.wrap(s) / this.step, i = Math.floor(f) % this.n, j = (i + 1) % this.n, t = f - Math.floor(f);
+    out.P = (out.P || new THREE.Vector3()).lerpVectors(this.P[i], this.P[j], t);
+    out.T = (out.T || new THREE.Vector3()).lerpVectors(this.T[i], this.T[j], t).normalize();
+    out.U = (out.U || new THREE.Vector3()).lerpVectors(this.U[i], this.U[j], t);
+    out.U.addScaledVector(out.T, -out.T.dot(out.U)).normalize();
+    out.R = (out.R || new THREE.Vector3()).crossVectors(out.T, out.U);
+    out.kv = this.kv[i] + (this.kv[j] - this.kv[i]) * t;
+    out.kh = this.kh[i] + (this.kh[j] - this.kh[i]) * t;
+    return out;
+  }
+
+  // a ribbon of cross-section points swept along the track: section = [[x, y, u], ...], normals per segment side
+  sweep(section, vScale, closeLoop = true) {
+    const pos = [], nrm = [], uv = [], idx = [], n = this.n, m = section.length;
+    for (let i = 0; i <= n; i++) {
+      const k = i % n, P = this.P[k], U = this.U[k], R = this.R[k];
+      for (let c = 0; c < m; c++) {
+        const [x, y, u, nx, ny] = section[c];
+        pos.push(P.x + R.x * x + U.x * y, P.y + R.y * x + U.y * y, P.z + R.z * x + U.z * y);
+        nrm.push(R.x * nx + U.x * ny, R.y * nx + U.y * ny, R.z * nx + U.z * ny);
+        uv.push(u, (i * this.step) / vScale);
+      }
+    }
+    for (let i = 0; i < n; i++) {
+      if (!this.solid[i]) continue;                    // a cut in the deck: nothing there
+      for (let c = 0; c < m - 1; c++) {
+        if (section[c][5] === 'cut') continue;          // a hard edge between two faces of the section
+        const a = i * m + c, b = a + 1, d = a + m, e = d + 1;
+        idx.push(a, b, d, b, e, d);                    // counter-clockwise seen from the face's normal side
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    return g;
+  }
+
+  // the structure's faces swept along the track, each with its own coordinates for the hull material (hull.js):
+  // faces = [{ a: [x, y], b: [x, y], n: [nx, ny], kind }], a -> b counter-clockwise seen from the normal's side;
+  // mirror: the same faces drawn on the left (swapped ends keep them facing out)
+  hullSweep(faces, mirror = false) {
+    if (mirror) faces = faces.map((f) => ({ ...f, a: f.b, b: f.a }));
+    const F = faces.length, n = this.n, pos = [], nrm = [], huv = [], hf = [], ht = [], idx = [];
+    const fw = faces.map((f) => Math.hypot(f.b[0] - f.a[0], f.b[1] - f.a[1]));
+    for (let i = 0; i <= n; i++) {
+      const k = i % n, P = this.P[k], U = this.U[k], R = this.R[k];
+      faces.forEach((f, c) => {
+        const W = fw[c], tx = (f.b[0] - f.a[0]) / W, ty = (f.b[1] - f.a[1]) / W;
+        for (const [q, u] of [[f.a, 0], [f.b, W]]) {
+          pos.push(P.x + R.x * q[0] + U.x * q[1], P.y + R.y * q[0] + U.y * q[1], P.z + R.z * q[0] + U.z * q[1]);
+          nrm.push(R.x * f.n[0] + U.x * f.n[1], R.y * f.n[0] + U.y * f.n[1], R.z * f.n[0] + U.z * f.n[1]);
+          huv.push(u, i * this.step);
+          hf.push(W, f.kind);
+          ht.push(R.x * tx + U.x * ty, R.y * tx + U.y * ty, R.z * tx + U.z * ty);
+        }
+      });
+    }
+    for (let i = 0; i < n; i++) {
+      if (!this.solid[i]) continue;                    // a cut in the deck: nothing there
+      for (let c = 0; c < F; c++) {
+        const a = (i * F + c) * 2, b = a + 1, d = a + 2 * F, e = d + 1;
+        idx.push(a, b, d, b, e, d);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+    g.setAttribute('hullUV', new THREE.Float32BufferAttribute(huv, 2));
+    g.setAttribute('hullF', new THREE.Float32BufferAttribute(hf, 2));
+    g.setAttribute('hullT', new THREE.Float32BufferAttribute(ht, 3));
+    g.setIndex(idx);
+    return g;
+  }
+
+  meshes(scene) {
+    const W = TRACK_W / 2;
+    const out = {};
+    // a section drawn right-to-left faces the other way: mirror sections are reversed (their 'cut' flags move with
+    // the segment they mark), so both walls face the deck
+    const rev = (sec) => {
+      const m = sec.length, r = sec.map((p) => p.slice(0, 5)).reverse();
+      sec.forEach((p, k) => { if (p[5] === 'cut') r[m - 2 - k][5] = 'cut'; });
+      return r;
+    };
+    // deck top (u across), and the underside + sides (a hard edge at each corner: duplicate points per face)
+    const top = this.sweep([[-W, 0, 0, 0, 1], [W, 0, 1, 0, 1]], 40);
+    // the maps are made on the GPU (bakeDeck, deck.js) once the renderer exists
+    const detail = (this.deckDetail = { map: { value: null }, normal: { value: null } });
+    const deckMat = new THREE.MeshStandardMaterial({ normalScale: new THREE.Vector2(0.8, 0.8), roughness: 1.0, metalness: 0.08 });
+    deckMat.onBeforeCompile = (sh) => {
+      sh.uniforms.detailMap = detail.map;
+      sh.uniforms.detailNormal = detail.normal;
+      sh.uniforms.detailRep = { value: new THREE.Vector2(TRACK_W / 4, 40 / 4) };
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform sampler2D detailMap;\nuniform sampler2D detailNormal;\nuniform vec2 detailRep;')
+        .replace('#include <map_fragment>', '#include <map_fragment>\n  diffuseColor.rgb *= 0.72 + 0.56 * texture2D(detailMap, vMapUv * detailRep).r;')
+        .replace('mapN.xy *= normalScale;', 'mapN.xy *= normalScale;\n  mapN.xy += (texture2D(detailNormal, vNormalMapUv * detailRep).xy * 2.0 - 1.0) * 0.45;')
+        .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n' + SPECULAR_AA);
+    };
+    deckMat.customProgramCacheKey = () => 'feather-deck';
+    this.deckMat = deckMat;
+    out.deck = new THREE.Mesh(top, deckMat);
+    const E = W + WALL_T;
+    const under = this.hullSweep([
+      { a: [E, 0], b: [E, -DECK], n: [1, 0], kind: HULL_SIDE },
+      { a: [E, -DECK], b: [-E, -DECK], n: [0, -1], kind: HULL_UNDER },
+      { a: [-E, -DECK], b: [-E, 0], n: [-1, 0], kind: HULL_SIDE },
+    ]);
+    // painted steel plates, computed per pixel (hull.js)
+    const metal = hullMaterial();
+    out.under = new THREE.Mesh(under, metal);
+    // walls: inner face, top, outer face, both sides
+    const wall = (s) => this.hullSweep([
+      { a: [s * W, 0], b: [s * W, WALL_H], n: [-s, 0], kind: HULL_SIDE },
+      { a: [s * W, WALL_H], b: [s * E, WALL_H], n: [0, 1], kind: HULL_SIDE },
+      { a: [s * E, WALL_H], b: [s * E, 0], n: [s, 0], kind: HULL_SIDE },
+    ], s < 0);
+    out.walls = [new THREE.Mesh(wall(-1), metal), new THREE.Mesh(wall(1), metal)];
+    // a glowing strip along the top of each wall's inner face
+    const stripMat = new THREE.ShaderMaterial({
+      vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: /* glsl */`varying vec2 vUv;
+        void main() {
+          float u = abs(vUv.x - 0.5) * 2.0, aa = fwidth(u) * 1.5;
+          float core = 1.0 - smoothstep(0.22 - aa, 0.22 + aa, u), body = exp(-u * u * 2.5);
+          gl_FragColor = vec4(vec3(0.03, 0.32, 1.0) * body * 1.6 + vec3(0.75, 0.92, 1.0) * core * 5.0, 1.0);
+        }`,
+    });
+    const strip = (s) => {
+      const sec = [[s * (W - 0.02), WALL_H - 0.28, 0, -s, 0], [s * (W - 0.02), WALL_H - 0.1, 1, -s, 0]];
+      return this.sweep(s > 0 ? sec : rev(sec), 10);
+    };
+    out.strips = [new THREE.Mesh(strip(-1), stripMat), new THREE.Mesh(strip(1), stripMat)];
+    // energy barriers
+    this.fieldMat = fieldMaterial();
+    const field = (s) => this.sweep([[s * (W + WALL_T * 0.5), WALL_H, 0, -s, 0], [s * (W + WALL_T * 0.5), FIELD_H, 1, -s, 0]], 1);
+    out.fields = [new THREE.Mesh(field(-1), this.fieldMat), new THREE.Mesh(field(1), this.fieldMat)];
+    for (const f of out.fields) {
+      // u along the track for the hex pattern: swap the sweep's (u, v) so x runs along the track
+      const uv = f.geometry.attributes.uv;
+      for (let i = 0; i < uv.count; i++) { const a = uv.getX(i), b = uv.getY(i); uv.setXY(i, b, a); }
+      f.renderOrder = 2;
+      f.frustumCulled = false;
+    }
+    out.gantries = this.gantries();
+    out.lanes = this.laneLights();
+    out.studs = this.studs();
+    out.girders = this.girders(metal);
+    out.startLine = this.startLine();
+    out.chevrons = this.chevrons();
+    out.lamps = this.lampPosts();
+    out.trims = this.edgeTrims();
+    out.pads = this.padMeshes();
+    out.lips = this.gapLips(metal);
+    out.tunnel = this.tunnel();
+    out.gates = this.lightGates();
+    out.towers = this.towers(metal);
+    out.cave = this.cave();
+    // the deck and walls receive but never cast: at a grazing sun, PCSS's blocker search found a plane's own
+    // neighbouring texels and shaded the whole deck black. The ship and the gantries are the casters.
+    for (const m of [out.deck, out.under, ...out.walls]) { m.castShadow = false; m.receiveShadow = true; }
+    for (const m of [out.deck, out.under, ...out.walls, ...out.strips, ...out.fields, ...out.gantries, ...out.pads,
+      ...out.lanes, out.studs, ...out.girders, out.startLine, ...out.chevrons, ...out.lamps, ...out.trims,
+      ...out.lips, ...out.tunnel, ...out.gates, ...out.towers, ...out.cave]) scene.add(m);
+    this.parts = out;
+    return out;
+  }
+
+  // a ribbon like sweep() but only over [s0, s1] (open ends)
+  sweepSpan(section, vScale, s0, s1) {
+    const i0 = Math.floor(this.wrap(s0) / this.step), len = Math.ceil(this.wrap(s1 - s0) / this.step), m = section.length;
+    const pos = [], nrm = [], uv = [], idx = [];
+    for (let k = 0; k <= len; k++) {
+      const i = (i0 + k) % this.n, P = this.P[i], U = this.U[i], R = this.R[i];
+      for (const [x, y, u, nx, ny] of section) {
+        pos.push(P.x + R.x * x + U.x * y, P.y + R.y * x + U.y * y, P.z + R.z * x + U.z * y);
+        nrm.push(R.x * nx + U.x * ny, R.y * nx + U.y * ny, R.z * nx + U.z * ny);
+        uv.push(u, (k * this.step) / vScale);
+      }
+    }
+    for (let k = 0; k < len; k++) {
+      for (let c = 0; c < m - 1; c++) { const a = k * m + c, b = a + 1, d = a + m, e = d + 1; idx.push(a, b, d, b, e, d); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    return g;
+  }
+
+  // The cuts' edges: the deck ends in a closed face (no hollow box), hazard stripes on the last and first 6 m, a row
+  // of amber lights along each lip, and a beacon post on each wall at both lips, blinking (Track.update)
+  gapLips(metal) {
+    const E = TRACK_W / 2 + WALL_T, W = TRACK_W / 2, out = [], M = new THREE.Matrix4(), f = {};
+    const stripes = canvasTex(256, 64, (g, w, h) => {
+      g.fillStyle = '#16171a'; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#e8b018';
+      for (let x = -h; x < w + h; x += 32) { g.beginPath(); g.moveTo(x, h); g.lineTo(x + 16, h); g.lineTo(x + 16 + h, 0); g.lineTo(x + h, 0); g.closePath(); g.fill(); }
+    });
+    stripes.wrapS = THREE.RepeatWrapping; stripes.repeat.set(7, 1);
+    const capG = hullBox(2 * E, DECK + WALL_H, 0.5).translate(0, (WALL_H - DECK) / 2, 0);
+    const bandG = new THREE.PlaneGeometry(2 * W - 0.4, 6).rotateX(-Math.PI / 2);
+    const lightG = new THREE.BoxGeometry(0.5, 0.12, 0.25);
+    const postG = hullBox(0.4, 9, 0.4).translate(0, 4.5 + WALL_H, 0);
+    const beaconG = new THREE.BoxGeometry(0.9, 0.5, 0.9).translate(0, 9.3 + WALL_H, 0);
+    const ends = this.gaps.flatMap(([s0, s1]) => [{ s: s0, dir: 1 }, { s: s1, dir: -1 }]);
+    const caps = new THREE.InstancedMesh(capG, metal, ends.length);
+    const bands = new THREE.InstancedMesh(bandG, new THREE.MeshStandardMaterial({ map: stripes, emissiveMap: stripes,
+      emissive: 0xffffff, emissiveIntensity: 0.25, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }), ends.length);
+    const lights = new THREE.InstancedMesh(lightG, new THREE.MeshBasicMaterial({ color: new THREE.Color(4.0, 1.8, 0.25) }), ends.length * 15);
+    const posts = new THREE.InstancedMesh(postG, metal, ends.length * 2);
+    this.beaconMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(5, 2.2, 0.3) });
+    const beacons = new THREE.InstancedMesh(beaconG, this.beaconMat, ends.length * 2);
+    let li = 0, pi = 0;
+    ends.forEach(({ s, dir }, k) => {
+      this.frame(s, f);
+      const B = f.T.clone().multiplyScalar(-dir);                              // the cap faces into the cut
+      M.makeBasis(f.R.clone().multiplyScalar(dir), f.U, B).setPosition(f.P.clone().addScaledVector(f.T, -dir * 0.25));
+      caps.setMatrixAt(k, M);
+      M.makeBasis(f.R, f.U, f.T.clone().negate()).setPosition(f.P.clone().addScaledVector(f.T, -dir * 3).addScaledVector(f.U, 0.03));
+      bands.setMatrixAt(k, M);
+      for (let j = 0; j < 15; j++) {
+        M.makeBasis(f.R, f.U, f.T.clone().negate()).setPosition(f.P.clone().addScaledVector(f.R, -W + 1.5 + j * (2 * W - 3) / 14)
+          .addScaledVector(f.U, 0.06).addScaledVector(f.T, -dir * 0.5));
+        lights.setMatrixAt(li++, M);
+      }
+      for (const sd of [-1, 1]) {
+        M.makeBasis(f.R, f.U, f.T.clone().negate()).setPosition(f.P.clone().addScaledVector(f.R, sd * (W + WALL_T / 2)).addScaledVector(f.T, -dir * 1.5));
+        posts.setMatrixAt(pi, M); beacons.setMatrixAt(pi++, M);
+      }
+    });
+    caps.receiveShadow = posts.castShadow = true;
+    return [caps, bands, lights, posts, beacons];
+  }
+
+  // The tunnel: a glass tube over the climb - steel ribs every 16 m standing on the walls, a light band on each rib's
+  // inner face, two light strips along the roof, and the glass between them (faint, brighter at a grazing look, a
+  // light wave running along it). Glass, so the sun still reaches the deck and its shadows stay true.
+  tunnel() {
+    const out = [], A = TRACK_W / 2 + WALL_T + 0.2, H = 19, base = WALL_H;
+    for (const [s0, s1] of this.tunnels) {
+      const arc = [];
+      for (let k = 0; k <= 28; k++) {
+        const t = Math.PI * (1 - k / 28), x = A * Math.cos(t), y = base + H * Math.sin(t);
+        const nx = -Math.cos(t) / A, ny = -Math.sin(t) / H, l = Math.hypot(nx, ny);
+        arc.push([x, y, k / 28, nx / l, ny / l]);
+      }
+      const glass = new THREE.Mesh(this.sweepSpan(arc, 30, s0, s1), new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, side: THREE.DoubleSide,
+        blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+        uniforms: { time: { value: 0 } },
+        vertexShader: /* glsl */`varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+          void main() { vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+        fragmentShader: /* glsl */`uniform float time; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+          void main() {
+            float fr = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 3.0);
+            float wave = exp(-pow(fract(vUv.y * 0.02 - time * 0.35) - 0.5, 2.0) * 120.0);
+            float grid = 1.0 - smoothstep(0.0, 0.02, min(abs(fract(vUv.x * 14.0) - 0.5), abs(fract(vUv.y * 0.5) - 0.5)) - 0.47);
+            gl_FragColor = vec4(vec3(0.25, 0.6, 1.0) * (0.012 + fr * 0.12 + wave * 0.05 + grid * 0.03), 1.0);
+          }`,
+      }));
+      glass.renderOrder = 2;
+      glass.frustumCulled = false;
+      this.tunnelMat = glass.material;
+      // ribs: a box section swept round the arch (local frame: x across, y up, z along the track)
+      const ribG = (w, d, inset, emissive) => {
+        const pos = [], idx = [];
+        const ring = (k) => { const t = Math.PI * (1 - k / 28); return [Math.cos(t), Math.sin(t)]; };
+        for (let k = 0; k <= 28; k++) {
+          const [c, sn] = ring(k), x = A * c, y = base + H * sn;
+          let nx = -c / A, ny = -sn / H; const l = Math.hypot(nx, ny); nx /= l; ny /= l;
+          for (const [o, z] of [[inset, -d], [inset, d], [inset + w, d], [inset + w, -d]]) pos.push(x - nx * o, y - ny * o, z);
+        }
+        for (let k = 0; k < 28; k++) for (let q = 0; q < 4; q++) {
+          const a = k * 4 + q, b = k * 4 + ((q + 1) % 4), c2 = a + 4, e = b + 4;
+          if (emissive && q !== 0) continue;
+          idx.push(a, c2, b, b, c2, e);
+        }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        g.setIndex(idx);
+        g.computeVertexNormals();
+        return g;
+      };
+      const every = Math.round(16 / this.step), i0 = Math.floor(s0 / this.step), cnt = Math.floor(this.wrap(s1 - s0) / 16) + 1;
+      const ribs = new THREE.InstancedMesh(ribG(0.9, 0.35, -0.9, false), new THREE.MeshStandardMaterial({ color: 0x4d545e, roughness: 0.45, metalness: 0.7, side: THREE.DoubleSide }), cnt);
+      const bands = new THREE.InstancedMesh(ribG(0.05, 0.12, -0.95, true), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 1.4, 3.2), side: THREE.DoubleSide }), cnt);
+      const M = new THREE.Matrix4();
+      for (let k = 0; k < cnt; k++) { this.basisAt((i0 + k * every) % this.n, M); ribs.setMatrixAt(k, M); bands.setMatrixAt(k, M); }
+      ribs.castShadow = true;
+      const roof = (x) => this.sweepSpan([[x - 0.25, base + H * Math.sqrt(Math.max(0, 1 - (x / A) ** 2)) - 0.5, 0, 0, -1],
+        [x + 0.25, base + H * Math.sqrt(Math.max(0, 1 - (x / A) ** 2)) - 0.5, 1, 0, -1]], 10, s0, s1);
+      const strips = [-4, 4].map((x) => new THREE.Mesh(roof(x), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.2, 2.0, 3.6), side: THREE.DoubleSide })));
+      out.push(glass, ribs, bands, ...strips);
+    }
+    return out;
+  }
+
+  // The meteorite tunnel: the track bores through a mass of rock - a rough oval bore round the deck (wider at the
+  // mouths), its walls lumpy and fractured, and great boulders packed round it outside. No light of its own: the
+  // shaders cut the sun and the sky inside it (look.js setCave), so only the ships light it.
+  cave() {
+    const out = [], rnd = mulberry32(55);
+    const rockMat = rockMaterial({ big: 45, small: 7, side: THREE.DoubleSide, key: 'cave', shadow: true });
+    const shellMat = rockMaterial({ big: 60, small: 9, key: 'meteor', ao: true, shadow: true });
+    const boulderMat = rockMaterial({ big: 60, small: 9, key: 'boulder', shadow: true });
+    // vertex colours are tints round 1 (the rock's albedo is the material's): no blotches
+    const c = new THREE.Color(), tint = (t) => c.setRGB(t * 1.015, t, t * 0.975);
+    for (const [s0, s1] of this.caves) {
+      // the bore
+      const len = this.wrap(s1 - s0), nk = Math.ceil(len / 3), nj = 64, pos = [], col = [], idx = [], f = {};
+      for (let k = 0; k <= nk; k++) {
+        const s = s0 + (k / nk) * len, d = (k / nk) * len, flare = smoothstep(35, 0, Math.min(d, len - d));
+        this.frame(s, f);
+        for (let j = 0; j < nj; j++) {
+          const a = (j / nj) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+          const n1 = fbm(ca * 1.6 + s * 0.012, sa * 1.6 - s * 0.009, 4), n2 = noise2(a * 9 + s * 0.13, s * 0.05 - a * 3);
+          const r = 33 + 12 * (n1 - 0.5) + 3 * (n2 - 0.5) + flare * 10;
+          const x = ca * r * 1.12, y = 5 + sa * r * 0.82;
+          pos.push(f.P.x + f.R.x * x + f.U.x * y, f.P.y + f.R.y * x + f.U.y * y, f.P.z + f.R.z * x + f.U.z * y);
+          tint(0.94 + (n2 - 0.5) * 0.1 + (n1 - 0.5) * 0.14);
+          col.push(c.r, c.g, c.b);
+        }
+      }
+      for (let k = 0; k < nk; k++) for (let j = 0; j < nj; j++) {
+        const a = k * nj + j, b = k * nj + ((j + 1) % nj), d = a + nj, e = b + nj;
+        idx.push(a, d, b, b, d, e);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      // the faces must look into the bore (toward its centre line)
+      this.frame(s0 + len / 2, f);
+      const centre = f.P.clone().addScaledVector(f.U, 5), i0 = Math.floor(nk / 2) * nj;
+      const vp = new THREE.Vector3().fromBufferAttribute(g.attributes.position, i0), vn = new THREE.Vector3().fromBufferAttribute(g.attributes.normal, i0);
+      if (vn.dot(centre.clone().sub(vp)) < 0) {
+        for (let q = 0; q < idx.length; q += 3) { const t = idx[q + 1]; idx[q + 1] = idx[q + 2]; idx[q + 2] = t; }
+        g.setIndex(idx); g.computeVertexNormals();
+      }
+      out.push(new THREE.Mesh(g, rockMat));
+      // The meteorite: ONE craggy body round the bore. Its surface runs in rows from the bore's entrance ring (the very
+      // same vertices - no seam to see through, no rock inside the bore) out into a crater, over the crater's rim,
+      // round the body, and back down the exit crater onto the bore's exit ring. (The first version packed boulders
+      // round the bore, scaled and lumped far past their clearance: "the meteorite is literally in the road".)
+      const ring = (k) => Array.from({ length: nj }, (_, j) => new THREE.Vector3().fromBufferAttribute(g.attributes.position, k * nj + j));
+      const r0 = ring(0), r1 = ring(nk);
+      const A0 = r0.reduce((a, v) => a.add(v), new THREE.Vector3()).divideScalar(nj);
+      const B0 = r1.reduce((a, v) => a.add(v), new THREE.Vector3()).divideScalar(nj);
+      const O = A0.clone().add(B0).multiplyScalar(0.5), Z = B0.clone().sub(A0), half = Z.length() / 2;
+      Z.normalize();
+      this.frame(s0 + len / 2, f);
+      const Y = f.U.clone().addScaledVector(Z, -f.U.dot(Z)).normalize(), X = new THREE.Vector3().crossVectors(Z, Y);
+      const SUB = 6, nc = nj * SUB;                    // six columns of rock to each column of the bore (~4.3 m)
+      // the bore's end rings, resampled to the finer columns (points on the ring's own edges: still watertight)
+      const fine = (rr) => Array.from({ length: nc }, (_, c) => rr[Math.floor(c / SUB)].clone().lerp(rr[(Math.floor(c / SUB) + 1) % nj], (c % SUB) / SUB));
+      const f0 = fine(r0), f1 = fine(r1);
+      const Rb = 260, rimR = 125, rimOut = 30;
+      const sinR = rimR / Rb, thR = Math.asin(sinR), Rz = (half + rimOut) / Math.cos(thR);
+      // craters of every size (16 big, 44 smaller): a bowl ~0.18 of the diameter deep (the big ones with a flat
+      // floor), a sharp raised rim, a skirt of ejecta; each darkens the ambient light in its bowl
+      const crDir = () => new THREE.Vector3(rnd() * 2 - 1, (rnd() * 2 - 1) * 0.8, (rnd() * 2 - 1) * 0.6).normalize();
+      const craters = [...Array.from({ length: 16 }, () => ({ d: crDir(), r: 0.12 + rnd() * 0.22 })),
+        ...Array.from({ length: 44 }, () => ({ d: crDir(), r: 0.045 + Math.pow(rnd(), 1.5) * 0.08 }))]
+        .map((q) => ({ ...q, k: 0.36 * q.r * (0.7 + rnd() * 0.5), cosOut: Math.cos(q.r * 2.2) }));
+      const dirL = new THREE.Vector3();
+      let occl = 1;
+      const relief = (dx, dy, dz) => {                 // the body's radius factor in a (local) direction
+        dirL.set(dx, dy, dz).normalize();
+        let h = 1 + 0.2 * (fbm(dirL.x * 1.6 + 3.1, dirL.y * 1.6 + dirL.z * 1.1, 5) - 0.5)
+          + 0.08 * (1 - Math.abs(2 * fbm(dirL.z * 3.2 - 1.7, dirL.x * 3.2 + dirL.y * 2.0, 4) - 1))
+          + 0.012 * (fbm(dirL.x * 9 - 2, dirL.y * 9 + dirL.z * 7, 3) - 0.5);
+        occl = 1;
+        for (const q of craters) {
+          const cs = dirL.dot(q.d);
+          if (cs < q.cosOut) continue;
+          const u = Math.acos(Math.min(1, cs)) / q.r;
+          if (u < 1) {
+            h += q.k * ((q.r > 0.1 ? Math.max(u * u, 0.3) : u * u) - 1);
+            occl *= 1 - 0.42 * (1 - u * u);
+          }
+          h += q.k * (0.3 * Math.exp(-(((u - 1) / 0.15) ** 2)) + (u > 1 ? 0.07 * Math.exp(-(u - 1) * 3) : 0));
+        }
+        return h;
+      };
+      let lastAO = 1;
+      const aoRows = [];
+      const body = (th, phi) => {
+        const lx = Math.cos(phi) * Math.sin(th) * Rb * 1.15, ly = Math.sin(phi) * Math.sin(th) * Rb * 0.9, lz = -Rz * Math.cos(th);
+        const h = relief(lx / (Rb * 1.15), ly / (Rb * 0.9), lz / Rz);
+        lastAO = occl;
+        return O.clone().addScaledVector(X, lx * h).addScaledVector(Y, ly * h).addScaledVector(Z, lz * (0.92 + 0.08 * h));
+      };
+      const rows = [];
+      const crater = (ringPts, sign, rimTh) => {      // ring -> rim, as rows (the rim row itself is the body's)
+        const out2 = [];
+        const CR = 14;
+        for (let i = 0; i < CR; i++) {
+          const t = i / CR, tr2 = Math.pow(t, 0.8), tz = Math.sin(t * Math.PI / 2);
+          out2.push(ringPts.map((v, c) => {
+            const rim = body(rimTh, (c / nc) * Math.PI * 2);
+            const a = v.clone().sub(O), b = rim.clone().sub(O);
+            const ax = a.dot(X), ay = a.dot(Y), az = a.dot(Z), bx = b.dot(X), by = b.dot(Y), bz = b.dot(Z);
+            const x = ax + (bx - ax) * tr2, y = ay + (by - ay) * tr2, z = az + (bz - az) * tz;
+            const jag = i === 0 ? 0 : (noise2(c * 0.21 + sign * 7, i * 0.7) - 0.5) * 6 * Math.sin(t * Math.PI);
+            const radial = new THREE.Vector3(x, y, 0).normalize();
+            return O.clone().addScaledVector(X, x + radial.x * jag).addScaledVector(Y, y + radial.y * jag).addScaledVector(Z, z);
+          }));
+        }
+        return out2;
+      };
+      const mouthAO = (i) => new Array(nc).fill(0.3 + 0.7 * Math.pow(i / 14, 0.8));
+      rows.push(...crater(f0, -1, thR));
+      for (let i = 0; i < 14; i++) aoRows.push(mouthAO(i));
+      const BR = 160;
+      for (let i = 0; i <= BR; i++) {
+        const th = thR + (Math.PI - 2 * thR) * (i / BR), ar = [];
+        rows.push(Array.from({ length: nc }, (_, c) => { const v = body(th, (c / nc) * Math.PI * 2); ar.push(lastAO); return v; }));
+        aoRows.push(ar);
+      }
+      rows.push(...crater(f1, 1, Math.PI - thR).reverse());
+      for (let i = 13; i >= 0; i--) aoRows.push(mouthAO(i));
+      const mp = [], mc = [], mi = [];
+      for (const row of rows) for (const v of row) {
+        mp.push(v.x, v.y, v.z);
+        tint(0.92 + 0.16 * fbm(v.x * 0.006 + 3, v.z * 0.006 + v.y * 0.004, 4));
+        mc.push(c.r, c.g, c.b);
+      }
+      const ao = new Float32Array(aoRows.flat());
+      for (let i = 0; i < rows.length - 1; i++) for (let cc = 0; cc < nc; cc++) {
+        const a = i * nc + cc, b = i * nc + ((cc + 1) % nc), d = a + nc, e = b + nc;
+        mi.push(a, b, d, b, e, d);
+      }
+      const mg = new THREE.BufferGeometry();
+      mg.setAttribute('position', new THREE.Float32BufferAttribute(mp, 3));
+      mg.setAttribute('color', new THREE.Float32BufferAttribute(mc, 3));
+      mg.setIndex(mi);
+      mg.computeVertexNormals();
+      // outward: a vertex on the body's equator must face away from its middle
+      const ie = (14 + Math.floor(BR / 2)) * nc, ve = new THREE.Vector3().fromBufferAttribute(mg.attributes.position, ie), ne = new THREE.Vector3().fromBufferAttribute(mg.attributes.normal, ie);
+      if (ne.dot(ve.clone().sub(O)) < 0) {
+        for (let q = 0; q < mi.length; q += 3) { const t = mi[q + 1]; mi[q + 1] = mi[q + 2]; mi[q + 2] = t; }
+        mg.setIndex(mi); mg.computeVertexNormals();
+      }
+      const meteor = new THREE.Mesh(mg, shellMat);
+      meteor.name = 'meteorite';
+      out.push(meteor);
+      // boulders on its body: each sunk into the surface where it lies (resting, never floating), none on the crater
+      // walls round the mouths. Angular (split faces), sizes by a power law (many small, a few big), most of them
+      // in clusters; their feet darken the shell's ambient light, each its own shade
+      const bg = (k, detail) => {
+        let sg = new THREE.IcosahedronGeometry(1, detail);
+        sg.deleteAttribute('normal'); sg.deleteAttribute('uv');
+        sg = mergeVertices(sg);
+        const pp = sg.attributes.position, v = new THREE.Vector3(), cc = new Float32Array(pp.count * 3);
+        const cuts = Array.from({ length: 4 + Math.floor(rnd() * 3) }, () => ({ n: new THREE.Vector3(rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1).normalize(), c: 0.45 + rnd() * 0.35 }));
+        for (let i = 0; i < pp.count; i++) {
+          v.fromBufferAttribute(pp, i).normalize();
+          let h = 1 + 0.24 * (fbm(v.x * 1.7 + k * 3.3, v.y * 1.7 + v.z, 4) - 0.5) + 0.05 * (fbm(v.x * 5 - k, v.z * 5 + v.y * 3, 3) - 0.5);
+          for (const cp of cuts) { const dd = v.dot(cp.n); if (dd > cp.c) h = Math.min(h, h * (cp.c / dd)); }
+          v.multiplyScalar(h);
+          pp.setXYZ(i, v.x, v.y, v.z);
+          tint(0.93 + 0.14 * fbm(v.x * 3 + k, v.z * 3, 3));
+          cc.set([c.r, c.g, c.b], i * 3);
+        }
+        sg.setAttribute('color', new THREE.BufferAttribute(cc, 3));
+        sg.computeVertexNormals();
+        return sg;
+      };
+      const bshapes = [bg(0, 3), bg(1, 3), bg(2, 3), bg(3, 2), bg(4, 2), bg(5, 2)], bmats = bshapes.map(() => []), btone = bshapes.map(() => []);
+      const BM = new THREE.Matrix4(), BQ = new THREE.Quaternion(), BE = new THREE.Euler(), BS = new THREE.Vector3();
+      const mpos = mg.attributes.position, mnrm = mg.attributes.normal, bv = new THREE.Vector3(), bn = new THREE.Vector3(), wv = new THREE.Vector3();
+      const rowLo = 14 + 5, rowHi = 14 + BR - 5, gauss = () => (rnd() + rnd() + rnd() - 1.5) * 1.4;
+      const clusters = Array.from({ length: 16 }, () => ({ row: rowLo + 4 + Math.floor(rnd() * (rowHi - rowLo - 8)), col: Math.floor(rnd() * nc), spread: 3 + rnd() * 8 }));
+      this.boulderSpots = [];
+      for (let placed = 0; placed < 300; placed++) {
+        let row, col;
+        if (rnd() < 0.72) {
+          const cl = clusters[Math.floor(rnd() * clusters.length)];
+          row = Math.round(cl.row + gauss() * cl.spread); col = (Math.round(cl.col + gauss() * cl.spread * 1.4) % nc + nc) % nc;
+        } else { row = rowLo + Math.floor(rnd() * (rowHi - rowLo)); col = Math.floor(rnd() * nc); }
+        row = Math.min(rowHi, Math.max(rowLo, row));
+        const vi = row * nc + col;
+        bv.fromBufferAttribute(mpos, vi); bn.fromBufferAttribute(mnrm, vi).normalize();
+        const size = 1.6 + 20 * Math.pow(rnd(), 3.2);
+        BE.set(rnd() * 6.3, rnd() * 6.3, rnd() * 6.3);
+        BS.set(size * (0.8 + rnd() * 0.5), size * (0.55 + rnd() * 0.4), size * (0.8 + rnd() * 0.5));
+        const kind = size > 6 ? Math.floor(rnd() * 3) : 3 + Math.floor(rnd() * 3);
+        bmats[kind].push(BM.compose(bv.clone().addScaledVector(bn, size * 0.3), BQ.setFromEuler(BE), BS).clone());
+        btone[kind].push(0.8 + rnd() * 0.45);
+        this.boulderSpots.push({ row, col, size });
+        // the foot's shadow in the ambient light, on the shell vertices round it
+        const reach = Math.ceil((1.9 * size) / 4) + 1;
+        for (let r = row - reach; r <= row + reach; r++) for (let q = col - reach; q <= col + reach; q++) {
+          const vj = r * nc + ((q % nc) + nc) % nc;
+          if (r < 0 || vj >= ao.length) continue;
+          const dd = wv.fromBufferAttribute(mpos, vj).distanceTo(bv);
+          ao[vj] *= 0.5 + 0.5 * smoothstep(0.45 * size, 1.9 * size, dd);
+        }
+      }
+      mg.setAttribute('rockAO', new THREE.BufferAttribute(ao, 1));
+      bshapes.forEach((sg, k) => {
+        if (!bmats[k].length) return;
+        const im = new THREE.InstancedMesh(sg, boulderMat, bmats[k].length);
+        bmats[k].forEach((m, i) => { im.setMatrixAt(i, m); im.setColorAt(i, c.setRGB(btone[k][i], btone[k][i], btone[k][i])); });
+        im.name = 'meteorite-boulders';
+        out.push(im);
+      });
+      this.meteor = { O, X, Y, Z, half, mesh: meteor, bore: out.find((o) => o.material === rockMat && o.isMesh && !o.isInstancedMesh), boulders: out.filter((o) => o.name === 'meteorite-boulders'), nc, BR };
+    }
+    for (const m of out) { m.castShadow = false; m.receiveShadow = true; }
+    return out;
+  }
+
+  // light gates: an arch of light over the deck from wall to wall at the start, before both jumps, the rolls, the
+  // loop and the corkscrew - pulses running up both legs, a white-hot core, each in its own colour
+  lightGates() {
+    const R = TRACK_W / 2 + 2.5, out = [], f = {};
+    const ring = new THREE.TorusGeometry(R, 0.45, 12, 72, Math.PI);
+    const leg = new THREE.BoxGeometry(1.4, WALL_H + 1.5, 1.4);
+    const legMat = new THREE.MeshStandardMaterial({ color: 0x3a4048, roughness: 0.5, metalness: 0.7 });
+    this.gateMats = [];
+    for (const g of this.gates) {
+      const mat = new THREE.ShaderMaterial({
+        uniforms: { time: { value: 0 }, col: { value: new THREE.Color(g.col) } },
+        vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: /* glsl */`uniform float time; uniform vec3 col; varying vec2 vUv;
+          void main() {
+            float a = vUv.x, ring = abs(vUv.y - 0.5) * 2.0;
+            float pulse = pow(0.5 + 0.5 * sin((min(a, 1.0 - a)) * 40.0 - time * 8.0), 6.0);
+            float core = exp(-ring * ring * 6.0);
+            gl_FragColor = vec4(col * (1.2 + 2.5 * pulse) * (0.4 + core) + vec3(1.0) * core * core * 2.0, 1.0);
+          }`,
+      });
+      this.gateMats.push(mat);
+      this.frame(g.s, f);
+      const arch = new THREE.Mesh(ring, mat);
+      arch.matrixAutoUpdate = false;
+      arch.matrix.makeBasis(f.R, f.U, f.T.clone().negate()).setPosition(f.P.clone().addScaledVector(f.U, WALL_H));
+      out.push(arch);
+      for (const sd of [-1, 1]) {
+        const m = new THREE.Mesh(leg, legMat);
+        m.matrixAutoUpdate = false;
+        m.matrix.makeBasis(f.R, f.U, f.T.clone().negate()).setPosition(f.P.clone().addScaledVector(f.R, sd * R).addScaledVector(f.U, (WALL_H + 1.5) / 2 - 0.2));
+        m.castShadow = true;
+        out.push(m);
+      }
+    }
+    return out;
+  }
+
+  // Towers along the circuit, each bolted to the track: a truss arm out from under the deck's girders to a tall
+  // column that runs well above and below the deck, ringed by platforms, its windows lit, a beacon on top
+  towers(metal) {
+    const rnd = mulberry32(404), out = [], M = new THREE.Matrix4();
+    const list = [];
+    for (let s = 300; s < this.length - 200; s += 760 + rnd() * 380) {
+      if (this.inGap(s, 60) || this.inLoop(s, 120) || this.inTunnel(s, 40) || this.inCave(s, 250)) continue;
+      list.push({ i: Math.floor(s / this.step), side: rnd() < 0.5 ? -1 : 1, off: 62 + rnd() * 30, h: 70 + rnd() * 90 });
+    }
+    const box = (w, h, d, x, y, z = 0) => new THREE.BoxGeometry(w, h, d).translate(x, y, z).toNonIndexed();
+    const merge = (gs) => { const g = new THREE.BufferGeometry(), n = gs.reduce((a, x) => a + x.attributes.position.count, 0);
+      const pp = new Float32Array(n * 3), nr = new Float32Array(n * 3); let o = 0;
+      for (const x of gs) { pp.set(x.attributes.position.array, o * 3); nr.set(x.attributes.normal.array, o * 3); o += x.attributes.position.count; }
+      g.setAttribute('position', new THREE.BufferAttribute(pp, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nr, 3)); return g; };
+    // one unit tower (x out from the track, y up the deck's up), scaled per instance in height only via two parts
+    const col = merge([box(9, 1, 9, 0, 0.5), box(6, 1, 6, 0, 0.5)]);
+    const towerParts = [], glowParts = [];
+    for (const t of list) {
+      const h = t.h, lo = -h * 0.45, X = t.off;
+      const g = [box(8, h, 8, X, lo + h / 2), box(12, 2.4, 12, X, lo + h * 0.3), box(14, 2.4, 14, X, lo + h * 0.72),
+        box(10, 4, 10, X, lo + h + 2), box(0.6, 18, 0.6, X, lo + h + 13),
+        // the arm: two chords from under the deck girders out to the column, with posts between
+        box(X - TRACK_W / 2, 1.2, 1.2, (X + TRACK_W / 2) / 2, -DECK - 3.2, -3), box(X - TRACK_W / 2, 1.2, 1.2, (X + TRACK_W / 2) / 2, -DECK - 3.2, 3),
+        box(X - TRACK_W / 2, 1.2, 1.2, (X + TRACK_W / 2) / 2, -DECK - 9, 0)];
+      for (let k = 0; k <= 6; k++) { const x = TRACK_W / 2 + (X - TRACK_W / 2) * k / 6; g.push(box(0.5, 6.4, 0.5, x, -DECK - 6.1, 0)); }
+      const glow = [box(0.25, h * 0.86, 0.5, X - 4.05, lo + h * 0.5, -2), box(0.25, h * 0.86, 0.5, X - 4.05, lo + h * 0.5, 2),
+        box(12.2, 0.3, 12.2, X, lo + h * 0.3 + 1.0), box(14.2, 0.3, 14.2, X, lo + h * 0.72 + 1.0), box(1.4, 1.4, 1.4, X, lo + h + 22)];
+      const Mi = this.basisAt(t.i, new THREE.Matrix4());
+      if (t.side < 0) Mi.multiply(new THREE.Matrix4().makeScale(-1, 1, 1));
+      for (const x of g) towerParts.push(x.applyMatrix4(Mi));
+      for (const x of glow) glowParts.push(x.applyMatrix4(Mi));
+    }
+    const tm = new THREE.Mesh(merge(towerParts), new THREE.MeshStandardMaterial({ color: 0x555c66, roughness: 0.55, metalness: 0.6, side: THREE.DoubleSide }));
+    const gm = new THREE.Mesh(merge(glowParts), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.9, 1.6, 3.0), side: THREE.DoubleSide }));
+    tm.castShadow = true; tm.receiveShadow = true;
+    this.towerList = list;
+    return [tm, gm];
+  }
+
+  // lane lights, built like fixtures: a dark metal housing set in the deck, a capsule lens (saturated blue edge,
+  // white-hot HDR core, anti-aliased ends) every 8 m, a soft pool of their light on the deck round them, and a pulse
+  // chasing forward (speed reads off it)
+  laneLights() {
+    const SEG = /* glsl */`
+      float capsule(float x, float s) {                    // distance (m) to the light's capsule in its 8 m period
+        float seg = fract(s / 8.0) * 8.0;
+        return length(vec2(x, seg - clamp(seg, 0.7, 3.3)));
+      }`;
+    this.laneMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+      uniforms: { time: { value: 0 }, prefilter: { value: 1 } },
+      vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: /* glsl */`
+        uniform float time, prefilter; varying vec2 vUv;
+        ${SEG}
+        void main() {
+          float x = (vUv.x - 0.5) * 0.36, d = capsule(x, vUv.y), aa = fwidth(d) * 1.3 + 1e-4;
+          float lens = 1.0 - smoothstep(0.055 - aa, 0.055 + aa, d);
+          float core = 1.0 - smoothstep(0.016 - aa, 0.016 + aa, d);
+          float halo = exp(-d * d / 0.004) * 0.5;
+          // far down the track the 8 m pattern is finer than the pixels and sparkled: it fades to its average (each
+          // capsule lights ~34 % of its period), across-track profile kept
+          float far = smoothstep(0.8, 3.0, fwidth(vUv.y)) * prefilter, ax = abs(x), aax = fwidth(x) * 1.3 + 1e-4;
+          lens = mix(lens, (1.0 - smoothstep(0.055 - aax, 0.055 + aax, ax)) * 0.34, far);
+          core = mix(core, (1.0 - smoothstep(0.016 - aax, 0.016 + aax, ax)) * 0.33, far);
+          halo = mix(halo, exp(-ax * ax / 0.004) * 0.5 * 0.35, far);
+          float chase = 0.8 + 0.7 * pow(0.5 + 0.5 * sin(vUv.y * 0.06 - time * 4.0), 10.0);
+          vec3 c = vec3(0.04, 0.33, 1.0) * (lens * 2.4 + halo) + vec3(0.75, 0.9, 1.0) * core * 7.0;
+          gl_FragColor = vec4(c * chase, 1.0);
+        }`,
+    });
+    this.spillMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
+      uniforms: { time: { value: 0 } },
+      vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: /* glsl */`
+        uniform float time; varying vec2 vUv;
+        ${SEG}
+        void main() {
+          float x = (vUv.x - 0.5) * 4.0, d = capsule(x, vUv.y);
+          float chase = 0.8 + 0.7 * pow(0.5 + 0.5 * sin(vUv.y * 0.06 - time * 4.0), 10.0);
+          float spill = mix(exp(-d * d / 0.35), exp(-x * x / 0.35) * 0.46, smoothstep(0.8, 3.0, fwidth(vUv.y)));
+          gl_FragColor = vec4(vec3(0.06, 0.32, 1.0) * spill * 0.16 * chase, 1.0);
+        }`,
+    });
+    const housing = new THREE.MeshStandardMaterial({ color: 0x15171b, roughness: 0.3, metalness: 0.7,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const out = [];
+    for (const x of [-11, 11]) {
+      const h = new THREE.Mesh(this.sweep([[x - 0.15, 0.012, 0, 0, 1], [x + 0.15, 0.012, 1, 0, 1]], 1), housing);
+      h.receiveShadow = true;
+      const spill = new THREE.Mesh(this.sweep([[x - 2, 0.014, 0, 0, 1], [x + 2, 0.014, 1, 0, 1]], 1), this.spillMat);
+      const lens = new THREE.Mesh(this.sweep([[x - 0.18, 0.018, 0, 0, 1], [x + 0.18, 0.018, 1, 0, 1]], 1), this.laneMat);
+      spill.renderOrder = 1; lens.renderOrder = 2;
+      for (const m of [h, spill, lens]) { m.frustumCulled = false; out.push(m); }
+    }
+    this.laneHousing = out.filter((m) => m.material === housing);
+    return out;
+  }
+
+  // small LED studs inside both kerbs every 6 m
+  studs() {
+    const every = Math.round(6 / this.step), n = Math.floor(this.n / every) * 2;
+    const im = new THREE.InstancedMesh(new THREE.BoxGeometry(0.22, 0.05, 0.4),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(0.7, 1.3, 2.6) }), n);
+    const M = new THREE.Matrix4(), W = TRACK_W / 2 - 2.4;
+    let k = 0;
+    for (let i = 0; i + every <= this.n; i += every) {
+      if (this.inGap(i * this.step, 2)) continue;
+      for (const side of [-1, 1]) {
+        M.makeBasis(this.R[i], this.U[i], this.T[i].clone().negate())
+          .setPosition(this.P[i].clone().addScaledVector(this.R[i], side * W).addScaledVector(this.U[i], 0.03));
+        im.setMatrixAt(k++, M);
+      }
+    }
+    im.count = k;
+    return im;
+  }
+
+  // what holds the deck up: two box girders along its belly and a cross-rib every 24 m
+  girders(metal) {
+    const D = DECK, g = (x) => this.hullSweep([
+      { a: [x - 1, -D], b: [x - 1, -D - 2.4], n: [-1, 0], kind: HULL_SIDE },
+      { a: [x - 1, -D - 2.4], b: [x + 1, -D - 2.4], n: [0, -1], kind: HULL_GIRDER },
+      { a: [x + 1, -D - 2.4], b: [x + 1, -D], n: [1, 0], kind: HULL_SIDE },
+    ], true);                // (listed the deck's other way round: drawn as they were, the girders were inside out)
+    const beams = [new THREE.Mesh(g(-12), metal), new THREE.Mesh(g(12), metal)];
+    const every = Math.round(24 / this.step), n = Math.floor(this.n / every);
+    const ribs = new THREE.InstancedMesh(hullBox(TRACK_W + 1, 0.9, 1.0).translate(0, -D - 0.45, 0), metal, n);
+    const M = new THREE.Matrix4();
+    let nr = 0;
+    for (let k = 0; k < n; k++) if (!this.inGap(k * every * this.step, 1)) ribs.setMatrixAt(nr++, this.basisAt(k * every, M));
+    ribs.count = nr;
+    for (const m of [...beams, ribs]) { m.receiveShadow = true; }
+    return [...beams, ribs];
+  }
+
+  basisAt(i, M, scale = 1) {
+    const R = this.R[i], U = this.U[i], B = this.T[i].clone().negate();
+    M.makeBasis(R, U, B).scale(new THREE.Vector3(scale, scale, scale)).setPosition(this.P[i]);
+    return M;
+  }
+
+  // Gantries every 300 m, built to stand on the track (the first ones floated beside it - "levitating not being
+  // connected to anything"): each pillar on a base plate bolted to the wall top, its foot clamped down the outside
+  // of the wall and the deck's side, tapered, with a light strip on its inner face; a truss beam (two chords, posts,
+  // diagonals) across the top carrying a light bar. The first one (the start) is lit red.
+  gantries() {
+    const X = TRACK_W / 2 + WALL_T / 2, E = TRACK_W / 2 + WALL_T, TOP = 15.3, BOT = 13.6;
+    const box = (w, h, d, x, y, z = 0) => new THREE.BoxGeometry(w, h, d).translate(x, y, z);
+    const strut = (a, b, w) => {
+      const dir = b.clone().sub(a), len = dir.length(), g = new THREE.BoxGeometry(w, len, w);
+      g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize()));
+      return g.translate((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+    };
+    const frame = [], glow = [];
+    for (const sd of [-1, 1]) {
+      frame.push(box(1.5, 0.25, 3.2, sd * X, WALL_H + 0.125));                         // base plate on the wall top
+      frame.push(box(0.5, DECK + WALL_H + 0.2, 2.6, sd * (E + 0.25), (WALL_H - DECK) / 2)); // clamp down the outside
+      frame.push(box(1.3, 6.2, 1.7, sd * X, WALL_H + 0.25 + 3.1));                      // pillar, lower
+      frame.push(box(1.0, 6.4, 1.35, sd * X, WALL_H + 0.25 + 6.2 + 3.2));               // pillar, upper
+      frame.push(box(1.7, 0.5, 2.0, sd * X, BOT - 0.25));                               // the beam's seat
+      glow.push(box(0.1, 9.5, 0.28, sd * (X - 0.66), WALL_H + 5.5));                    // light strip, inner face
+    }
+    const span = 2 * X, bays = 10;
+    frame.push(box(span + 1.0, 0.6, 1.2, 0, TOP));                                      // top chord
+    frame.push(box(span + 1.0, 0.6, 1.2, 0, BOT));                                      // bottom chord
+    for (let k = 0; k <= bays; k++) {
+      const x0 = -X + (span * k) / bays;
+      frame.push(box(0.32, TOP - BOT, 0.9, x0, (TOP + BOT) / 2));                       // posts
+      if (k < bays) {
+        const x1 = -X + (span * (k + 1)) / bays, up = k % 2 === 0;
+        frame.push(strut(new THREE.Vector3(x0, up ? BOT : TOP, 0), new THREE.Vector3(x1, up ? TOP : BOT, 0), 0.24));
+      }
+    }
+    glow.push(box(span - 3, 0.12, 0.45, 0, BOT - 0.36));                                // light bar under the beam
+    const merge = (gs) => { const g = new THREE.BufferGeometry(); const all = gs.map((x) => x.toNonIndexed());
+      const n = all.reduce((a, x) => a + x.attributes.position.count, 0), pp = new Float32Array(n * 3), nr = new Float32Array(n * 3);
+      let o = 0; for (const x of all) { pp.set(x.attributes.position.array, o * 3); nr.set(x.attributes.normal.array, o * 3); o += x.attributes.position.count; }
+      g.setAttribute('position', new THREE.BufferAttribute(pp, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nr, 3)); return g; };
+    const every = Math.round(GANTRY_EVERY / this.step);
+    this.gantryIdx = [];
+    for (let i = this.start; i < this.start + this.n; i += every) {
+      const s = (i % this.n) * this.step;
+      if (i === this.start || !(this.inGap(s, 30) || this.inLoop(s, 40) || this.inTunnel(s, 20) || this.inCave(s, 30))) this.gantryIdx.push(i % this.n);
+    }
+    const fm = new THREE.InstancedMesh(merge(frame), new THREE.MeshStandardMaterial({ color: 0x5a616b, roughness: 0.5, metalness: 0.65 }), this.gantryIdx.length);
+    const gm = new THREE.InstancedMesh(merge(glow), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.0, 1.8, 3.2) }), this.gantryIdx.length);
+    const M = new THREE.Matrix4();
+    this.gantryIdx.forEach((i, k) => {
+      this.basisAt(i, M);
+      fm.setMatrixAt(k, M);
+      gm.setMatrixAt(k, M);
+      gm.setColorAt(k, k === 0 ? new THREE.Color(2.6, 0.25, 0.2) : new THREE.Color(1, 1, 1));
+    });
+    fm.castShadow = true;
+    fm.receiveShadow = true;
+    return [fm, gm];
+  }
+
+  // the start / finish line: a band of checks across the deck
+  startLine() {
+    const tex = canvasTex(512, 32, (g, w, h) => {
+      for (let i = 0; i < 32; i++) for (let j = 0; j < 2; j++) { g.fillStyle = (i + j) % 2 ? '#e8e6e0' : '#16171a'; g.fillRect(i * 16, j * 16, 16, 16); }
+    });
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(TRACK_W - 4.4, 2.75).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({
+      map: tex, roughness: 0.55, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));
+    const i = this.start, M = new THREE.Matrix4().makeBasis(this.R[i], this.U[i], this.T[i].clone().negate()).setPosition(this.P[i].clone().addScaledVector(this.U[i], 0.02));
+    m.matrixAutoUpdate = false;
+    m.matrix.copy(M);
+    m.receiveShadow = true;
+    return m;
+  }
+
+  // chevron boards on the outside wall of every tight corner, facing the traffic, pointing the way
+  chevrons() {
+    const tex = canvasTex(256, 96, (g, w, h) => {
+      g.fillStyle = '#c4202a'; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#f2f0ea';
+      for (let k = 0; k < 3; k++) {
+        const x = 40 + k * 72;
+        g.beginPath(); g.moveTo(x, 12); g.lineTo(x + 34, h / 2); g.lineTo(x, h - 12); g.lineTo(x + 18, h - 12); g.lineTo(x + 52, h / 2); g.lineTo(x + 18, 12); g.closePath(); g.fill();
+      }
+      g.strokeStyle = '#111'; g.lineWidth = 6; g.strokeRect(3, 3, w - 6, h - 6);
+    });
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    const board = new THREE.PlaneGeometry(4.2, 1.6);
+    const post = new THREE.BoxGeometry(0.16, 1.4, 0.16).translate(0, -1.2, -0.1);
+    const list = [];
+    let last = -1e9;
+    for (let i = 0; i < this.n; i++) {
+      const k = this.kh[i];
+      if (Math.abs(k) < 0.0045 || i - last < Math.round(32 / this.step) || this.inGap(i * this.step, 10)) continue;
+      last = i;
+      list.push({ i, side: -Math.sign(k) });                // the outside of the turn
+    }
+    const bm = new THREE.InstancedMesh(board, new THREE.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: 0xffffff,
+      emissiveIntensity: 0.45, roughness: 0.6, side: THREE.DoubleSide }), list.length);
+    const pm = new THREE.InstancedMesh(post, new THREE.MeshStandardMaterial({ color: 0x3c4148, roughness: 0.5, metalness: 0.6 }), list.length);
+    const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), P = new THREE.Vector3();
+    list.forEach(({ i, side }, k) => {
+      const R = this.R[i], U = this.U[i], T = this.T[i];
+      // face the oncoming ships (normal = -T), turned a little toward the track; mirrored for left-hand turns
+      const n = T.clone().negate().addScaledVector(R, -side * 0.35).normalize(), x = new THREE.Vector3().crossVectors(U, n).normalize();
+      M.makeBasis(x, U, n);
+      Q.setFromRotationMatrix(M);
+      P.copy(this.P[i]).addScaledVector(R, side * (TRACK_W / 2 + WALL_T / 2)).addScaledVector(U, WALL_H + 2.1);
+      S.set(side > 0 ? 1 : -1, 1, 1);
+      bm.setMatrixAt(k, M.compose(P, Q, S));
+      pm.setMatrixAt(k, M.compose(P, Q, new THREE.Vector3(1, 1, 1)));
+    });
+    bm.castShadow = pm.castShadow = true;
+    return [bm, pm];
+  }
+
+  // lamp posts on the walls every 60 m (alternating sides), each a post, an arm over the track and a lit lens
+  lampPosts() {
+    const every = Math.round(60 / this.step), n = Math.floor(this.n / every);
+    const X = TRACK_W / 2 + WALL_T / 2;
+    const postG = new THREE.BoxGeometry(0.22, 4.2, 0.22).translate(0, 2.1, 0);
+    const armG = new THREE.BoxGeometry(1.8, 0.18, 0.3).translate(-0.8, 4.15, 0);
+    const lensG = new THREE.BoxGeometry(0.9, 0.06, 0.24).translate(-1.15, 4.04, 0);
+    const merge = (a, b) => { const g = mergeTwo(a, b); g.deleteAttribute('uv'); return g; };
+    const mm = new THREE.InstancedMesh(merge(postG, armG), new THREE.MeshStandardMaterial({ color: 0x4a5058, roughness: 0.5, metalness: 0.6 }), n);
+    const lm = new THREE.InstancedMesh(lensG, new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 2.6, 3.4) }), n);
+    const M = new THREE.Matrix4(), mirror = new THREE.Matrix4().makeScale(-1, 1, 1);
+    let used = 0;
+    for (let k = 0; k < n; k++) {
+      const i = k * every, side = k % 2 ? 1 : -1;
+      if (this.inGap(i * this.step, 6) || this.inLoop(i * this.step, 10) || this.inTunnel(i * this.step, 5) || this.inCave(i * this.step, 20)) continue;
+      this.basisAt(i, M);
+      M.setPosition(this.P[i].clone().addScaledVector(this.R[i], side * X).addScaledVector(this.U[i], WALL_H));
+      if (side < 0) M.multiply(mirror);
+      mm.setMatrixAt(used, M);
+      lm.setMatrixAt(used++, M);
+    }
+    mm.count = lm.count = used;
+    mm.material.side = lm.material.side = THREE.DoubleSide;   // the left-hand posts are mirrored
+    mm.castShadow = true;
+    return [mm, lm];
+  }
+
+  // a lit trim along the deck's outer sides (it reads the track's line from other parts of the circuit)
+  edgeTrims() {
+    const E = TRACK_W / 2 + WALL_T + 0.01;
+    const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.08, 0.5, 1.3) });
+    return [-1, 1].map((sd) => {
+      const sec = [[sd * E, -0.55, 0, sd, 0], [sd * E, -0.38, 1, sd, 0]];
+      return new THREE.Mesh(this.sweep(sd > 0 ? sec.slice().reverse() : sec, 10), mat);
+    });
+  }
+
+  // boost pads: chevrons scrolling forward and pulsing, a bright frame, light pillars rising from both edges; a pad
+  // flares when a ship takes it (flash per instance, decays in Track.update)
+  padMeshes() {
+    const tex = chevronTexture();
+    const n = this.pads.length;
+    this.padFlashA = new THREE.InstancedBufferAttribute(new Float32Array(n), 1);
+    this.padMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+      uniforms: { map: { value: tex }, time: { value: 0 } },
+      vertexShader: /* glsl */`attribute float flash; varying float vF; varying vec2 vUv;
+        void main() { vUv = uv; vF = flash; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }`,
+      fragmentShader: /* glsl */`
+        uniform sampler2D map; uniform float time; varying float vF; varying vec2 vUv;
+        void main() {
+          float m = texture2D(map, vec2(vUv.x, fract(vUv.y - time * 1.3))).a;
+          float d = max(abs(vUv.x - 0.5) * 2.0, abs(vUv.y - 0.5) * 2.0);
+          float rim = smoothstep(0.86, 0.95, d) * (1.0 - smoothstep(0.97, 1.0, d));
+          float pulse = 0.7 + 0.3 * sin(time * 7.0 - vUv.y * 10.0);
+          vec3 c = vec3(1.0, 0.42, 0.05) * (m * pulse * (0.9 + 2.5 * vF) + rim * 0.9 + 0.06 + vF * 0.5);
+          gl_FragColor = vec4(c * 1.4, 1.0);
+        }`,
+    });
+    const geo = new THREE.PlaneGeometry(8, 16).rotateX(-Math.PI / 2);
+    geo.setAttribute('flash', this.padFlashA);
+    const im = new THREE.InstancedMesh(geo, this.padMat, n);
+    // light pillars: thin vertical sheets along both long edges, fading upward
+    this.beamMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      uniforms: { time: { value: 0 } },
+      vertexShader: /* glsl */`attribute float flash; varying float vF; varying vec2 vUv;
+        void main() { vUv = uv; vF = flash; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }`,
+      fragmentShader: /* glsl */`uniform float time; varying float vF; varying vec2 vUv;
+        void main() {
+          float up = pow(1.0 - vUv.y, 2.2), ends = smoothstep(0.0, 0.12, vUv.x) * smoothstep(1.0, 0.88, vUv.x);
+          float rise = 0.75 + 0.25 * sin(vUv.y * 14.0 - time * 9.0);
+          gl_FragColor = vec4(vec3(1.0, 0.5, 0.1) * up * ends * rise * (0.25 + 1.6 * vF), 1.0);
+        }`,
+    });
+    const beam = (x) => new THREE.PlaneGeometry(16, 3.2).rotateY(Math.PI / 2).translate(x, 1.6, 0);
+    const bgeo = mergeTwo(beam(-4), beam(4));
+    bgeo.setAttribute('flash', this.padFlashA);
+    const bm = new THREE.InstancedMesh(bgeo, this.beamMat, n);
+    const M = new THREE.Matrix4(), f = {};
+    this.pads.forEach((p, k) => {
+      this.frame(p.s, f);
+      p.at = f.P.clone().addScaledVector(f.R, p.x).addScaledVector(f.U, 0.04);
+      p.basis = new THREE.Matrix4().makeBasis(f.R, f.U, f.T.clone().negate());
+      M.copy(p.basis).setPosition(p.at);
+      im.setMatrixAt(k, M);
+      bm.setMatrixAt(k, M);
+    });
+    im.renderOrder = 1;
+    bm.renderOrder = 2;
+    im.frustumCulled = bm.frustumCulled = false;
+    return [im, bm];
+  }
+
+  padFlash(i) { this.padFlashA.array[i] = 1; }
+
+  // an energy ripple through the barrier from where a ship hit it (four at a time)
+  fieldHit(at, strength) {
+    const u = this.fieldMat.uniforms, k = u.hitN.value++ % 4;
+    u.hits.value[k].set(at.x, at.y, at.z, u.time.value);
+    u.hitS.value[k] = Math.min(1.5, strength);
+  }
+
+  // Asteroids: six rock shapes - lumpy, ridged, cratered (bowls with raised rims), squashed and stretched - with
+  // colour that darkens in the hollows; the surface gets fine procedural relief and grain in the shader (3-D noise in
+  // the rock's own space, so it sticks to it), as bump through the surface gradient. Many small, a few huge.
+  asteroids(scene) {
+    const rnd = mulberry32(2024);
+    const shape = (detail, k) => {
+      let g = new THREE.IcosahedronGeometry(1, detail);
+      g.deleteAttribute('normal'); g.deleteAttribute('uv');
+      g = mergeVertices(g);
+      const p = g.attributes.position, v = new THREE.Vector3(), r2 = mulberry32(77 + k * 13);
+      const craters = Array.from({ length: 6 + Math.floor(r2() * 8) }, () => ({
+        c: new THREE.Vector3(r2() * 2 - 1, r2() * 2 - 1, r2() * 2 - 1).normalize(), r: 0.12 + r2() * 0.38, d: 0.05 + r2() * 0.1 }));
+      const stretch = new THREE.Vector3(1 + r2() * 0.6, 0.65 + r2() * 0.4, 0.8 + r2() * 0.45);
+      const cuts = Array.from({ length: 2 + Math.floor(r2() * 3) }, () => ({ n: new THREE.Vector3(r2() * 2 - 1, r2() * 2 - 1, r2() * 2 - 1).normalize(), c: 0.55 + r2() * 0.3 }));
+      const depth = new Float32Array(p.count);
+      for (let i = 0; i < p.count; i++) {
+        v.fromBufferAttribute(p, i).normalize();
+        let h = 1 + 0.34 * (fbm(v.x * 1.2 + k * 7.1, v.y * 1.2 + v.z * 0.9 - k * 3.3, 4) - 0.5);
+        const rg = 1 - Math.abs(2 * fbm(v.x * 3.2 + 11 + k, v.z * 3.2 - v.y * 2.4, 3) - 1);
+        h += 0.09 * rg * rg;
+        let cr = 0;
+        for (const c of craters) {
+          const x = v.angleTo(c.c) / c.r;
+          if (x < 1) cr -= c.d * (1 - x * x);
+          else if (x < 1.4) cr += c.d * 0.35 * Math.sin(((x - 1) / 0.4) * Math.PI);
+        }
+        h += cr;
+        // ridges, and the flat faces left where pieces split off
+        const rg2 = 1 - Math.abs(2 * fbm(v.y * 5.5 - k * 2, v.x * 5.5 + v.z * 3.1, 3) - 1);
+        h += 0.06 * rg2 * rg2 * rg2;
+        for (const cp of cuts) { const dd = v.dot(cp.n); if (dd > cp.c) h = Math.min(h, h * (cp.c / dd) + (dd - cp.c) * 0.05); }
+        depth[i] = cr;
+        v.multiplyScalar(h).multiply(stretch);
+        p.setXYZ(i, v.x, v.y, v.z);
+      }
+      g.computeVertexNormals();
+      const col = new Float32Array(p.count * 3), c = new THREE.Color();
+      for (let i = 0; i < p.count; i++) {
+        v.fromBufferAttribute(p, i);
+        const n1 = fbm(v.x * 2.2 + k, v.z * 2.2 + v.y, 4), n2 = noise2(v.x * 7 - k, v.y * 7 + v.z * 3);
+        const t = 0.9 + 0.14 * n1 + 0.06 * (n2 - 0.5) - Math.min(0.12, -depth[i] * 1.2);
+        c.setRGB(t * (1 + 0.04 * smoothstep(0.55, 0.75, n1)), t, t * (1 - 0.05 * smoothstep(0.55, 0.75, n1)));
+        col.set([c.r, c.g, c.b], i * 3);
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      return g;
+    };
+    const geos = [shape(4, 0), shape(4, 1), shape(3, 2), shape(3, 3), shape(3, 4), shape(3, 5)];
+    const mat = rockMaterial({ big: 38, small: 6, key: 'asteroid' });
+    const coarse = this.P.filter((_, i) => i % 10 === 0);
+    const box = new THREE.Box3().setFromPoints(this.P).expandByScalar(1600);
+    const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(), S = new THREE.Vector3(), X = new THREE.Vector3();
+    const lists = geos.map(() => []), tones = geos.map(() => []);
+    for (let k = 0; k < 9000 && lists.flat().length < 360; k++) {
+      X.set(box.min.x + rnd() * (box.max.x - box.min.x), box.min.y + rnd() * (box.max.y - box.min.y) * 0.8, box.min.z + rnd() * (box.max.z - box.min.z));
+      const size = 3 + 95 * Math.pow(rnd(), 4.5);
+      let dmin = 1e9;
+      for (const p of coarse) { const d = p.distanceTo(X); if (d < dmin) dmin = d; }
+      if (dmin < size * 1.5 + 160 || dmin > 1800) continue;
+      E.set(rnd() * 6.3, rnd() * 6.3, rnd() * 6.3);
+      M.compose(X, Q.setFromEuler(E), S.set(size, size, size));
+      const kind = size > 30 ? (rnd() < 0.5 ? 0 : 1) : 2 + Math.floor(rnd() * 4);
+      lists[kind].push(M.clone());
+      tones[kind].push(0.7 + rnd() * 0.6);
+    }
+    return lists.map((l, k) => {
+      const im = new THREE.InstancedMesh(geos[k], mat, Math.max(1, l.length));
+      const tc = new THREE.Color();
+      l.forEach((m, i) => { im.setMatrixAt(i, m); const t = tones[k][i]; im.setColorAt(i, tc.setRGB(t * 1.02, t, t * 0.97)); });
+      im.count = l.length;
+      im.receiveShadow = true;
+      scene.add(im);
+      return im;
+    });
+  }
+
+  update(t, shipPos, dt = 0) {
+    this.fieldMat.uniforms.time.value = t;
+    if (this.tunnelMat) this.tunnelMat.uniforms.time.value = t;
+    for (const m of this.gateMats || []) m.uniforms.time.value = t;
+    if (this.beaconMat) this.beaconMat.color.setRGB(5, 2.2, 0.3).multiplyScalar(0.15 + 0.85 * (Math.sin(t * 6) > 0 ? 1 : 0));
+    this.fieldMat.uniforms.shipPos.value.copy(shipPos);
+    this.padMat.uniforms.time.value = t;
+    this.laneMat.uniforms.time.value = t;
+    this.spillMat.uniforms.time.value = t;
+    this.beamMat.uniforms.time.value = t;
+    const fl = this.padFlashA.array;
+    for (let i = 0; i < fl.length; i++) fl[i] = Math.max(0, fl[i] - dt * 1.6);
+    this.padFlashA.needsUpdate = true;
+  }
+}
+
+// ------------------------------------------------------------------ the racer: track-space anti-grav physics
+// "increase the max speed by a lot": full throttle ~250 m/s (900 km/h), boost ~340 m/s (1,220 km/h), pads to 380 m/s
+const THRUST = 82, BOOST = 67, DRAG_Q = 0.0012, DRAG_L = 0.03;
+const HOLD = 32, HOLD_V2 = 0.0018;  // the track's magnetic pull toward the deck (m/s2), stronger with speed so only a
+                                    // real crest (the jump) throws the ship off at 900 km/h
+const HOVER = 1.35;            // clearance of the lowest point (1.1: a hard lean put the low engine in the road)
+const AIRBRAKE = 0.9;
+const HOLD_GAP = 24;            // over a cut in the deck: no cushion, no floor - only a weak pull (m/s2)
+const PAD_KICK = 55, PAD_MAX = 380;
+// "make turns harder at higher speeds": the yaw rate the ship can steer halves from walking pace to top speed,
+// and the hull slides more (grip 4 -> 2.4); airbrakes still add 90 %
+export const turnRate = (v) => 1.6 * (1 - 0.5 * smoothstep(60, 320, v));
+export const gripAt = (v) => 4.0 * (1 - 0.4 * smoothstep(100, 320, v));
+
+const _H = new THREE.Vector3(), _R = new THREE.Vector3(), _B = new THREE.Vector3(), _F = new THREE.Vector3();
+const _M = new THREE.Matrix4(), _Q = new THREE.Quaternion();
+
+export class TrackRacer {
+  constructor(ship, track) {
+    this.ship = ship;
+    this.track = track;
+    this.pos = new THREE.Vector3();
+    this.q = new THREE.Quaternion();
+    this.vel = new THREE.Vector3();
+    this.f = {};
+    this.throttle = 0; this.boostEnergy = 1; this.boosting = 0; this.assist = true;
+    this.crashed = 0; this.events = []; this.turn = 0; this.scrape = 0; this.steerS = 0; this.padT = 0;
+    this.yawRate = 0; this.airIn = 0;
+    this.accS = 0; this.latS = 0; this.landImp = 0;    // for the ship's animation (Ship.animate)
+    this.thrustScale = 1;              // rivals' engines (and a little rubber band)
+    this.locked = false;               // on the grid: engines and throttle live, the ship held in its slot
+    this.camQ = new THREE.Quaternion(); // the track frame + heading, without the lean: what the chase camera follows
+    this.qAir = new THREE.Quaternion(); // the attitude in the air (pose)
+    this.airT = 0;                      // 0 on the deck .. 1 well clear of it
+    this.yawKick = 0;                   // heading turned in one step (a wall glance): the animation eases it in
+    this.place(track.start * track.step, false);
+  }
+
+  place(s, hover) {
+    this.s = s; this.x = 0; this.y = hover ? HOVER : 0.002; this.vy = 0; this.vs = 0; this.vx = 0; this.psi = 0; this.slow = 0;
+    this.throttle = 0; this.steerS = 0; this.yawRate = 0; this.boosting = 0;
+    this.pose(0);
+  }
+
+  emit(ev) { this.events.push(ev); this.onEvent?.(ev); }
+
+  // what the animation layer reads each frame (the landing impulse is consumed)
+  animState() {
+    const land = this.landImp, yawKick = this.yawKick;
+    this.landImp = 0;
+    this.yawKick = 0;
+    return { steer: this.steerS, lat: this.latS, accel: this.accS, vy: this.vy, airbrake: this.airIn, land, air: this.airT,
+      brake: this.brakeS || 0, yawKick, height: this.y };
+  }
+
+  get speed() { return Math.hypot(this.vs, this.vx, this.vy * 0.2); }
+  get forward() { return new THREE.Vector3(0, 0, -1).applyQuaternion(this.q); }
+  get up() { return new THREE.Vector3(0, 1, 0).applyQuaternion(this.q); }
+  get agl() { return this.y; }
+  get pitch() { return 0; }
+
+  step(dt, inp) {
+    const ship = this.ship, power = ship.power, tr = this.track, f = tr.frame(this.s, this.f);
+    // "make the break more powerful": S cuts the throttle and brakes at once (it used to wind the throttle lever down
+    // for 1.4 s before any braking); W spools back up in under a second
+    const braking = ship.ready && inp.throttleDown > 0.5;
+    if (ship.ready) this.throttle = inp.throttleAxis != null ? inp.throttleAxis
+      : clamp(this.throttle + (inp.throttleUp * 1.3 - inp.throttleDown * 3.0) * dt, 0, 1);
+    else if (!ship.engineOn) this.throttle = Math.max(0, this.throttle - dt);
+    this.brakeS = (this.brakeS || 0) + ((braking ? 1 : 0) - (this.brakeS || 0)) * damp(9, dt);
+    const wantBoost = inp.boost && this.boostEnergy > 0.02 && ship.ready;
+    this.boosting += ((wantBoost ? 1 : 0) - this.boosting) * damp(6, dt);
+    this.boostEnergy = clamp(this.boostEnergy + (wantBoost ? -0.2 : 0.08) * dt, 0, 1);
+    const air = this.y > HOVER + 1.2;
+    // steering (A/D, arrows, mouse, stick), airbrakes (Z / X, bumpers): a sharper turn, more drag
+    const steer = clamp(inp.yaw + inp.roll, -1, 1), brakeL = inp.airL > 0.5 ? 1 : 0, brakeR = inp.airR > 0.5 ? 1 : 0;
+    this.steerS += (steer + (brakeR - brakeL) * 0.8 - this.steerS) * damp(8, dt);
+    const grip = air ? 0.25 : 1;
+    this.yawRate = this.steerS * turnRate(Math.abs(this.vs)) * (brakeL || brakeR ? 1 + AIRBRAKE : 1) * grip * power;
+    this.psi += this.yawRate * dt;
+    if (this.assist && Math.abs(steer) < 0.1 && !air) this.psi -= this.psi * 1.1 * dt;   // eases back along the track
+    this.airIn = brakeR - brakeL;
+    // the track turns under the ship: its heading and velocity rotate against the turn
+    const turn = f.kh * this.vs * dt;
+    this.psi = clamp(this.psi - turn, -1.3, 1.3);
+    const c = Math.cos(turn), sn = Math.sin(turn), vs = this.vs * c + this.vx * sn, vx = -this.vs * sn + this.vx * c;
+    this.vs = vs; this.vx = vx;
+    // a knock's speed loss (walls, other ships) is paid over ~0.1 s, not in one step: taken in one 8 ms step a 37 m/s
+    // loss showed as the ship jerking backwards ("they stutter when hit")
+    this.slow = Math.min(this.slow || 0, 0.35 * Math.abs(this.vs));     // never more than a third of the speed owed
+    if (this.slow > 0) {
+      const d = Math.min(this.slow, 420 * dt);
+      this.vs -= Math.sign(this.vs) * Math.min(Math.abs(this.vs), d);
+      this.slow -= d;
+    }
+    // thrust along the heading, drag, brake, airbrakes
+    const hs = Math.cos(this.psi), hx = Math.sin(this.psi);
+    // slipstream: tucked in behind another ship (Race sets draft 0..1) the air is easier: up to 7 % more thrust
+    const thrust = (this.throttle * THRUST + this.boosting * BOOST) * power * this.thrustScale * (1 + 0.07 * (this.draft || 0));
+    const sp = Math.hypot(this.vs, this.vx);
+    const drag = DRAG_L + DRAG_Q * sp + (brakeL + brakeR) * 0.25;
+    this.vs += (hs * thrust - this.vs * drag) * dt;
+    this.vx += (hx * thrust - this.vx * drag) * dt;
+    // the brake: ~6 g plus a share of the speed (15 g at top speed), never into reverse
+    const bk = this.brakeS * (60 + 0.3 * Math.abs(this.vs)) * dt * power;
+    this.vs -= Math.sign(this.vs) * Math.min(Math.abs(this.vs), bk);
+    // grip: slip across the heading bleeds away (into the heading while on the deck)
+    const along = this.vs * hs + this.vx * hx, across = -this.vs * hx + this.vx * hs;
+    const kept = across * Math.exp(-(air ? 0.4 : gripAt(sp)) * dt);
+    const al2 = along + (air ? 0 : Math.abs(across - kept) * 0.5 * Math.sign(along || 1));
+    this.vs = al2 * hs - kept * hx; this.vx = al2 * hx + kept * hs;
+    // boost pads
+    this.padT = Math.max(0, this.padT - dt);
+    for (const p of tr.pads) {
+      const ds = ((this.s - p.s) % tr.length + tr.length * 1.5) % tr.length - tr.length / 2;
+      if (Math.abs(ds) < 8 && Math.abs(this.x - p.x) < 6 && this.padT <= 0 && !air) {
+        this.vs = Math.min(PAD_MAX, this.vs + PAD_KICK);
+        this.padT = 0.6;
+        this.emit({ type: 'pad', i: tr.pads.indexOf(p), at: p.at });
+      }
+    }
+    // along / across (held in the grid slot until the lights go out)
+    if (this.locked) { this.vs = 0; this.vx = 0; this.psi = 0; this.yawRate = 0; }
+    this.s = tr.wrap(this.s + this.vs * dt);
+    this.x += this.vx * dt;
+    // walls
+    const lim = TRACK_W / 2 - ship.halfSpan * 0.92;
+    this.scrape = Math.max(0, this.scrape - dt * 3);
+    this.grind = Math.max(0, (this.grind || 0) - dt);
+    this.wallCool = Math.max(0, (this.wallCool || 0) - dt);
+    if (Math.abs(this.x) > lim) {
+      const side = Math.sign(this.x);
+      this.grind = 0.12;                   // touching the wall: sparks keep coming while it lasts
+      this.grindSide = side;
+      this.x = side * lim;
+      // grinding along it drags: ~20 % of the speed for each second of contact (proportional - it never stops a ship)
+      this.vs *= Math.exp(-0.22 * dt);
+      // the nose glances off: a heading into the wall is turned back along it
+      if (this.psi * side > 0) {
+        const p0 = this.psi;
+        this.psi = -this.psi * 0.25;
+        this.yawRate *= 0.3;
+        this.yawKick += this.psi - p0;
+      }
+      if (this.vx * side > 0) {
+        const hit = Math.abs(this.vx);
+        this.vx = -this.vx * 0.3;
+        // friction: the speed lost along the wall is a share of the blow. It was a share of the SPEED on every
+        // 120 Hz step of contact (up to 30 %), so a ship pressed to a wall stopped dead - "touching the wall gets
+        // me stuck sometimes"
+        // "make the wall hits more punishing": a knock costs a share of the blow and, for a real blow, a share of
+        // the speed too (a 20 m/s knock at 900 km/h: ~13 %); a graze costs little
+        this.slow = (this.slow || 0) + 0.45 * hit + 0.13 * Math.abs(this.vs) * smoothstep(3, 24, hit);
+        // one event per knock, not one per step of grinding (each fired the jolt, shield, shake and thud again)
+        if (hit > 1.5 && this.wallCool <= 0) {
+          this.wallCool = 0.25;
+          this.scrape = Math.min(1, hit / 20);
+          const at = f.P.clone().addScaledVector(f.R, side * TRACK_W / 2).addScaledVector(f.U, 1.2);
+          this.emit({ type: 'scrape', at, v: hit, side, wall: true });
+        }
+      }
+    }
+    // height: hold + hover cushion; the deck falling away over a crest (kv < 0) throws the ship up. Over a cut there
+    // is no deck: no cushion, no floor, a weak pull - the ship flies its arc (the -kv v^2 term is the frame turning,
+    // not a force: it stays)
+    const gap = tr.inGap(this.s);
+    const hold = gap ? HOLD_GAP : HOLD + HOLD_V2 * this.vs * this.vs;
+    let ay = -hold - f.kv * this.vs * this.vs;
+    if (!gap && power > 0 && this.y < HOVER + 2.5) {
+      const w = 1 - smoothstep(HOVER + 0.6, HOVER + 2.5, this.y);
+      ay += (90 * (HOVER * power + hold / 90 - this.y) - 12 * this.vy) * w;
+      // the cushion stiffens through a dip: at 1,000 km/h the deck rising into the hull outran the spring and the
+      // ship slammed the floor in every hollow
+      if (f.kv > 0) ay += f.kv * this.vs * this.vs * w * power;
+    }
+    // coming down off a jump the cushion reaches up for the hull and catches the fall over the last metres (the
+    // fastest descent it can still stop from at each height): it met the deck at 80 m/s, struck the floor and
+    // bounced - a jolt and sparks on every landing
+    if (!gap && power > 0 && this.vy < 0) {
+      const d = this.y - HOVER;
+      if (d > 0 && d < 16) {
+        const vMax = -Math.sqrt(2 * 260 * d) - 5;
+        if (this.vy < vMax) ay += (vMax - this.vy) * 30 * power;
+      }
+    }
+    const wasAir = this.y > HOVER + 0.8, vy0 = this.vy;
+    this.vy += ay * dt;
+    this.y += this.vy * dt;
+    if (wasAir && this.y <= HOVER + 0.8 && vy0 < -2) this.landImp += -vy0;      // touchdown: the animation dips
+    // too low in a cut, or reaching its far lip under the deck: a fall (back on the deck past the cut, slowed)
+    if ((gap && this.y < -14) || (this.wasGap && !gap && this.y < -0.8)) { this.wasGap = false; this.fall(); return; }
+    this.wasGap = gap;
+    if (!gap && this.y < 0) {
+      if (this.vy < -7 && this.wallCool <= 0) { this.emit({ type: 'scrape', at: this.pos.clone(), v: -this.vy }); this.scrape = 1; this.wallCool = 0.25; }
+      this.y = 0;
+      this.vy = Math.max(0, this.vy);
+      if (power < 0.5) { this.vs *= Math.exp(-2 * dt); this.vx *= Math.exp(-2 * dt); }
+    }
+    this.turn = clamp(Math.abs(this.steerS) * 0.8 + Math.abs(f.kh * this.vs) * 0.6, 0, 1.5);
+    const vs1 = this.vs;
+    this.accS += ((vs1 - (this.vsPrev ?? vs1)) / dt - this.accS) * damp(6, dt);
+    this.vsPrev = vs1;
+    this.latS += (this.vs * this.yawRate - this.latS) * damp(6, dt);
+    this.pose(dt);
+  }
+
+  // fell into a cut (or hit its far lip): back on the deck 30 m past it, at a crawl; the race goes on
+  fall() {
+    const tr = this.track, g = tr.gaps.find(([s0, s1]) => tr.inSpan(this.s, s0 - 10, s1 + 40)) || [this.s, this.s];
+    const at = this.pos.clone();
+    this.place(g[1] + 30, true);
+    this.vs = 80;
+    this.throttle = 1;
+    this.emit({ type: 'fall', at });
+  }
+
+  // world pose from track coordinates (all lean, pitch and float is the ship's animation layer, Ship.animate)
+  pose(dt) {
+    const f = this.track.frame(this.s, this.f), ship = this.ship, cp = Math.cos(this.psi), sp = Math.sin(this.psi);
+    const H = _H.copy(f.T).multiplyScalar(cp).addScaledVector(f.R, sp);
+    this.pos.copy(f.P).addScaledVector(f.R, this.x).addScaledVector(f.U, this.y + ship.bottom);
+    this.q.setFromRotationMatrix(_M.makeBasis(_R.crossVectors(H, f.U), f.U, _B.copy(H).negate()));
+    this.vel.copy(f.T).multiplyScalar(this.vs).addScaledVector(f.R, this.vx).addScaledVector(f.U, this.vy);
+    // in the air the hull flies where it points: its attitude eases toward the flight path (pitched up by the climb
+    // off a crest, down by the fall) instead of turning with the deck below - it tipped nose-down while still
+    // climbing off the jump and nose-up while falling. Over the last metres down it settles back onto the deck.
+    this.airT = smoothstep(HOVER + 0.4, HOVER + 7, this.y);
+    // how fast the deck frame turns under the ship (rad/s: loops, rolls, crests) - the chase camera follows tighter
+    if (dt > 0) { this.camRate = (this.camRate || 0) + ((this.qLast ? this.qLast.angleTo(this.q) / dt : 0) - (this.camRate || 0)) * damp(10, dt); (this.qLast ||= new THREE.Quaternion()).copy(this.q); }
+    if (this.airT > 0) {
+      const along = this.vs * cp + this.vx * sp;
+      if (dt > 0 && along > 5) {
+        const fw = _F.copy(H).multiplyScalar(along).addScaledVector(f.U, this.vy).normalize();
+        const r = _R.crossVectors(fw, f.U).normalize(), u = _B.crossVectors(r, fw);
+        _Q.setFromRotationMatrix(_M.makeBasis(r, u, fw.negate()));
+        this.qAir.slerp(_Q, damp(7, dt));
+      }
+      this.q.slerp(this.qAir, this.airT);
+    } else this.qAir.copy(this.q);
+    this.camQ.copy(this.q);
+  }
+}

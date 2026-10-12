@@ -1,0 +1,6 @@
+# backups of the ship made when a new bake is copied in
+*.prev.glb
+__pycache__/
+.DS_Store
+Thumbs.db
+desktop.ini

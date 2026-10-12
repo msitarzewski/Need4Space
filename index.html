@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en" data-level="normal">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Need4Space</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="src/ui.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+  "meshoptimizer/": "https://cdn.jsdelivr.net/npm/meshoptimizer@0.21.0/"
+} }
+</script>
+</head>
+<body data-ui="loading">
+<canvas id="view" tabindex="0"></canvas>
+
+<!-- the race HUD (hud.js); hidden behind the title menu and the results -->
+<div id="hud" data-kind="race">
+  <div id="hud-tl">
+    <div class="hp" id="hud-race">
+      <div class="h-pos"><span class="lbl">Pos</span><div class="pos"><span id="rpos">-</span><span class="of">/<span id="rtot">9</span></span></div></div>
+      <div class="h-lap"><span class="lbl">Lap</span><div class="lapn"><span id="lapn">1</span><span class="of">/<span id="lapt">3</span></span></div></div>
+    </div>
+    <div class="hp" id="hud-mode">Free flight</div>
+    <div class="hp hidden" id="help"></div>
+  </div>
+
+  <div class="hp" id="hud-time">
+    <div class="t-head"><span class="lbl">Lap time</span></div>
+    <div class="laptime" id="lap">--:--.--</div>
+    <div id="splits"></div>
+    <div class="t-foot">
+      <div class="trow" id="row-last"><span>Last</span><b id="last">--:--.--</b></div>
+      <div class="trow"><span>Best</span><b id="best">--:--.--</b></div>
+      <div class="trow race-only"><span>Total</span><b id="total">--:--.--</b></div>
+      <div class="trow race-only score"><span>Score</span><b id="rscore">0</b></div>
+    </div>
+  </div>
+
+  <div class="hp" id="hud-speed">
+    <div id="state" class="chip off">Engines off</div>
+    <div class="spd"><span id="spd">0</span><span class="unit">km/h</span></div>
+    <div class="segs" id="spdbar"></div>
+    <div class="meter"><span class="lbl">Energy</span><div class="bar boost"><i id="bst"></i></div></div>
+    <div class="meter"><span class="lbl">Thrust</span><div class="bar thr"><i id="thr"></i></div></div>
+    <div class="minor"><span>Alt <b id="alt">0</b> m</span><span>Cam <b id="cam">Orbit</b></span></div>
+  </div>
+
+  <div class="hp" id="mapwrap"><canvas id="minimap" width="380" height="380"></canvas></div>
+  <div id="msg"></div>
+  <div id="banner"></div>
+  <div id="count"><div class="lights"><i></i><i></i><i></i></div><div class="num" id="countnum"></div></div>
+</div>
+<div id="edgeflash"></div>
+<div id="fps"></div>
+
+<!-- the menus (menu.js builds them; the settings and the results move into their screens) -->
+<div id="menu"></div>
+<div id="settings" class="hidden"></div>
+<div id="results" class="hidden"></div>
+<div id="veil"></div>
+
+<div id="loading"><div><h1>NEED<i>4</i>SPACE</h1><div class="l-bar"></div><div id="loadtext">Starting</div></div></div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
