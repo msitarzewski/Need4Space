@@ -290,7 +290,8 @@ async function boot() {
     shafts.enabled = !!world.lightShafts && v.shafts !== false;
     lens.allowed = v.lensWater !== false;
     world.setOptions?.(v);                           // (a world's own effects: the ice planet's weather, its aurora)
-    world.wreck?.setEffects(v.wreckFx !== false);       // the derelict's sparks, flickering lamps, drifting debris
+    world.wreck?.setEffects(v.wreckFx !== false);       // the derelict's sparks, flickering lamps, drifting debris, arcs
+    world.wreck?.setMist(v.wreckMist !== false);        // the coolant mist in its reactor and machinery halls
     TrackRacer.drifting = v.drift !== false;
     TrackRacer.airPitch = v.airPitch !== false;
     bloom.enabled = v.bloom;

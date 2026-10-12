@@ -15,7 +15,7 @@ const v3 = (v) => { const [a, b, c] = v.isColor ? [v.r, v.g, v.b] : [v.x, v.y, v
 function polyK(name, lines, R, mouth) {
   const f = (v) => `vec3(${v.x.toFixed(2)}, ${v.y.toFixed(2)}, ${v.z.toFixed(2)})`;
   let fn = `float ${name}( vec3 w ) {\n\tfloat k = 1.0;\n`;
-  lines.forEach(({ pts, len }, c) => {
+  lines.forEach(({ pts, len, off = 0, total = len }, c) => {
     const ctr = pts.reduce((a, p) => a.add(p), new THREE.Vector3()).divideScalar(pts.length);
     const bound = Math.max(...pts.map((p) => p.distanceTo(ctr))) + R + 10;
     fn += `\tif ( distance( w, ${f(ctr)} ) < ${bound.toFixed(1)} ) {
@@ -27,7 +27,7 @@ function polyK(name, lines, R, mouth) {
 \t\t\tif ( d < dmin ) { dmin = d; t = ( float( i ) + h ) / ${(pts.length - 1).toFixed(1)}; }
 \t\t}
 \t\tfloat inside = 1.0 - smoothstep( ${(R - 4).toFixed(1)}, ${(R + 2).toFixed(1)}, dmin );
-\t\tfloat ends = smoothstep( 0.0, ${mouth.toFixed(1)}, min( t, 1.0 - t ) * ${len.toFixed(1)} );
+\t\tfloat along = ${off.toFixed(1)} + t * ${len.toFixed(1)}, ends = smoothstep( 0.0, ${mouth.toFixed(1)}, min( along, ${total.toFixed(1)} - along ) );
 \t\tk = min( k, 1.0 - inside * ends );
 \t}
 `;

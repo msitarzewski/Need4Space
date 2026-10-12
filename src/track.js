@@ -8,6 +8,7 @@ import { clamp, damp, smoothstep, mulberry32, noise2, fbm } from './noise.js';
 import { bakeDeckMaps } from './deck.js';
 import { rockMaterial } from './rock.js';
 import { hullMaterial, hullBox, HULL_SIDE, HULL_UNDER, HULL_GIRDER } from './hull.js';
+import { wreckRoute, GRAVEYARD } from './wreckplan.js';
 
 // "the roads are a bit bigger in redout": 44 -> 56 m, room for five Feathers (10.3 m) abreast and a line through a
 // corner that is not the only one (deck.js bakes its plates for the same width)
@@ -42,26 +43,30 @@ for (let k = 0; k <= 12; k++) {                                      // R 80 m, 
 pt(3160, -240, 525); pt(3420, -225, 620, 20); pt(3560, -210, 850, 28); pt(3600, -195, 1050, 10);
 pt(3605, -195, 1150); pt(3610, -180, 1245, 0, 'crest2'); pt(3615, -195, 1340);   // the second jump
 pt(3610, -190, 1700, 0, 'back');
-// the derelict (wreck.js): out past its bow, round the nose, along its flank and in through the breach; down the
-// hangar and the spine to where it broke in two, across the gap, through the engine room and out of the hole its
-// main engine left
-pt(3790, -185, 1990, 8); pt(4090, -178, 2120, 14); pt(4316, -172, 2228, 22); pt(4420, -166, 2450, 28);
-pt(4316, -160, 2672, 26); pt(4080, -154, 2736, 18); pt(3880, -149, 2650, -4); pt(3720, -144, 2530, 0, 'wreckIn');
-pt(3520, -136, 2462); pt(3150, -120, 2440, 0, 'wreckBrk'); pt(2900, -110, 2432); pt(2700, -100, 2425, 0, 'wreckOut');
-pt(2540, -60, 2345, 4);
+// the derelict (wreck.js; its plan, and the way through and round it, in wreckplan.js): in through its main engine,
+// through the stern piece, two jumps across where it broke, the fore piece's holds and hangar, out into the graveyard
+// off its bow, back along its back, through the command tower and down off the stern
+for (const [x, y, z, bank, name] of wreckRoute()) pt(x, y, z, bank, name);
+pt(3600, -62, 1975, 10); pt(3330, -56, 1880, 14); pt(2930, -38, 2070, 6); pt(2510, -20, 2290, 2);
 pt(2050, 60, 2150, 6, 'caveIn'); pt(1500, 160, 1950, 12, 'caveOut');      // the meteorite tunnel
 pt(1010, 220, 1770, 0, 'west'); pt(520, 200, 1730, 18); pt(240, 135, 1350, 0);
 pt(180, 100, 1150, 120); pt(120, 65, 960, 240); pt(60, 30, 800, 0, 'cork');     // the corkscrew home
 const LOOPS = [['loopIn', 'loopOut']];
-const GAPS = [['crest1', 35, 105], ['crest2', 35, 108]];             // (after point, from m, to m)
+// (after point, from m, to m): the two crests' cuts, and the two where the great derelict broke
+const GAPS = [['crest1', 35, 105], ['crest2', 35, 108], ['jump1', 35, 170], ['jump2', 35, 185]];
 const TUNNELS = [['tunIn', 'tunOut']];
+// gravity flips: up onto the derelict's hold's deck overhead and back down (wreckplan.js)
+const FLIPS = [['flipA', 'flipB'], ['flipC', 'flipD']];
 const CAVES = [['caveIn', -40, 'caveOut', 40]];                     // (from point, m, to point, m)
-// the derelict's dark stretches (from point, m, to point, m): its fore half from the breach to where it broke, its
-// aft half from the torn end to the engine block (no sky light; the sun only where its holes let it in - wreck.js)
-const WRECKS = [['wreckIn', -10, 'wreckBrk', -10], ['wreckBrk', 125, 'wreckOut', 10]];
+// the derelict's dark stretches (from point, m, to point, m): the stern piece from its engine's bell to its torn
+// front, the middle piece, the fore piece from its torn end to the breach, the command tower's control deck (no sky
+// light; the sun only where its holes let it in - wreck.js)
+const WRECKS = [['wreckIn', 60, 'jump1', 20], ['jump1', 150, 'jump2', 20], ['jump2', 175, 'breach', 30], ['tower', -20, 'towerOut', 20],
+  ...GRAVEYARD.filter((g) => g.how === 'through').map((g) => ['breach', g.from - 10, 'breach', g.to + 10])];
 // boost pads: (point, metres after it, lateral x)
 const PADS = [['start', 360, 0], ['tunIn', -160, -10], ['tunIn', -160, 10], ['north', 120, 0], ['dive', -260, 12],
-  ['preLoop', 30, 0], ['back', 90, -12], ['wreckBrk', 55, 0], ['west', -300, 10], ['west', 260, -10]];
+  ['preLoop', 30, 0], ['back', 90, -12], ['jump1', -280, 0], ['trench', 420, -10], ['tower', -380, 0], ['west', -300, 10],
+  ['west', 260, -10]];
 // light gates over the deck: (point, metres after it, colour)
 const GATES = [['start', -60, 0x40c8ff], ['crest1', -90, 0xffb020], ['rollIn', -40, 0xb040ff], ['preLoop', -60, 0xff3a6a],
   ['crest2', -90, 0xffb020], ['wreckIn', -270, 0xff4a1c], ['west', 120, 0x40c8ff], ['cork', -330, 0x40ff9a]];
@@ -75,7 +80,7 @@ const g3 = (c) => `vec3(${c.map((x) => x.toFixed(3)).join(', ')})`;
 // towers: the space map's towers on truss arms, meteor: its meteorite round the cave, wrecks: the derelict's dark
 // stretches)
 export const SPACE_LAYOUT = { ctrl: CTRL, at: AT, loops: LOOPS, gaps: GAPS, tunnels: TUNNELS, caves: CAVES, pads: PADS,
-  gates: GATES, start: [0, 0, 430], towers: true, meteor: true, wrecks: WRECKS };
+  gates: GATES, start: [0, 0, 430], towers: true, meteor: true, wrecks: WRECKS, flips: FLIPS };
 // a layout's control points from a list of [x, y, z, bank, name?]. flips: [pointA, pointB] - a gravity flip between
 // two points in a row: the bank turns over by 180 between them (B's bank = A's +- 180) while the centre line climbs
 // 18-30 m to the next deck overhead (or drops to one underneath, coming back), 160-260 m on, fairly straight in plan
@@ -266,21 +271,27 @@ export class Track {
     this.canopies = (L.canopies || []).map(([a, fa, b, fb]) => [this.at(a, fa), this.at(b, fb)]);
     // and the stretches something else covers (the forest's skull): nothing of the track's own over the deck there
     this.covers = (L.covers || []).map(([a, fa, b, fb]) => [this.at(a, fa), this.at(b, fb)]);
-    // the cave's centre line (a polyline the shaders test every pixel against: inside it, no sun and no sky light)
-    const centreLine = ([s0, s1]) => {
-      const len = this.wrap(s1 - s0), pts = [];
-      for (let k = 0; k <= 15; k++) {                    // (the raw samples: frame() needs the curvature, not made yet)
-        const i = Math.round(this.wrap(s0 + (len * k) / 15) / this.step) % n;
+    // the cave's centre line (a polyline the shaders test every pixel against: inside it, no sun and no sky light), a
+    // point every ~50 m; off / total: where it starts along its whole stretch, and that stretch's length (the light
+    // fades in over the stretch's own mouths only)
+    const centreLine = ([s0, s1], off = 0, total = null) => {
+      const len = this.wrap(s1 - s0), pts = [], m = Math.max(15, Math.ceil(len / 50));
+      for (let k = 0; k <= m; k++) {                     // (the raw samples: frame() needs the curvature, not made yet)
+        const i = Math.round(this.wrap(s0 + (len * k) / m) / this.step) % n;
         pts.push(this.P[i].clone().addScaledVector(this.U[i], 5));
       }
-      return { pts, len };
+      return { pts, len, off, total: total ?? len };
     };
-    this.caveLines = this.caves.map(centreLine);
+    this.caveLines = this.caves.map((c) => centreLine(c));
     // the derelict's dark stretches: no sky light round the deck there (look.js shade lines), and the ships' lights on;
     // they count as caves for what stands on the track (no gantries, lamps or towers) and for the echo
     this.meteorCaves = this.caves;
     this.wrecks = (L.wrecks || []).map(([a, fa, b, fb]) => [this.at(a, fa), this.at(b, fb)]);
-    this.wreckLines = this.wrecks.map(centreLine);
+    // (in lines of 400 m at most: each is tested only near itself)
+    this.wreckLines = this.wrecks.flatMap(([s0, s1]) => {
+      const len = this.wrap(s1 - s0), m = Math.ceil(len / 400);
+      return Array.from({ length: m }, (_, k) => centreLine([s0 + (len * k) / m, s0 + (len * (k + 1)) / m], (len * k) / m, len));
+    });
     this.caves = [...this.caves, ...this.wrecks];
     this.keepOut = [];                                   // spheres the asteroids and towers stay out of ({ c, r })
     // curvature in the deck's own frame: kv > 0 where it dips (presses the ship down), kh > 0 turning right
@@ -335,14 +346,14 @@ export class Track {
   // make
   caveLight(p, R = CAVE_R, mouth = CAVE_MOUTH) {
     let k = 1;
-    const line = ({ pts, len }, R, mouth) => {
+    const line = ({ pts, len, off, total }, R, mouth) => {
       let dmin = 1e9, t = 0;
       for (let i = 0; i < pts.length - 1; i++) {
         const a = pts[i], ab = _cv.subVectors(pts[i + 1], a), h = clamp(_cw.subVectors(p, a).dot(ab) / ab.lengthSq(), 0, 1);
         const d = _cw.subVectors(p, a).addScaledVector(ab, -h).length();
         if (d < dmin) { dmin = d; t = (i + h) / (pts.length - 1); }
       }
-      const inside = 1 - smoothstep(R - 4, R + 2, dmin), ends = smoothstep(0, mouth, Math.min(t, 1 - t) * len);
+      const along = off + t * len, inside = 1 - smoothstep(R - 4, R + 2, dmin), ends = smoothstep(0, mouth, Math.min(along, total - along));
       k = Math.min(k, 1 - inside * ends);
     };
     for (const l of this.caveLines) line(l, R, mouth);

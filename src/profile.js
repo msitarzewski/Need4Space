@@ -216,6 +216,47 @@ export async function timeTrial(opts = {}) {
   return { laps, walls, pads, falls, boost: +(boostT / t).toFixed(3), airbrake: +(air / t).toFixed(3), minV: minV | 0, maxLineErr: +err.toFixed(1), rmsLineErr: +Math.sqrt(e2 / Math.max(1, ne)).toFixed(2) };
 }
 
+// One ship's second lap alone (the rivals' AI at `level`), where it went wrong between arc lengths from and to: its
+// wall knocks and falls (s, m/s), where it ran under `slow` m/s, and how high it flew (s every 20 m, m over the deck)
+export async function trace(level = 'hard', from = 0, to = 1e9, slow = 240) {
+  const F = window.__feather, race = F.race, tr = F.track, dt = 1 / 120, { Driver } = await import('./race.js');
+  race.reset();
+  const e = race.player, r = e.racer;
+  e.ship.setEngine(true); e.ship.power = 1; e.ship.spin = 1; e.ship.canopyT = 0; e.ship.canopyOpen = false;
+  const solo = Object.create(race);
+  solo.entries = [e];
+  solo.level = level;
+  const d = new Driver(e, solo, () => 0.5, e.slot), o = r.onEvent, ev = [];
+  r.locked = false; r.thrustScale = 1; r.draft = 0;
+  let lap = 0, t = 0, prog = 0, lastS = r.s, t0 = 0;
+  r.onEvent = (x) => { if (lap === 1 && (x.type === 'scrape' || x.type === 'fall')) ev.push([x.type, Math.round(r.s), Math.round(x.v || 0)]); };
+  const nb = Math.ceil(tr.length / 20), vs = new Float32Array(nb), ys = new Float32Array(nb);
+  try {
+    while (t < 600 && prog < tr.length * 2) {
+      r.step(dt, d.think(dt)); r.events.length = 0; r.animState();
+      prog += race.gap(r.s, lastS); lastS = r.s; t += dt;
+      if (prog > tr.length && !lap) { lap = 1; t0 = t; }
+      if (lap) { const k = Math.floor(r.s / 20); vs[k] = r.vs; ys[k] = Math.max(ys[k], r.y); }
+    }
+  } finally { r.onEvent = o; race.reset(); }
+  const pick = (a, f) => [...a].map((x, k) => [k * 20, Math.round(x)]).filter(([s, x]) => s >= from && s <= to && f(x));
+  return { lap: +(t - t0).toFixed(2), ev: ev.filter(([, s]) => s >= from && s <= to), slow: pick(vs, (v) => v > 0 && v < slow), air: pick(ys, (y) => y > 6) };
+}
+
+// chase-camera frames along the lap (racing, the pack on its AI): one at each arc length of `list`, saved as
+// <prefix><s>.png (the frames are shot in order: list ascending)
+export async function shotsAt(prefix, list, w = 640, h = 360) {
+  const F = window.__feather, out = [];
+  await scenario('pack', 0);
+  for (const s of list) {
+    goTo(s);
+    F.rig.mode = 'chase';
+    F.advance(0.25);
+    out.push(await F.shot(prefix + Math.round(s), w, h));
+  }
+  return out;
+}
+
 // The music, exported: each song of music.js rendered whole and saved as 16-bit WAV through the dev server
 // (racer/wip/shots/music_<name>.png - the PNG name is the server's; it is a WAV), then encoded with ffmpeg to
 // assets/music/<name>.ogg (Opus) and .m4a (AAC). The game streams those files instead of synthesising at runtime.

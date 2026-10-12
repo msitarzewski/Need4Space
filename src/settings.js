@@ -3,11 +3,11 @@ const KEY = 'feather.settings.v4';
 export const DEFAULTS = { tonemap: 'aces', ao: true, bloom: true, shadows: 'high', scale: 1, exposure: 0, fps: true,
   blur: true, reflections: true, streaks: true, ai: 'normal', music: 'high', sfx: 'high', aa: 'smaa', aoRes: 'auto',
   brakeLights: true, laptop: false, touch: 'auto', map: 'space', shafts: true, lensWater: true, iceSnow: true, iceDust: true, aurora: true,
-  wreckFx: true, drift: true, airPitch: true };
+  wreckFx: true, wreckMist: true, drift: true, airPitch: true };
 // Laptop mode's picture (quality.js has what else it cuts); turned off, the rows go back to what they were. The render
 // scale stays at 100 %: with the rest cut, a laptop's integrated GPU holds it (tested on a Core Ultra 5 235U)
 const LAPTOP = { scale: 1, aa: 'smaa1', ao: false, reflections: false, shadows: 'off', streaks: false, blur: false, shafts: false,
-  iceSnow: false, iceDust: false, wreckFx: false };
+  iceSnow: false, iceDust: false, wreckFx: false, wreckMist: false };
 // (AI difficulty: the rivals, race.js AI_LEVELS - Normal a fair fight, Hard close to a flawless lap, Brutal at it)
 const ROWS = [
   ['ai', 'AI difficulty', [['normal', 'Normal'], ['hard', 'Hard'], ['brutal', 'Brutal']]],
@@ -30,7 +30,8 @@ const ROWS = [
   ['iceDust', 'Diamond dust (ice planet)', [[true, 'On'], [false, 'Off']]],
   ['aurora', 'Aurora (ice planet)', [[true, 'On'], [false, 'Off']]],
   ['lensWater', 'Water on the lens', [[true, 'On'], [false, 'Off']]],
-  ['wreckFx', 'Derelict: sparks, flicker, drift (space)', [[true, 'On'], [false, 'Off']]],
+  ['wreckFx', 'Derelict: sparks, flicker, drift, arcs (space)', [[true, 'On'], [false, 'Off']]],
+  ['wreckMist', 'Derelict: coolant mist, sun beams (space)', [[true, 'On'], [false, 'Off']]],
   ['brakeLights', 'Brake lights', [[true, 'On'], [false, 'Off']]],
   ['laptop', 'Laptop mode (integrated GPU)', [[false, 'Off'], [true, 'On']]],
   ['shadows', 'Shadows', [['high', 'High'], ['medium', 'Medium'], ['off', 'Off']]],

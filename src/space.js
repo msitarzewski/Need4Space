@@ -211,9 +211,9 @@ export class SpaceWorld {
     setCave(this.track.caveLines, CAVE_R, CAVE_MOUTH, this.wreck ? { lines: this.track.wreckLines, R: WRECK_R, mouth: WRECK_MOUTH, amb: 0.02 } : null);
     this.wreck?.patchShaders();
     this.track.meshes(scene);
-    if (this.wreck) for (const m of [...this.wreck.meshes, ...this.wreck.debrisMeshes, this.wreck.sparks.mesh]) scene.add(m);
+    if (this.wreck) for (const m of [...this.wreck.meshes, ...this.wreck.instMeshes, ...this.wreck.debrisMeshes, ...this.wreck.fxMeshes, this.wreck.sparks.mesh]) scene.add(m);
     this.scenery = new Scenery(scene, this.sky, SUN_DIR, renderer);
-    this.noAO = [this.scenery.gate.userData.fieldMesh, ...(this.wreck ? [this.wreck.sparks.mesh] : [])];
+    this.noAO = [this.scenery.gate.userData.fieldMesh, ...(this.wreck ? [this.wreck.sparks.mesh, ...this.wreck.fxMeshes.filter((m) => m.material.transparent)] : [])];
     this.track.bakeDeck(renderer);
     // the meteorite's own shadow from the sun, once (crater rims, boulders - at any distance)
     if (this.track.meteor) bakeRockShadow(renderer, [this.track.meteor.mesh, ...this.track.meteor.boulders], SUN_DIR);
@@ -299,12 +299,12 @@ export class SpaceWorld {
     // the derelict (no gantries there) they are its emergency lamps nearest the ship, flickering with them
     const tr = this.track, gi = tr.gantryIdx, sIdx = Math.floor(s / tr.step);
     if (this.wreck && tr.wrecks.some(([a, b]) => tr.inSpan(s, a - 90, b + 40))) {
-      this.wreck.nearLamps(shipPos, 3).forEach(({ L }, k) => {
+      this.wreck.nearLamps(shipPos, 3, 400, undefined, false).forEach(({ L }, k) => {
         const l = this.lamps[k];
         l.position.copy(L.p);
         l.color.setRGB(L.col[0], L.col[1], L.col[2]);
-        l.intensity = (L.big ? 2600 : 900) * L.f;
-        l.distance = L.big ? 110 : 75;
+        l.intensity = L.I * L.f * (L.real ?? 1);
+        l.distance = L.reach;
       });
       return;
     }
