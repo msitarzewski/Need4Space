@@ -1642,7 +1642,9 @@ export const ENERGY_MAX = 1.5, ENERGY_BLEED = 0.05;
 // 20 % faster boost gain on drift and 10 % boost gain overall; on hard only the drift's 10 % and 20 % less harsh; on
 // brutal no bonuses"): wall - the share of a wall knock's and a grind's speed loss paid; drift - the drift's charge
 // and energy top-up; recharge - the boost energy's own recharge. Rivals get none.
-export const PERKS = { normal: { wall: 0.7, drift: 1.2, recharge: 1.1 }, hard: { wall: 0.8, drift: 1.1, recharge: 1 },
+// Easy ("the walls less harsh by 80 %"): Normal's drift and recharge help and a fifth of a knock's cost.
+export const PERKS = { easy: { wall: 0.2, drift: 1.2, recharge: 1.1 }, normal: { wall: 0.7, drift: 1.2, recharge: 1.1 },
+  hard: { wall: 0.8, drift: 1.1, recharge: 1 },
   brutal: { wall: 1, drift: 1, recharge: 1 } };
 const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck

@@ -94,7 +94,7 @@ export class Blizzard {
           float a = on * slab * smoothstep(${(BOX * 0.5).toFixed(1)}, ${(BOX * 0.22).toFixed(1)}, d) * (veil > 0.5 ? smoothstep(10.0, 24.0, d) : smoothstep(5.0, 14.0, d));
           float kk;
           float size = veil > 0.5 ? 0.5 + 1.1 * fract(seed.w * 13.1) : 0.12 + 0.12 * fract(seed.w * 5.7);
-          gl_Position = a > 0.003 ? bzStreak(p, wind * spd - camVel, size, veil > 0.5 ? 0.06 : 0.03, min(veil > 0.5 ? 6.0 : 4.0, d * 0.12), kk) : vec4(0.0, 0.0, -2.0, 1.0);
+          gl_Position = a > 0.003 ? bzStreak(p, wind * spd - camVel, size, veil > 0.5 ? 0.06 : 0.015, min(veil > 0.5 ? 6.0 : 3.0, d * 0.1), kk) : vec4(0.0, 0.0, -2.0, 1.0);
           vK = kk; vVeil = veil;
           vA = a * (veil > 0.5 ? 0.5 : 0.75) * (1.0 + 0.35 * kk) / (1.0 + kk) * k;
           vC = bzLight(normalize(rel)) * (veil > 0.5 ? 1.6 : 2.4);

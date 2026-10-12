@@ -5,6 +5,7 @@
 @property --accent { syntax: '<color>'; inherits: true; initial-value: #3cc8ff; }
 
 :root {
+  --c-easy: #5fe39a;
   --c-normal: #3cc8ff;
   --c-hard: #ffa91c;
   --c-brutal: #ff2b4e;
@@ -24,10 +25,12 @@
   font-size: clamp(11px, calc(min(0.52vw, 0.925vh) + 6px), 20px);
   transition: --accent 0.6s ease;
 }
+:root[data-level="easy"] { --accent: var(--c-easy); }
 :root[data-level="hard"] { --accent: var(--c-hard); }
 :root[data-level="brutal"] { --accent: var(--c-brutal); }
 /* the level's colour at once (--accent eases into it) */
 :root { --lv: var(--c-normal); }
+:root[data-level="easy"] { --lv: var(--c-easy); }
 :root[data-level="hard"] { --lv: var(--c-hard); }
 :root[data-level="brutal"] { --lv: var(--c-brutal); }
 

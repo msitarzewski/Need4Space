@@ -1,7 +1,7 @@
 // Settings (O): every look feature has a switch that changes the picture and costs what it costs; saved per browser.
 const KEY = 'feather.settings.v4';
 export const DEFAULTS = { tonemap: 'aces', ao: true, bloom: true, shadows: 'high', scale: 1, exposure: 0, fps: true,
-  blur: true, reflections: true, streaks: true, ai: 'normal', music: 'high', sfx: 'high', aa: 'smaa', aoRes: 'auto',
+  blur: true, reflections: true, streaks: true, ai: 'easy', music: 'high', sfx: 'high', aa: 'smaa', aoRes: 'auto',
   brakeLights: true, laptop: false, touch: 'auto', map: 'space', shafts: true, lensWater: true, iceSnow: true, iceDust: true, aurora: true,
   iceStorm: true, iceGeysers: true, wreckFx: true, wreckMist: true, drift: true, airPitch: true, sandFx: true, dustDevils: true, heatHaze: true,
   sandstorm: true, caveFx: true };
@@ -11,7 +11,7 @@ const LAPTOP = { scale: 1, aa: 'smaa1', ao: false, reflections: false, shadows: 
   iceSnow: false, iceDust: false, iceGeysers: false, wreckFx: false, wreckMist: false, sandFx: false, dustDevils: false, heatHaze: false, caveFx: false };
 // (AI difficulty: the rivals, race.js AI_LEVELS - Normal a fair fight, Hard close to a flawless lap, Brutal at it)
 const ROWS = [
-  ['ai', 'AI difficulty', [['normal', 'Normal'], ['hard', 'Hard'], ['brutal', 'Brutal']]],
+  ['ai', 'AI difficulty', [['easy', 'Easy'], ['normal', 'Normal'], ['hard', 'Hard'], ['brutal', 'Brutal']]],
   ['drift', 'Drift (touch the brake, turn hard)', [[true, 'On'], [false, 'Off']]],
   ['airPitch', 'Nose control in the air', [[true, 'On'], [false, 'Off']]],
   ['music', 'Music', [['off', 'Off'], ['low', 'Low'], ['mid', 'Medium'], ['high', 'High']]],

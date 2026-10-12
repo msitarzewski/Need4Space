@@ -30,6 +30,9 @@ const HOLD = { throttleUp: 0, throttleDown: 0, throttleAxis: 0, boost: 0, yaw: 0
 // wander: a slow drift off the line, everywhere (m: a human's line); defend: how firmly it covers the player's way
 // past; aggression: how close it passes, how late it gives way
 export const AI_LEVELS = {
+  // "add an easy setting ... and the enemies are also slower": a tenth less engine than Normal, careful in the bends,
+  // pads and boost left to chance, wide of the line, never blocking, easing off more when well ahead of the player
+  easy: { pace: [0.85, 0.004, 0.02], corner: 0.9, pads: 0.3, boost: 'random', lane: 10, wander: 7, band: [0.03, 0.08], defend: 0, aggression: 0.35 },
   normal: { pace: [0.955, 0.004, 0.02], corner: 0.95, pads: 0.45, boost: 'random', lane: 8, wander: 5, band: [0.04, 0.04], defend: 0, aggression: 0.5 },
   hard: { pace: [0.994, 0.0025, 0.008], corner: 1, pads: 1, boost: 'plan', lane: 3, wander: 0, band: [0.05, 0.015], defend: 0.6, aggression: 0.8 },
   brutal: { pace: [1.012, 0.0015, 0.004], corner: 1, pads: 1, boost: 'plan', lane: 2, wander: 0, band: [0.08, 0], defend: 1, aggression: 1 },

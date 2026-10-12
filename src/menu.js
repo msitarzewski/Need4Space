@@ -16,6 +16,8 @@ const pad2 = (i) => String(i + 1).padStart(2, '0');
 
 // the rivals' classes (race.js AI_LEVELS); the stat bars come from the levels' own numbers
 const LEVELS = [
+  { id: 'easy', name: 'Easy', tag: 'Learn the tracks',
+    desc: 'Slower rivals that give you room. Wall knocks cost you a fifth of the speed, and drifts pay out extra boost.' },
   { id: 'normal', name: 'Normal', tag: 'A fair fight',
     desc: 'Rivals miss about half the boost pads, fire their boost at random and drift off the line. They never block you.' },
   { id: 'hard', name: 'Hard', tag: 'A percent off perfect',
