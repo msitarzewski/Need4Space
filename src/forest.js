@@ -121,7 +121,7 @@ pt(-1027, -207, 2430, 4);
     pt(cx + R * Math.cos(a), -208 + 34 * k / 12, z0 + R * Math.sin(a), k === 0 || k === 12 ? 16 : 32);
   }
 }
-pt(-1367, -162, 2420, 8);
+pt(-1367, -162, 2420);
 // the climb home upside down: the gravity turns over (the next deck overhead), the jungle for a sky, the skeleton's neck
 // hanging into it beside the way; turned back over before the run to the line
 pt(-1375, -144, 2300, 0, 'flipA'); pt(-1370, -120, 2090, 180, 'flipB');

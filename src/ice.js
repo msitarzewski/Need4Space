@@ -55,13 +55,14 @@ const arcs = (x, z, h, y0, y1, list, last) => {
 };
 pt(-30, 44, 800); pt(0, 44, 560, 0, 'start'); pt(0, 46, 300);
 pt(0, 62, 40, 0, 'crest1'); pt(0, 44, -120); pt(-30, 40, -380);                              // the first rift
-// the crystal garden: sweepers among the giant crystals, climbing to a crest ~150 m over the ice
-pt(-180, 50, -640, -16); pt(-430, 74, -760, 14); pt(-700, 104, -940, -18, 'garden'); pt(-860, 132, -1230, 12); pt(-830, 146, -1540, 24);
+// the crystal garden: sweepers among the giant crystals, climbing to a crest ~150 m over the ice (each banked into its
+// bend: one leant away)
+pt(-180, 50, -640, -16); pt(-430, 74, -760, 14); pt(-700, 104, -940, 16, 'garden'); pt(-860, 132, -1230, 12); pt(-830, 146, -1540, 24);
 // diving through the great arch, then the gallery: two barrel rolls between walls of crystal
 pt(-640, 100, -1800, 10, 'arch'); pt(-360, 68, -1960, 0);
-pt(-120, 58, -2010, 0, 'rollIn'); pt(50, 58, -2015, 120); pt(220, 58, -2020, 240); pt(390, 58, -2025, 0, 'rollOut'); pt(620, 66, -1990, -18);
-// through the glacier
-pt(880, 80, -1820, -32); pt(1060, 88, -1560, -12, 'caveIn'); pt(1130, 84, -1260, 0); pt(1150, 76, -960, 0, 'caveOut');
+pt(-120, 58, -2010, 0, 'rollIn'); pt(50, 58, -2015, 120); pt(220, 58, -2020, 240); pt(390, 58, -2025, 0, 'rollOut'); pt(620, 66, -1990, 14);
+// through the glacier (the bend into it banked into it, not away)
+pt(880, 80, -1820, 26); pt(1060, 88, -1560, 8, 'caveIn'); pt(1130, 84, -1260, 0); pt(1150, 76, -960, 0, 'caveOut');
 // down the frozen falls in a corkscrew, the loop over the sea
 pt(1150, 70, -760, 0, 'preCork'); pt(1140, 52, -580, 120); pt(1120, 34, -400, 240); pt(1090, 24, -220, 0, 'cork');
 // (in line with the corkscrew's way out: it was a bend, the pad before the loop in it; the loop's way out 80 m to the
