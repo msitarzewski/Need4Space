@@ -271,11 +271,11 @@ export class Track {
     this.canopies = (L.canopies || []).map(([a, fa, b, fb]) => [this.at(a, fa), this.at(b, fb)]);
     // and the stretches something else covers (the forest's skull): nothing of the track's own over the deck there
     this.covers = (L.covers || []).map(([a, fa, b, fb]) => [this.at(a, fa), this.at(b, fb)]);
-    // the cave's centre line (a polyline the shaders test every pixel against: inside it, no sun and no sky light), a
-    // point every ~50 m; off / total: where it starts along its whole stretch, and that stretch's length (the light
-    // fades in over the stretch's own mouths only)
-    const centreLine = ([s0, s1], off = 0, total = null) => {
-      const len = this.wrap(s1 - s0), pts = [], m = Math.max(15, Math.ceil(len / 50));
+    // the cave's centre line (a polyline the shaders test every pixel against: inside it, no sun and no sky light): at
+    // least `min` segments, at most `every` m long; off / total: where it starts along its whole stretch, and that
+    // stretch's length (the light fades in over the stretch's own mouths only)
+    const centreLine = ([s0, s1], off = 0, total = null, min = 15, every = 50) => {
+      const len = this.wrap(s1 - s0), pts = [], m = Math.max(min, Math.ceil(len / every));
       for (let k = 0; k <= m; k++) {                     // (the raw samples: frame() needs the curvature, not made yet)
         const i = Math.round(this.wrap(s0 + (len * k) / m) / this.step) % n;
         pts.push(this.P[i].clone().addScaledVector(this.U[i], 5));
@@ -287,10 +287,11 @@ export class Track {
     // they count as caves for what stands on the track (no gantries, lamps or towers) and for the echo
     this.meteorCaves = this.caves;
     this.wrecks = (L.wrecks || []).map(([a, fa, b, fb]) => [this.at(a, fa), this.at(b, fb)]);
-    // (in lines of 400 m at most: each is tested only near itself)
+    // (in lines of 600 m at most, a point every ~100 m - its bends are wide: each is tested only near itself, and every
+    // shader of every material carries them all)
     this.wreckLines = this.wrecks.flatMap(([s0, s1]) => {
-      const len = this.wrap(s1 - s0), m = Math.ceil(len / 400);
-      return Array.from({ length: m }, (_, k) => centreLine([s0 + (len * k) / m, s0 + (len * (k + 1)) / m], (len * k) / m, len));
+      const len = this.wrap(s1 - s0), m = Math.ceil(len / 600);
+      return Array.from({ length: m }, (_, k) => centreLine([s0 + (len * k) / m, s0 + (len * (k + 1)) / m], (len * k) / m, len, 3, 100));
     });
     this.caves = [...this.caves, ...this.wrecks];
     this.keepOut = [];                                   // spheres the asteroids and towers stay out of ({ c, r })

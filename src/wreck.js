@@ -153,11 +153,6 @@ class Hull {
     const dz = z - h.z, dt = wrapA(th - h.t) * this.ang, c = Math.cos(h.rot || 0), sn = Math.sin(h.rot || 0);
     return [(dz * c + dt * sn) / h.rz, (-dz * sn + dt * c) / h.rt];
   }
-  holeGLSL(h) {
-    const c = Math.cos(h.rot || 0), sn = Math.sin(h.rot || 0);
-    return `float dz = z - ${f5(h.z)}, dt = wkWrap( th - ${f5(h.t)} ) * ${f5(this.ang)};
-	  float u = ( dz * ${f5(c)} + dt * ${f5(sn)} ) * ${f5(1 / h.rz)}, v = ( dt * ${f5(c)} - dz * ${f5(sn)} ) * ${f5(1 / h.rt)};`;
-  }
 
   // the plating's field at (z, angle): > 0 plate, < 0 a hole (about metres from the edge); the hole it is nearest
   field(z, th, out = null) {
@@ -251,18 +246,24 @@ class Hull {
     return k;
   }
 
-  // the same test in GLSL: name(p world) -> 1 lit .. 0 in shadow
+  // the same test in GLSL: name(p world) -> 1 lit .. 0 in shadow. The skin is tried at both points the ray crosses it
+  // at once (in vec2s): each hole's code once in the program, not twice - it is compiled into every lit material
   glsl(name, sunL) {
     const D = sunL, P = this.planes;
-    const holes = this.holes.map((h) => `
-	if ( abs( z - ${f5(h.z)} ) < ${f5(2.3 * Math.max(h.rz, h.rt))} ) { ${this.holeGLSL(h)} float r2 = u * u + v * v;
-	  if ( r2 < ${f5(2.2 * 2.2)} ) { float ph = atan( v, u );
-	    float b = 1.0 + ${f5(h.a[0])} * sin( 2.0 * ph + ${f5(h.p[0])} ) + ${f5(h.a[1])} * sin( 5.0 * ph + ${f5(h.p[1])} ) + ${f5(h.a[2])} * sin( 11.0 * ph + ${f5(h.p[2])} ) + ${f5(h.a[3])} * sin( 23.0 * ph + ${f5(h.p[3])} );
-	    f = min( f, ( sqrt( r2 ) - b ) * ${f5(h.s)} ); } }`).join('');
+    const holes = this.holes.map((h) => {
+      const c = Math.cos(h.rot || 0), sn = Math.sin(h.rot || 0);
+      return `
+	if ( any( lessThan( abs( z - ${f5(h.z)} ), vec2( ${f5(2.3 * Math.max(h.rz, h.rt))} ) ) ) ) {
+	  vec2 dz = z - ${f5(h.z)}, dt = wkWrap2( th - ${f5(h.t)} ) * ${f5(this.ang)};
+	  vec2 u = ( dz * ${f5(c)} + dt * ${f5(sn)} ) * ${f5(1 / h.rz)}, v = ( dt * ${f5(c)} - dz * ${f5(sn)} ) * ${f5(1 / h.rt)}, r2 = u * u + v * v;
+	  if ( any( lessThan( r2, vec2( ${f5(2.2 * 2.2)} ) ) ) ) { vec2 ph = vec2( atan( v.x, u.x ), atan( v.y, u.y ) );
+	    vec2 b = 1.0 + ${f5(h.a[0])} * sin( 2.0 * ph + ${f5(h.p[0])} ) + ${f5(h.a[1])} * sin( 5.0 * ph + ${f5(h.p[1])} ) + ${f5(h.a[2])} * sin( 11.0 * ph + ${f5(h.p[2])} ) + ${f5(h.a[3])} * sin( 23.0 * ph + ${f5(h.p[3])} );
+	    f = min( f, ( sqrt( r2 ) - b ) * ${f5(h.s)} ); } }`;
+    }).join('');
     const edges = [[this.edge0, 1, 0], [this.edge1, -1, this.len]].filter(([e]) => e).map(([e, sign, end]) => `
 	f = min( f, ${f5(sign)} * ( z - ( ${f5(end)} + ${f5(sign)} * ( ${f5(e.d)} + ${f5(e.a[0])} * ( 0.5 + 0.5 * sin( 3.0 * th + ${f5(e.p[0])} ) ) + ${f5(e.a[1])} * sin( 7.0 * th + ${f5(e.p[1])} ) + ${f5(e.a[2])} * sin( 17.0 * th + ${f5(e.p[2])} ) ) ) ) );`).join('');
-    const cap = (c) => (c === 'open' ? '1.0' : c === 'closed' || !this.sternHole ? '0.0'
-      : `1.0 - smoothstep( ${f5(this.sternHole.r)} - w, ${f5(this.sternHole.r)} + w, length( e.xy - vec2( ${f5(this.sternHole.x)}, ${f5(this.sternHole.y)} ) ) )`);
+    const cap = (c, e) => (c === 'open' ? '1.0' : c === 'closed' || !this.sternHole ? '0.0'
+      : `1.0 - smoothstep( ${f5(this.sternHole.r)} - w.${e}, ${f5(this.sternHole.r)} + w.${e}, length( ${e === 'x' ? 'e0' : 'e1'}.xy - vec2( ${f5(this.sternHole.x)}, ${f5(this.sternHole.y)} ) ) )`);
     const lines = [];
     for (const pl of P) {
       const den = pl.n.dot(D);
@@ -277,23 +278,24 @@ class Hull {
 	  if ( t > max( tn, 0.0 ) && t < tx ) { vec2 q = abs( ( p + t * D ).xy - vec2( ${f5(b.x)}, ${f5(b.y)} ) ) - vec2( ${f5(b.hx)}, ${f5(b.hy)} );
 	    float w = 0.05 + 0.0047 * t; k *= 1.0 - smoothstep( -w, w, max( q.x, q.y ) ); } }`;
     }).join('');
-    const cuts = this.ribCuts.map((c) => `
-	{ ${this.holeGLSL(c)} if ( u * u + v * v < 1.0 ) rib = 0.0; }`).join('');
+    const cuts = this.ribCuts.map((c) => {
+      const cc = Math.cos(c.rot || 0), sn = Math.sin(c.rot || 0);
+      return `
+	{ vec2 dz = z - ${f5(c.z)}, dt = wkWrap2( th - ${f5(c.t)} ) * ${f5(this.ang)};
+	  vec2 u = ( dz * ${f5(cc)} + dt * ${f5(sn)} ) * ${f5(1 / c.rz)}, v = ( dt * ${f5(cc)} - dz * ${f5(sn)} ) * ${f5(1 / c.rt)};
+	  rib *= step( 1.0, u * u + v * v ); }`;
+    }).join('');
     return `
-float ${name}_field( float z, float th ) {
-	float f = 1e4;${holes}${edges}
-	return f;
-}
-float ${name}_pass( vec3 e, int face, float w ) {
-	if ( face == 16 ) return ${cap(this.cap0)};
-	if ( face == 17 ) return ${cap(this.cap1)};
-	float z = e.z, th = atan( e.y, e.x );
-	float f = ${name}_field( z, th );
-	float open = 1.0 - smoothstep( -w, w, f );
-	if ( open <= 0.0 ) return 0.0;
-	float m = mod( z - ${f5(this.ribFrom)}, ${f5(this.RIB)} ), rd = min( m, ${f5(this.RIB)} - m );
-	float rib = ( z > ${f5(this.ribFrom - this.RIBW)} && z < ${f5(this.ribTo + this.RIBW)} ) ? 1.0 - smoothstep( ${f5(this.RIBW)} - w, ${f5(this.RIBW)} + w, rd ) : 0.0;${cuts}
-	return open * ( 1.0 - rib );
+// the light through the skin where the ray crosses it at e0 (face f0) and e1 (face f1), w their penumbras: 1 open .. 0
+vec2 ${name}_pass( vec3 e0, int f0, vec3 e1, int f1, vec2 w ) {
+	vec2 z = vec2( e0.z, e1.z ), th = vec2( atan( e0.y, e0.x ), atan( e1.y, e1.x ) ), f = vec2( 1e4 );${holes}${edges}
+	vec2 open = 1.0 - smoothstep( -w, w, f );
+	vec2 m = mod( z - ${f5(this.ribFrom)}, ${f5(this.RIB)} ), rd = min( m, ${f5(this.RIB)} - m );
+	vec2 rib = ( 1.0 - smoothstep( ${f5(this.RIBW)} - w, ${f5(this.RIBW)} + w, rd ) ) * step( ${f5(this.ribFrom - this.RIBW)}, z ) * step( z, vec2( ${f5(this.ribTo + this.RIBW)} ) );${cuts}
+	vec2 k = open * ( 1.0 - rib );
+	if ( f0 == 16 ) k.x = ${cap(this.cap0, 'x')}; else if ( f0 == 17 ) k.x = ${cap(this.cap1, 'x')};
+	if ( f1 == 16 ) k.y = ${cap(this.cap0, 'y')}; else if ( f1 == 17 ) k.y = ${cap(this.cap1, 'y')};
+	return k;
 }
 float ${name}( vec3 w ) {
 	vec3 q = w - ${g3v(this.O)};
@@ -306,8 +308,8 @@ float ${name}( vec3 w ) {
 	float k = 1.0, tx = 1e9, tn = -1e9; int fx = -1, fn = -1;
 ${lines.join('\n')}
 	if ( tx > max( tn, 0.0 ) ) {
-		if ( tn > 0.0 ) k *= ${name}_pass( p + tn * D, fn, 0.05 + 0.0047 * tn );
-		if ( k > 0.0 ) k *= ${name}_pass( p + tx * D, fx, 0.05 + 0.0047 * tx );${bulk}
+		vec2 kk = ${name}_pass( p + tn * D, fn, p + tx * D, fx, 0.05 + 0.0047 * vec2( max( tn, 0.0 ), tx ) );
+		k = ( tn > 0.0 ? kk.x : 1.0 ) * kk.y;${bulk}
 		if ( k <= 0.0 ) return 0.0;
 	}
 	${this.boxes.map((b) => {
@@ -778,7 +780,9 @@ export class Wreck {
     const holes = [h(len * (0.3 + R() * 0.4), R() * 6.28, 30 + R() * 30, 30 + R() * 30, 3, 1), h(len * (0.2 + R() * 0.6), R() * 6.28, 18 + R() * 20, 20 + R() * 20, 2, 1)];
     const torn = (k) => this.edge(6 + R() * 4, [14 * k, 5 * k, 2 * k]);
     const paint = [[0.1, 0.1, 0.104], [0.095, 0.052, 0.036], [0.066, 0.078, 0.094], [0.085, 0.082, 0.075]][Math.floor(R() * 4)];
-    const def = { name: g.name, O: A, X, Y, Z, len, sec: FRIGATE, holes, ribFrom: 6, ribTo: len - 6, shade: g.how !== 'far', taper: 0, tip: 1, paint };
+    // (only the one the way flies through has the sun tested against it in every lit pixel: each piece's test is compiled
+    // into every lit material - a first visit's compile time)
+    const def = { name: g.name, O: A, X, Y, Z, len, sec: FRIGATE, holes, ribFrom: 6, ribTo: len - 6, shade: g.how === 'through', taper: 0, tip: 1, paint };
     if (g.how === 'through') Object.assign(def, { cap0: 'open', cap1: 'open', edge0: torn(1), edge1: torn(1.2) });
     else if (g.how === 'beside') Object.assign(def, { cap0: 'open', cap1: 'closed', edge0: torn(1.3) });
     else Object.assign(def, { cap0: 'closed', cap1: R() < 0.5 ? 'open' : 'closed', taper: len * 0.22, tip: 0.3 });
@@ -1486,10 +1490,14 @@ export class Wreck {
       H.box = { min: b.min, max: b.max, inv: new THREE.Vector3(...[D.x, D.y, D.z].map((x) => 1 / (Math.abs(x) < 1e-6 ? 1e-6 : x))) };
     }
     const src = shade.map(([H, i]) => H.glsl(`wreckH${i}`, this.sunL[i])).join('\n');
+    // (NO_WRECK_SUN: a material that never comes near the derelict - space.js: the rocks, the far scenery - is
+    // compiled without it)
     C.lights_pars_begin += `
-float wkWrap( float a ) { return a - 6.2831853 * floor( ( a + 3.1415927 ) / 6.2831853 ); }
+#ifndef NO_WRECK_SUN
+vec2 wkWrap2( vec2 a ) { return a - 6.2831853 * floor( ( a + 3.1415927 ) / 6.2831853 ); }
 ${src}
 float wreckSun( vec3 w ) { float k = 1.0;${shade.map(([, i]) => ` if ( k > 0.0 ) k *= wreckH${i}( w );`).join('')} return k; }
+#endif
 `;
     const L = C.lights_fragment_begin, a = 'directLight.color *= caveK;';
     if (!L.includes(a)) throw new Error('lights chunk changed: wreck patch not applied (setCave first)');
@@ -1497,7 +1505,11 @@ float wreckSun( vec3 w ) { float k = 1.0;${shade.map(([, i]) => ` if ( k > 0.0 )
     if (L.split(b).length !== 2) throw new Error('lights chunk changed: wreck patch not applied');
     C.lights_fragment_begin = L.replace(b, `${b}
 	vec3 wreckN = ( vec4( geometryNormal, 0.0 ) * viewMatrix ).xyz;
-	float wreckK = dot( wreckN, ${g3v(this.sunDir)} ) > 0.0 ? wreckSun( vCaveW + wreckN * 0.6 ) : 1.0;`)
+	#ifdef NO_WRECK_SUN
+	float wreckK = 1.0;
+	#else
+	float wreckK = dot( wreckN, ${g3v(this.sunDir)} ) > 0.0 ? wreckSun( vCaveW + wreckN * 0.6 ) : 1.0;
+	#endif`)
       .replace(a, `directLight.color *= caveK * ( UNROLLED_LOOP_INDEX == 0 ? wreckK : vCaveK.y );`);
     // where no sun gets in (the derelict's shadow, the meteorite) its shadow maps need not be looked up at all
     const sh = 'directLight.color *= ( directLight.visible && receiveShadow ) ? cascadeShadow() * worldShadow() : 1.0;';

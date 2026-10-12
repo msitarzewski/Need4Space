@@ -218,6 +218,12 @@ export class SpaceWorld {
     // the meteorite's own shadow from the sun, once (crater rims, boulders - at any distance)
     if (this.track.meteor) bakeRockShadow(renderer, [this.track.meteor.mesh, ...this.track.meteor.boulders], SUN_DIR);
     this.rocks = this.track.asteroids(scene);
+    // what never comes near the derelict is compiled without its sun test (wreck.js: in every other lit material - a
+    // first visit compiles it a program each): the rocks, the meteorite, the far scenery
+    if (this.wreck) {
+      const far = [...this.rocks, ...this.track.parts.cave, this.scenery.station, this.scenery.gate, ...this.scenery.freighters];
+      for (const o of far) o.traverse((m) => { for (const mt of [].concat(m.material || [])) if (mt.isMeshStandardMaterial) mt.defines = { ...mt.defines, NO_WRECK_SUN: '' }; });
+    }
     // gantry lamps: three real lights hop along the gantries ahead, so the ship is lit as it flies under them
     this.lamps = [0, 1, 2].map(() => {
       const l = new THREE.PointLight(new THREE.Color(0.75, 0.88, 1.0), 0, 70, 2);
