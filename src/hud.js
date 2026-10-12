@@ -13,8 +13,6 @@ export const ordinal = (n) => n + ((n % 100 > 10 && n % 100 < 14) ? 'th' : ['th'
 export const CONTROLS = [
   ['Flight', [
     [['W', 'S'], 'Throttle up / down (S at zero: brake)'],
-    [['S', 'A', 'D'], 'Drift: touch S and turn hard at speed; steer the slide with A / D (and W), catch it straight to kick out'],
-    [['S', 'S'], 'Drift again soon after a kick, or tap S again mid-drift: a bigger drift (up to three steps)'],
     [['A', 'D'], 'Steer'],
     [['←', '→', '↑', '↓'], 'Steer; in the air ↓ nose down, ↑ nose up'],
     [['Shift'], 'Boost (orange pads on the track kick too)'],
@@ -37,9 +35,8 @@ export const CONTROLS = [
     [['Esc'], 'Pause menu'],
   ]],
 ];
-export const GAMEPAD = 'Left stick steer (in the air: nose up / down), RT / LT throttle (touch LT and throw the stick over: ' +
-  'drift; steer the slide, catch it straight to kick out), A boost, B camera, LB / RB airbrakes. In the menus: d-pad, A select, ' +
-  'B back; View pauses.';
+export const GAMEPAD = 'Left stick steer (in the air: nose up / down), RT / LT throttle, A boost, B camera, LB / RB airbrakes. ' +
+  'In the menus: d-pad, A select, B back; View pauses.';
 
 export const controlsHTML = () => CONTROLS.map(([group, rows]) => `<div class="c-group"><div class="c-title">${group}</div>${rows.map(([keys, what]) =>
   `<div class="c-row"><span class="c-keys">${keys.map((k) => `<kbd>${k}</kbd>`).join('')}</span><span>${what}</span></div>`).join('')}</div>`).join('');

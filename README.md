@@ -27,7 +27,6 @@ Click or press a key once to start the sound and music (browsers block audio unt
 |---|---|
 | W / S | Throttle up / down |
 | A / D | Steer |
-| S + A / D | Drift: touch the brake and turn hard at speed, steer the slide, catch it straight for a kick and boost energy; drift again quickly (or tap S mid-drift) for a bigger one |
 | ↑ / ↓ | In the air: nose up / down (float further or land sooner) |
 | Z / X | Left / right airbrake |
 | Shift | Boost |
@@ -44,7 +43,7 @@ A gamepad (standard mapping) also works.
 ## Features
 
 - **Rivals:** AI on three difficulty levels, Normal, Hard and Brutal. They follow a racing line, plan their boost, use the boost pads, slipstream, overtake and defend.
-- **Physics:** track-space hover physics with jumps, loops, gravity flips, drifting, wall knocks and ship-to-ship contact.
+- **Physics:** track-space hover physics with jumps, loops, gravity flips, wall knocks and ship-to-ship contact. Drifting can be switched on in Settings.
 - **Picture:**
   - PCSS sun shadows in three cascades;
   - screen-space deck reflections;

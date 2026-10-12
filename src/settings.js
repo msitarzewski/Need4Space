@@ -3,7 +3,7 @@ const KEY = 'feather.settings.v4';
 export const DEFAULTS = { tonemap: 'aces', ao: true, bloom: true, shadows: 'high', scale: 1, exposure: 0, fps: true,
   blur: true, reflections: true, streaks: true, ai: 'easy', music: 'high', sfx: 'high', aa: 'smaa', aoRes: 'auto',
   brakeLights: true, laptop: false, touch: 'auto', map: 'space', shafts: true, lensWater: true, iceSnow: true, iceDust: true, aurora: true,
-  iceStorm: true, iceGeysers: true, wreckFx: true, wreckMist: true, drift: true, airPitch: true, sandFx: true, dustDevils: true, heatHaze: true,
+  iceStorm: true, iceGeysers: true, wreckFx: true, wreckMist: true, drift: false, airPitch: true, sandFx: true, dustDevils: true, heatHaze: true,
   sandstorm: true, caveFx: true };
 // Laptop mode's picture (quality.js has what else it cuts); turned off, the rows go back to what they were. The render
 // scale stays at 100 %: with the rest cut, a laptop's integrated GPU holds it (tested on a Core Ultra 5 235U)
@@ -67,6 +67,9 @@ export class Settings {
     if (!this.v.aiPicked) this.v.ai = DEFAULTS.ai;
     // and the music's level High, unless one was chosen
     if (!this.v.musicPicked) this.v.music = DEFAULTS.music;
+    // ("skip drifting for now": braking into a bend with the stick over slid the ship where the rivals just brake -
+    // off unless the player turns it on)
+    if (!this.v.driftPicked) this.v.drift = DEFAULTS.drift;
     this.focus = 0;                                  // the row the keyboard / gamepad is on
     this.onSet = null;                               // (k, value) after every change (menu.js: the difficulty accent)
     this.el = document.getElementById('settings');
@@ -101,6 +104,7 @@ export class Settings {
     this.v[k] = val;
     if (k === 'ai') this.v.aiPicked = true;
     if (k === 'music') this.v.musicPicked = true;
+    if (k === 'drift') this.v.driftPicked = true;
     try { localStorage.setItem(KEY, JSON.stringify(this.v)); } catch { /* storage blocked */ }
     this.apply(this.v);
     this.draw();

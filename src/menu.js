@@ -17,7 +17,7 @@ const pad2 = (i) => String(i + 1).padStart(2, '0');
 // the rivals' classes (race.js AI_LEVELS); the stat bars come from the levels' own numbers
 const LEVELS = [
   { id: 'easy', name: 'Easy', tag: 'Learn the tracks',
-    desc: 'Slower rivals that give you room. Wall knocks cost you a fifth of the speed, and drifts pay out extra boost.' },
+    desc: 'Slower rivals that give you room, and wall knocks cost you only a fifth of the speed.' },
   { id: 'normal', name: 'Normal', tag: 'A fair fight',
     desc: 'Rivals miss about half the boost pads, fire their boost at random and drift off the line. They never block you.' },
   { id: 'hard', name: 'Hard', tag: 'Sharp racecraft',
@@ -144,7 +144,7 @@ export class Menu {
         <header><div class="m-kicker"><span class="k-keys">Keyboard, mouse, gamepad</span><span class="k-touch">Touch</span></div><h2 class="m-h2">Controls</h2></header>
         <div class="c-touch">
           <div class="c-row"><span class="c-keys"><kbd>Left stick</kbd></span><span>Steer (in the air: nose up / down)</span></div>
-          <div class="c-row"><span class="c-keys"><kbd>Right stick</kbd></span><span>Up: throttle - down: brake - sideways: airbrakes. Drift: brake with the left stick hard over</span></div>
+          <div class="c-row"><span class="c-keys"><kbd>Right stick</kbd></span><span>Up: throttle - down: brake - sideways: airbrakes</span></div>
           <div class="c-row"><span class="c-keys"><kbd>Boost</kbd></span><span>Boost (orange pads on the track kick too)</span></div>
           <div class="c-row"><span class="c-keys"><kbd>Cam</kbd></span><span>Camera: chase, far, canopy, fly-by, orbit</span></div>
           <div class="c-row"><span class="c-keys"><kbd>II</kbd></span><span>Pause menu</span></div>
