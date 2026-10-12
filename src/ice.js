@@ -129,7 +129,7 @@ export class IceWorld {
     // cast while that map is drawn and stop after
     this.statics = [];
     scene.traverse((o) => { if ((o.isMesh || o.isInstancedMesh) && o.castShadow && o.layers.isEnabled(6)) this.statics.push(o); });
-    for (const m of [this.track.parts.under, ...this.track.parts.walls]) { m.castShadow = true; this.statics.push(m); }
+    for (const m of [this.track.parts.under]) { m.castShadow = true; this.statics.push(m); }
     this.staticsCast = true;
     // gantry lamps, as in space
     this.lamps = [0, 1, 2].map(() => { const l = new THREE.PointLight(new THREE.Color(0.8, 0.9, 1.0), 0, 70, 2); scene.add(l); return l; });
