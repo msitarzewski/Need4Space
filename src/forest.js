@@ -44,28 +44,34 @@ pt(220, 52, -560, -8, 'under'); pt(500, 44, -470, 0);
 pt(740, 50, -300, 28); pt(840, 46, -40, 6); pt(860, 56, 160, 0, 'crest1'); pt(855, 34, 300); pt(845, 22, 450);
 // the canyon of pillars, rolling twice round the ship under the vines
 pt(835, 14, 600, 0, 'canyonIn'); pt(825, 8, 760, 120); pt(815, 2, 920, 240); pt(805, -4, 1080, 0, 'canyonOut');
-// down round the Great Tree's trunk: one turn, 125 m of descent, under its own entry
-pt(750, -40, 1300, 25); pt(560, -80, 1440, 18);
+// down round the Great Tree's trunk: one turn, 125 m of descent, under its own entry (a point every 22.5 deg, banked
+// 38: with one every 45 deg its bend rippled between ~140 and ~250 m and kinked where it met the Hollow's plan)
+pt(750, -40, 1300, 25); pt(560, -80, 1440, 18); pt(430, -94, 1465, 20);
 export const TREE_C = new THREE.Vector3(300, 0, 1290), TREE_R = 175;
-for (let k = 0; k <= 8; k++) {
-  const a = (k / 8) * Math.PI * 2;
-  pt(Math.round(TREE_C.x - TREE_R * Math.sin(a)), Math.round(-100 - 125 * k / 8), Math.round(TREE_C.z + TREE_R * Math.cos(a)),
-    k > 0 && k < 8 ? 30 : 22, k === 0 ? 'treeIn' : k === 8 ? 'treeOut' : null);
+for (let k = 0; k <= 16; k++) {
+  const a = (k / 16) * Math.PI * 2;
+  pt(Math.round(TREE_C.x - TREE_R * Math.sin(a)), Math.round(-100 - 125 * k / 16), Math.round(TREE_C.z + TREE_R * Math.cos(a)),
+    k > 0 && k < 16 ? 38 : 26, k === 0 ? 'treeIn' : k === 16 ? 'treeOut' : null);
 }
 // Into the Hollow, a hill of rock floating over the abyss, under its own way out: through a waterfall into a cave in
 // its north cliff, a loop through it (down into a cavern over a lake, a jump over a chasm, crystal, a hall of
 // stalactites, the roots of the jungle overhead, fungi, a river, a fissure), out of a mouth higher up and over a cut in
 // the deck, the way in below; then the loop. Its plan: arcs ([radius, degrees], + to the left) and straights ([0, m])
 // walked on from the tree's foot - a point every 45 m, the heights from the slopes (%), eased from stretch to stretch
-export const HOLLOW_PLAN = [[0, 315], [300, 45], [0, 163.87], [260, 45], [0, 120], [260, 40], [450, -16], [380, 16], [260, 185],
-  [0, 267.12], [500, 15], [500, -15], [0, 140], [300, 45], [0, 100]];
+// (the chasm 20 m into a straight of 166 m, the bends either side of it wider and closing the plan as before - a ship
+// landed 22 deg into the bend after it; its crest a gentle one, a hop over the cut; the way out's jump 240 m from the
+// bend to the loop, which it used to land in)
+export const HOLLOW_PLAN = [[0, 315], [300, 40], [0, 100], [291.8, 40], [0, 165.8], [250, 50], [450, -16], [380, 16], [260, 185],
+  [0, 267.12], [500, 15], [500, -15], [0, 240], [320, 10]];
+let LX, LZ, LH;                                    // where the plan comes out, and its heading there (x, z)
 {
-  const SLOPES = [[0, -1], [315, -4], [625, -3], [790, -27], [850, -26], [950, 5], [1060, -10], [1130, -12], [1220, -2], [1300, 0],
-    [1452, 3], [1730, 14], [1990, 11], [2300, 10], [2600, 10], [2754, 6], [2814, 0], [2864, -8], [2960, -9], [3070, -6], [3196, -2], [3296, 0]];
-  const BANKS = [[0, 0], [315, 0], [430, -14], [551, -4], [714, -6], [919, -4], [1000, -4], [1039, -8], [1120, -16], [1220, -4], [1283, 8],
-    [1346, -2], [1400, -8], [1452, -12], [1530, -18], [2200, -18], [2291, -4], [2559, -2], [2620, -5], [2690, 0], [2750, 5], [2820, 0],
-    [2900, 0], [2990, -10], [3080, -14], [3196, -4], [3296, 0]];
-  const NAMES = { caveIn: 670, chasm: 987, caveOut: 2754, jump: 2814 }, EVERY = 45, Y1 = -216, FIX = 2864;
+  const SLOPES = [[0, -1], [315, -4], [520, -3], [700, -24], [720, -24], [788, 4], [848, 2], [894, -1], [955, -5], [1045, -18],
+    [1135, -25], [1220, -8], [1292, 0], [1444, 3], [1722, 14], [1982, 11], [2292, 10], [2592, 10], [2746, 5], [2800, 1], [2856, -5],
+    [2952, -8], [3040, -10], [3108, -5]];
+  const BANKS = [[0, 0], [315, 0], [420, -14], [524, -4], [590, -5], [725, -14], [815, -4], [838, 0], [905, 0], [960, -8], [1103, -18],
+    [1200, -4], [1275, 8], [1338, -2], [1392, -8], [1444, -12], [1522, -18], [2192, -18], [2283, -4], [2551, -2], [2612, -5], [2682, 0],
+    [2742, 5], [2812, 0], [3040, 0], [3080, -4], [3108, 0]];
+  const NAMES = { caveIn: 670, chasm: 834, caveOut: 2746, jump: 2806 }, EVERY = 45, Y1 = -205, FIX = 2856;
   const knot = (k, q) => { let i = 0; while (i < k.length - 2 && q > k[i + 1][0]) i++; const t = Math.min(1, Math.max(0, (q - k[i][0]) / (k[i + 1][0] - k[i][0]))); return k[i][1] + (k[i + 1][1] - k[i][1]) * t; };
   let [x, y, z] = P.at(-1), hx = -1, hz = 0, s = 0;
   const path = [[x, y, z, 0]];
@@ -84,17 +90,38 @@ export const HOLLOW_PLAN = [[0, 315], [300, 45], [0, 163.87], [260, 45], [0, 120
     const [px, py, pz] = at(q);
     pt(+px.toFixed(1), +(py + err * Math.max(0, (q - FIX) / (s - FIX))).toFixed(1), +pz.toFixed(1), Math.round(knot(BANKS, q)), nm);
   }
+  [LX, LZ, LH] = [x, z, [hx, hz]];
 }
-pt(-660, -216, 1450, 0, 'preLoop');
+// the loop, 130 m on along the way the plan comes out, its way out 80 m to the right of its way in (eased across: a
+// step taken evenly kinked the way in and out)
+const [FX, FZ] = LH, [RX, RZ] = [-FZ, FX];
+pt(LX, -205, LZ, 0, 'preLoop');
 for (let k = 0; k <= 12; k++) {
-  const a = (k / 12) * Math.PI * 2;
-  pt(-790 - 80 * Math.sin(a), -136 - 80 * Math.cos(a), 1450 - 80 * k / 12, 0, k === 0 ? 'loopIn' : k === 12 ? 'loopOut' : null);
+  const a = (k / 12) * Math.PI * 2, f = 130 + 80 * Math.sin(a), r = 40 * (1 - Math.cos(a / 2));
+  pt(LX + FX * f + RX * r, -125 - 80 * Math.cos(a), LZ + FZ * f + RZ * r, 0, k === 0 ? 'loopIn' : k === 12 ? 'loopOut' : null);
 }
-// south over the abyss to the skeleton: a long run at its open jaws, in through its mouth and out of the back of its
-// skull over a cut in the deck (its neck plunging away below), round, and the long climb home past it
-pt(-930, -214, 1392, -20); pt(-1005, -210, 1560, -6);
+// south over the abyss to the skeleton: out of the loop a long sweep left of ~300 m onto a run at its open jaws (it was
+// a turn of ~90 m, 25 m past the loop), in through its mouth and out of the back of its skull over a cut in the deck
+// (its neck plunging away below), round, and the long climb home past it
+{
+  const sx = LX + FX * 130 + RX * 80, sz = LZ + FZ * 130 + RZ * 80, R = (-1020 - sx) / (FZ - 1), cx = sx + R * FZ, cz = sz - R * FX;
+  const h = Math.atan2(FZ, FX), turn = ((h - Math.PI / 2) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2), n = Math.ceil(turn / 0.18);
+  for (let k = 1; k <= n; k++) {
+    const g = h - (turn * k) / n, e = Math.sin((Math.PI * k) / n);
+    pt(cx - R * Math.sin(g), -205 - 2 * k / n, cz + R * Math.cos(g), Math.round(-4 - 24 * e));
+  }
+}
 pt(-1018, -206, 1760, 0, 'skullRun'); pt(-1022, -202, 1955, 0, 'skullIn'); pt(-1024, -200, 2140, 0, 'skull'); pt(-1026, -197, 2325, 0, 'skullOut');
-pt(-1032, -206, 2470, 14); pt(-1080, -201, 2590, 30); pt(-1180, -192, 2655, 34); pt(-1295, -182, 2625, 30); pt(-1355, -172, 2505, 20);
+pt(-1027, -207, 2430, 4);
+// a half turn of ~170 m, banked into it, from 80 m past the cut (it was ~100 m, and began where the ships landed)
+{
+  const x0 = -1028, x1 = -1365, z0 = 2500, R = (x0 - x1) / 2, cx = (x0 + x1) / 2;
+  for (let k = 0; k <= 12; k++) {
+    const a = (k / 12) * Math.PI;
+    pt(cx + R * Math.cos(a), -208 + 34 * k / 12, z0 + R * Math.sin(a), k === 0 || k === 12 ? 16 : 32);
+  }
+}
+pt(-1367, -162, 2420, 8);
 // the climb home upside down: the gravity turns over (the next deck overhead), the jungle for a sky, the skeleton's neck
 // hanging into it beside the way; turned back over before the run to the line
 pt(-1375, -144, 2300, 0, 'flipA'); pt(-1370, -120, 2090, 180, 'flipB');
@@ -104,13 +131,14 @@ pt(-1258, -90, 1415, 0, 'flipD'); pt(-1205, -62, 1160, -4);
 export const FOREST_LAYOUT = layout(P, {
   start: [-1150, 0, 400],
   loops: [['loopIn', 'loopOut']],
-  gaps: [['crest1', 35, 105], ['chasm', 14, 80], ['jump', 14, 86], ['skullOut', 26, 92]],
+  gaps: [['crest1', 35, 105], ['chasm', 14, 60], ['jump', 14, 86], ['skullOut', 26, 92]],
   flips: [['flipA', 'flipB'], ['flipC', 'flipD']],
   // the skull over the deck (no gantry, lamp or board inside it)
   covers: [['skullIn', -240, 'skullOut', 20]],
   caves: [['caveIn', -10, 'caveOut', 10]],
   pads: [['start', 330, 0], ['fallsIn', -170, -10], ['fallsIn', -170, 10], ['under', 60, 0], ['canyonOut', 120, 0],
-    ['treeIn', -170, 0], ['caveIn', -110, 10], ['preLoop', 30, 0], ['loopOut', 260, -10], ['skullRun', -40, 0], ['skullView', 60, -10], ['skullView', 60, 10]],
+    ['treeIn', -170, 0], ['treeOut', 40, 0], ['preLoop', 30, 0], ['skullRun', -200, -10], ['skullRun', -40, 0], ['skullView', 60, -10],
+    ['skullView', 60, 10]],
   gates: [['start', -60, 0x60ffb0], ['crest1', -90, 0xffb020], ['canyonIn', -40, 0x9cff40], ['treeIn', -60, 0x40d8ff],
     ['caveIn', -60, 0xffb020], ['preLoop', -40, 0xff4a8a], ['skullOut', -260, 0xffb020]],
   // the tunnels of vines over the deck
