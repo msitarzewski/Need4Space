@@ -39,6 +39,7 @@ export function buildZones(w) {
   z.tower();
   z.outside();
   z.graveyard();
+  z.breakZone();
   z.sparks();
   z.windows();
   new Mist(w, w.aft, 600, w.aft.len - w.aft.block - 4, [-124, -104, -86]);
@@ -532,13 +533,38 @@ class Zones {
         w.place(r < 0.22 ? 'fighterW' : 'fighter', H, F(V(sd * (xIn + 19), y + 5.0, zc + (R() - 0.5)), V(0, 0, sd), V(0, 1, 0), nose), 1.6, r > 0.85 ? [0.9, 0.85, 0.8] : null);
       }
     }
+    // rack towers down both sides of the way: posts from the deck, a platform every 22 m, a fighter on each (its nose
+    // to the way), the platforms' edges lit; every ~120 m, sides alternating
+    let side = 1;
+    const towers = [];
+    for (let s = this.sAt(H, 1180, 'jump2'); s < this.tr.at('breach') - 160; s += 110 + R() * 30, side = -side) {
+      const t = w.tl(H, s), c = t.p.clone().addScaledVector(t.R, side * (98 + R() * 12));
+      c.y = -150;
+      const top = Math.min(t.p.y + 30, -60), n = Math.floor((top + 150) / 22), out = V(t.R.x, 0, t.R.z).normalize().multiplyScalar(-side);
+      if (n < 2 || !w.free(H, V(c.x, (top - 150) / 2, c.z), 24) || this.floorAt(H, c.x, c.z) === undefined) continue;
+      const ax = new THREE.Vector3().crossVectors(V(0, 1, 0), out).normalize(), o = { kind: K_FRAME, paint: PAINT_FRAME };
+      towers.push(c);
+      for (const [dx, dz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        const q = c.clone().addScaledVector(ax, dx * 17).addScaledVector(out, dz * 17);
+        w.beam(H, V(q.x, -149.6, q.z), V(q.x, -150 + n * 22 + 3, q.z), 2.2, 2.2, V(0, 0, 1), o);
+      }
+      for (let k = 1; k <= n; k++) {
+        const y = -150 + k * 22, pc = V(c.x, y, c.z);
+        w.box(H, F(pc, ax, V(0, 1, 0), out), 18, 0.5, 18, { kind: K_DECK, paint: P.deck });
+        w.box(H, F(pc.clone().addScaledVector(out, 18.2).add(V(0, 0.7, 0)), ax, V(0, 1, 0), out), 17, 0.12, 0.12, { kind: K_LAMP, paint: LAMP.amber.map((x) => x * 0.45), seed: 30000 + Math.floor(R() * 1e4), b: 0 });
+        if (R() < 0.15) continue;
+        w.place('cradle', H, F(pc.clone().add(V(0, 1.1, 0)), ax, V(0, 1, 0), out), 1.6);
+        w.place(R() < 0.15 ? 'fighterW' : 'fighter', H, F(pc.clone().add(V(0, 5.0, 0)), ax, V(0, 1, 0), out), 1.6, R() > 0.8 ? [0.9, 0.85, 0.8] : null);
+      }
+      w.lamp(H, c.clone().add(V(0, n * 22 + 5, 0)).addScaledVector(out, 14), out.clone().add(V(0, -0.4, 0)).normalize(), 'cold', 1.6, { reach: 120, I: 6000 });
+    }
     // dropships on the deck in rows, on their rails; one knocked off its rail
     for (const sx of [-1, 1]) {
       const x = sx * 140;
       w.box(H, F(V(x, -149.3, (z0 + z1) / 2)), 3, 0.5, (z1 - z0) / 2, { kind: K_FRAME, paint: P.hazard });
       for (let z = z0 + 60; z < z1 - 40; z += 110) {
         const tilt = sx > 0 && Math.abs(z - 890) < 60 ? 0.35 : 0, p = V(x + (tilt ? 18 : 0), -150 + 10.2 + (tilt ? 4 : 0), z);
-        if (!w.free(H, p, 30) || this.floorAt(H, p.x, z) === undefined) continue;
+        if (!w.free(H, p, 30) || this.floorAt(H, p.x, z) === undefined || towers.some((q) => Math.hypot(q.x - p.x, q.z - p.z) < 60)) continue;
         const ay = V(Math.sin(tilt) * -1, Math.cos(tilt), 0), ax = new THREE.Vector3().crossVectors(ay, V(0, 0, -1)).normalize();
         w.place('dropship', H, F(p, ax, ay, V(0, 0, -1)), 1, R() < 0.5 ? null : [0.8, 0.82, 0.85]);
       }
@@ -555,6 +581,58 @@ class Zones {
     // light: floods under the roof, lamps down the walls, marker rings
     for (const [x, z] of [[-120, 700], [120, 820], [-120, 1000], [120, 1150]]) this.flood(H, V(x, this.innerY(H, x, z, 1) - 4, z), V(-x * 0.003, -1, 0.1).normalize(), 'cold', 650, 1.4e6);
     this.markerRings(H, z0, z1, 4, 'amber');
+  }
+
+  // ---- where it broke: the keel's box trusses snapped out of the torn ends and bent, cables still strung across the
+  // gaps between the pieces, slack, others hanging loose; plates and chunks adrift in the gaps
+  breakZone() {
+    const w = this.w, R = this.R, { fore, mid, aft } = w;
+    const truss = (H, z0, z1, bend, y = -150, x = 0) => {
+      const wd = 6, pts = (zz, c) => { const t = clamp((zz - z0) / (z1 - z0), 0, 1), b = bend * Math.max(0, t - 0.5) ** 2 * 60; return V(x + c[0] * wd, y + c[1] * wd + b, zz); };
+      const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]], step = 10, o = { kind: K_FRAME, paint: PAINT_FRAME }, od = { ...o, layer: 'detail' };
+      for (const c of corners) for (let z = z0; z < z1; z += step) w.beam(H, pts(z, c), pts(Math.min(z1, z + step), c), 1.6, 1.6, V(0, 1, 0), o);
+      for (let z = z0; z <= z1; z += step) for (let e = 0; e < 4; e++) {
+        const a = corners[e], b = corners[(e + 1) % 4];
+        w.beam(H, pts(z, a), pts(z, b), 0.9, 0.9, V(0, 0, 1), od);
+        if (z + step <= z1) w.beam(H, pts(z, a), pts(z + step, b), 0.7, 0.7, V(0, 0, 1), od);
+      }
+    };
+    truss(fore, fore.len - 90, fore.len + 40, -1, -150, 60);
+    truss(fore, fore.len - 70, fore.len + 22, 1, -150, -90);
+    truss(aft, -36, 60, 1, -150, 40);
+    truss(mid, -30, 40, -1, -150, -70);
+    truss(mid, mid.len - 40, mid.len + 34, 1, -150, 90);
+    // cables across the gaps: from a torn end's last frame to the next piece's, slack
+    const across = (A, za, B, zb, n) => {
+      for (let k = 0; k < n; k++) {
+        const a = A.toWorld(V(-200 + R() * 400, -120 + R() * 260, za)), b = B.toWorld(V(-200 + R() * 400, -120 + R() * 260, zb)), sag = 14 + R() * 30, pts = [];
+        for (let i = 0; i <= 18; i++) { const t = i / 18; pts.push(fore.toLocal(a.clone().lerp(b, t).add(V(0, -sag * 4 * t * (1 - t), 0)))); }
+        if (pts.every((q) => w.free(fore, q, 4))) w.tube(fore, pts, 0.8 + R() * 0.8, { kind: K_MACH, paint: P.cable, segs: 8, sway: 1.4 });
+      }
+    };
+    across(fore, fore.len - 6, mid, 6, 6);
+    across(mid, mid.len - 6, aft, 6, 6);
+    // adrift in the gaps
+    const kinds = ['plate', 'stub', 'chunk', 'plate', 'container'], gaps = [[fore, fore.len, mid, 0], [mid, mid.len, aft, 0]];
+    for (const [A, za, B, zb] of gaps) {
+      const a = A.toWorld(V(0, 0, za)), b = B.toWorld(V(0, 0, zb));
+      for (let k = 0, n = 0; k < 400 && n < 40; k++) {
+        const p = a.clone().lerp(b, R()).add(V((R() - 0.5) * 520, (R() - 0.5) * 360, (R() - 0.5) * 160)), kind = kinds[Math.floor(R() * kinds.length)];
+        const size = kind === 'container' ? 1 : 2 + R() * 5;
+        if (!this.clearOfTrack(p, size * 7 + 10)) continue;
+        const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(R() * 6.3, R() * 6.3, R() * 6.3));
+        w.drift(kind, fore, F(fore.toLocal(p), fore.dirLocal(V(1, 0, 0).applyQuaternion(q)), fore.dirLocal(V(0, 1, 0).applyQuaternion(q)), fore.dirLocal(V(0, 0, 1).applyQuaternion(q))), size, kind === 'container' ? TINTS[Math.floor(R() * TINTS.length)] : null, 2 + R() * 3);
+        n++;
+      }
+    }
+  }
+  // a world point clear of the track (the space round it)
+  clearOfTrack(p, r) {
+    for (const q of this.w.near(p, r + 50)) {
+      const d = p.clone().sub(q.P), x = d.dot(q.R), y = d.dot(q.U);
+      if (Math.abs(x) < 36 + r && y > -16 - r && y < 28 + r) return false;
+    }
+    return true;
   }
 
   // ---- where sparks fly (wreck.js Sparks): torn conduits - the ruptured front's, the reactor's coolant lines, the holds'
@@ -828,7 +906,7 @@ class Zones {
       for (let k = 0; k < n; k++) {
         const u = (k + 0.5) / n;
         if (!this.solid(H, face, u, z, 0.5 / n, 9, 10) || this.taken(H, face, u - 0.5 / n, u + 0.5 / n, z - 8, z + 8)) continue;
-        this.w.box(H, this.onHull(H, face, u, z, 2), (W * H.k(z)) / n / 2 + 0.1, 2, 8, { kind: K_HULL, paint: [0.06, 0.062, 0.064], sky: 1, b: 1, layer: 'shell' });
+        this.w.box(H, this.onHull(H, face, u, z, 2), (W * H.k(z)) / n / 2 + 0.1, 2, 8, { kind: K_HULL, paint: [0.06, 0.062, 0.064], sky: 1, b: 1, layer: 'relief' });
       }
       this.mark(H, face, 0, 1, z - 9, z + 9);
     }
@@ -843,7 +921,7 @@ class Zones {
       const a = H.OCT[face], b = H.OCT[(face + 1) % 8], W0 = Math.hypot(b[0] - a[0], b[1] - a[1]);
       for (let z = 6; z < H.len - 12;) {
         const L = (24 + Math.floor(R() * 4) * 16) * sc, z1 = Math.min(H.len - 8, z + L), Wm = W0 * H.k((z + z1) / 2), r = R();
-        const tone = PAINT_HULL.map((c) => c * (0.82 + R() * 0.36)), o = { kind: K_HULL, paint: tone, sky: 1, layer: 'shell' };
+        const tone = H.paint.map((c) => c * (0.82 + R() * 0.36)), o = { kind: K_HULL, paint: tone, sky: 1, layer: 'relief' };
         if (r < 0.4) {                                                 // armour plates in a row across
           const n = Math.max(1, Math.round(Wm / ((8 + R() * 6) * sc))), t = (0.5 + R() * 0.7) * sc, gap = 1.2 * sc / Wm;
           for (let k = 0; k < n; k++) {
@@ -884,8 +962,8 @@ class Zones {
       if (H.hulk.how !== 'far') this.relief(H);
       const z = H.len * (0.55 + R() * 0.2), Fb = this.onHull(H, 0, 0.5, z, 9);
       if (this.solid(H, 0, 0.5, z, 0.3, 30, 4)) {
-        w.box(H, Fb, 26, 9, 34, { kind: K_HULL, paint: PAINT_HULL, sky: 1, b: 2, layer: 'shell' });
-        w.box(H, F(Fb.o.clone().addScaledVector(Fb.ay, 12), Fb.ax, Fb.ay, Fb.az), 16, 4, 14, { kind: K_HULL, paint: PAINT_HULL, sky: 1, b: 1.2, layer: 'shell' });
+        w.box(H, Fb, 26, 9, 34, { kind: K_HULL, paint: H.paint, sky: 1, b: 2, layer: 'shell' });
+        w.box(H, F(Fb.o.clone().addScaledVector(Fb.ay, 12), Fb.ax, Fb.ay, Fb.az), 16, 4, 14, { kind: K_HULL, paint: H.paint, sky: 1, b: 1.2, layer: 'shell' });
         w.box(H, F(Fb.o.clone().addScaledVector(Fb.ay, 12).addScaledVector(Fb.az, -14.2), Fb.ax, Fb.ay, Fb.az), 15, 1.4, 0.4, { kind: K_INNER, paint: [0.01, 0.012, 0.014], sky: 1 });
         w.lamp(H, Fb.o.clone().addScaledVector(Fb.ay, 16.6), Fb.ay, 'red', 1.2, { sky: 1, layer: 'main' });
       }
@@ -895,6 +973,11 @@ class Zones {
         w.lathe(H, F(c, V(1, 0, 0), V(0, 0, 1), V(0, -1, 0)), [[13.1, 30.6], [8.6, 16], [6.2, 4.2]], { kind: K_MACH, paint: P.soot, sky: 0.5, segs: 24, layer: 'shell' });
       }
       if (H.hulk.how === 'through') { this.markerRings(H, 10, H.len - 10, 3, 'red'); this.wallLamps(H, 10, H.len - 10, 0, 2, ['red', 'amber']); }
+      if (H.hulk.how !== 'far') for (const [face, z] of [[0, H.len * 0.2], [4, H.len * 0.5], [0, H.len * 0.85]]) {
+        if (!this.solid(H, face, 0.5, z, 0.1, 4, 3)) continue;
+        const Fl = this.onHull(H, face, 0.5, z, 1.5);
+        w.lamp(H, Fl.o, Fl.ay.clone().multiplyScalar(0.35).addScaledVector(Fl.az, z > H.len / 2 ? -1 : 1).normalize(), R() < 0.5 ? 'amber' : 'cold', 1.6, { sky: 1, reach: 420, I: 2.6e5, area: 30, layer: 'main' });
+      }
     }
     // debris: shapes built once, adrift, round the way from the breach to the trench
     w.module('plate', (M) => { const ho = { kind: K_HULL, paint: PAINT_HULL, sky: 1, soot: 0.3 }, to = { kind: K_TORN, paint: PAINT_TORN, sky: 1, soot: 0.6 };

@@ -14,10 +14,10 @@
 //    against every piece - its faces, holes, frames and bulkheads - so the sun only comes in where the hull is open, in
 //    shafts striped by the frames, with a penumbra as wide as the sun's disc makes it;
 //  - the sky light inside (an ambient cube per cell, rays through the same holes, worked out only where it is used).
-// Drawn in chunks: each piece's geometry in 160 m lengths and three layers - the shell (both skins, the big things
-// outside: seen from anywhere on the circuit), the main (frames, decks, machinery: within 1.8 km), the detail (small
-// parts: within 500 m). What repeats (fighters, containers, turrets, racks, debris) is instanced in groups, each drawn
-// within its own reach.
+// Drawn in chunks: each piece's geometry in 160 m lengths and layers - the shell (both skins, the big things outside:
+// seen from anywhere on the circuit), the skin's relief (within 2.6 km, not from inside), the main (frames, decks,
+// machinery: within 1.8 km), the detail (small parts: within 500 m). What repeats (fighters, containers, turrets, racks,
+// debris) is instanced in groups, each drawn within its own reach (from outside its piece, only near).
 // No text, numbers, signs or markings anywhere: plates, seams, hatches, vents, wear and soot only.
 import * as THREE from 'three';
 import { mulberry32, noise2, smoothstep, clamp } from './noise.js';
@@ -28,8 +28,9 @@ import { buildZones } from './wreckzones.js';
 
 const TAU = Math.PI * 2;
 const CHUNK = 160;                                            // a chunk's length along its piece (m)
-// how far each layer is drawn (m, to its chunk's sphere); 'cast' is the shell's that throws shadows (the trench's walls)
-const RANGE = { shell: 1e9, cast: 1e9, main: 1800, detail: 500 };
+// how far each layer is drawn (m, to its chunk's sphere); 'cast' is the shell's that throws shadows (the trench's walls),
+// 'relief' the skin's own (armour plates, strips, belts: from further off only the hull's shape counts)
+const RANGE = { shell: 1e9, cast: 1e9, relief: 2600, main: 1800, detail: 500 };
 const ihash = (n) => { let h = Math.imul(n | 0, 374761393) ^ 0x5bd1e995; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
 const wrapA = (a) => a - TAU * Math.floor((a + Math.PI) / TAU);
 const f5 = (x) => (Math.abs(x) < 1e-9 ? '0.0' : x.toFixed(5));
@@ -96,7 +97,7 @@ class Geo {
 class Hull {
   constructor(d) {
     Object.assign(this, { cap0: 'closed', cap1: 'closed', holes: [], edge0: null, edge1: null, bulkheads: [], sternHole: null,
-      taper: 0, tip: 1, shade: true, ribFrom: 0 }, d);
+      taper: 0, tip: 1, shade: true, ribFrom: 0, paint: PAINT_HULL }, d);
     const v3 = (a) => (a.isVector3 ? a.clone() : new THREE.Vector3(a[0], a[1], a[2]));
     this.O = v3(d.O); this.X = v3(d.X); this.Y = v3(d.Y); this.Z = v3(d.Z);
     const s = d.sec;
@@ -510,6 +511,9 @@ float wRelief( vec2 uv, float kind, float fp, float W, out vec2 id, out vec3 fea
 	}`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 	if ( wKind > 5.5 ) { totalEmissiveRadiance += vWC * 6.0; diffuseColor.rgb = vec3( 0.05 ); }`)
+      .replace('#include <lights_fragment_begin>', () => lightsBegin())
+      // (the sky's reflections and light not looked up where the sky is not seen: deep inside)
+      .replace('#include <lights_fragment_maps>', 'if ( vWA.y > 0.06 ) {\n#include <lights_fragment_maps>\n}')
       .replace('#include <lights_fragment_end>', `{
 		// (its own view of the sky in place of the shade round the deck - look.js's, applied after this)
 		float wSky = vWA.y / max( vCaveK.y, 1e-3 );
@@ -537,6 +541,20 @@ float wRelief( vec2 uv, float kind, float fp, float W, out vec2 id, out vec3 fea
   mat.customProgramCacheKey = () => `wreck2-${Q.lite}`;
   mat.userData.U = U;
   return mat;
+}
+
+// The light loop as the scene's other materials have it, but for the two lights that only carry the sun's mid and far
+// shadow maps (space.js: no light of their own, lights 1 and 2 - the shadow casters come first): not worked out at all;
+// and without the scene's point lights - they stand at the wreck's own lamps (space.js), whose light it has already
+// (the eight nearest, above): the ships' headlights (spots) still reach it
+function lightsBegin() {
+  let L = THREE.ShaderChunk.lights_fragment_begin;
+  const p0 = L.indexOf('#if ( NUM_POINT_LIGHTS > 0 ) && defined( RE_Direct )'), p1 = L.indexOf('#endif', L.indexOf('#pragma unroll_loop_end', p0));
+  const i0 = L.indexOf('DirectionalLight directionalLight;'), i1 = L.indexOf('#pragma unroll_loop_end', i0);
+  if (p0 < 0 || p1 < 0 || i0 < p1 || i1 < 0) return '#include <lights_fragment_begin>';
+  const dir = L.slice(i0, i1).replace(/RE_Direct\( directLight[^;]*;/, (m) => `#if UNROLLED_LOOP_INDEX != 1 && UNROLLED_LOOP_INDEX != 2\n\t\t${m}\n\t\t#endif`);
+  L = L.slice(0, i0) + dir + L.slice(i1);
+  return L.slice(0, p0) + L.slice(p1 + '#endif'.length);
 }
 
 // ---------------------------------------------------------------- the build
@@ -727,7 +745,8 @@ export class Wreck {
     const X = new THREE.Vector3().crossVectors(Y, Z), len = A.distanceTo(B);
     const holes = [h(len * (0.3 + R() * 0.4), R() * 6.28, 30 + R() * 30, 30 + R() * 30, 3, 1), h(len * (0.2 + R() * 0.6), R() * 6.28, 18 + R() * 20, 20 + R() * 20, 2, 1)];
     const torn = (k) => this.edge(6 + R() * 4, [14 * k, 5 * k, 2 * k]);
-    const def = { name: g.name, O: A, X, Y, Z, len, sec: FRIGATE, holes, ribFrom: 6, ribTo: len - 6, shade: g.how !== 'far', taper: 0, tip: 1 };
+    const paint = [[0.1, 0.1, 0.104], [0.095, 0.052, 0.036], [0.066, 0.078, 0.094], [0.085, 0.082, 0.075]][Math.floor(R() * 4)];
+    const def = { name: g.name, O: A, X, Y, Z, len, sec: FRIGATE, holes, ribFrom: 6, ribTo: len - 6, shade: g.how !== 'far', taper: 0, tip: 1, paint };
     if (g.how === 'through') Object.assign(def, { cap0: 'open', cap1: 'open', edge0: torn(1), edge1: torn(1.2) });
     else if (g.how === 'beside') Object.assign(def, { cap0: 'open', cap1: 'closed', edge0: torn(1.3) });
     else Object.assign(def, { cap0: 'closed', cap1: R() < 0.5 ? 'open' : 'closed', taper: len * 0.22, tip: 0.3 });
@@ -777,9 +796,9 @@ export class Wreck {
     return k;
   }
 
-  // ---- the plating: per face, cells the face's width / ~16 m across (6 m on the small hulls); near an edge cells a
-  // quarter of that, cut along the edge (marching squares); the edge's thickness; the inner skin; the plates within
-  // ~9 m (scaled) of an edge bent outward
+  // ---- the plating: per face, cells the face's width / ~16 m across (12 m on the small hulls); near an edge cells a
+  // third of that (a quarter on the small ones), cut along the edge (marching squares); the edge's thickness; the inner
+  // skin; the plates within ~9 m (scaled) of an edge bent outward
   plating(H) {
     const cell = H.HW > 100 ? 16 : 12, zEnd = H.len, info = {}, SKIN = H.SKIN, edgeK = 1.75 * cell;
     for (let face = 0; face < 8; face++) {
@@ -799,7 +818,7 @@ export class Wreck {
         const n = nrm(z), peel = this.peel(H, z, u, f, which, face);
         const po = outer(z, u, new THREE.Vector3()).addScaledVector(n, peel), pi = inner(z, u, new THREE.Vector3()).addScaledVector(n, peel);
         const nW = H.dirWorld(n, _nw), uv = u * W;
-        const o = g.v(H.toWorld(po, _pw), nW, uv, z, tW, [K_HULL, 1, soot, face], PAINT_HULL);
+        const o = g.v(H.toWorld(po, _pw), nW, uv, z, tW, [K_HULL, 1, soot, face], H.paint);
         const i = g.v(H.toWorld(pi, _pw), nW.negate(), uv, z, tW, [K_INNER, 0, soot * 0.7, face], PAINT_INNER);
         return [o, i, po, pi];
       };
@@ -816,7 +835,7 @@ export class Wreck {
           if (hi < -edgeK) continue;                               // all hole
           const g = this.geo(H, (z0 + z1) / 2, 'shell');
           if (lo > edgeK) { this.poly(g, [[z0, u0], [z1, u0], [z1, u1], [z0, u1]].map(([z, u], k) => emit(g, z, u, fs[k], -1, 0))); continue; }
-          const N = 4;
+          const N = H.HW > 100 ? 3 : 4;
           for (let sj = 0; sj < N; sj++) for (let sc = 0; sc < N; sc++) {
             const za = z0 + (z1 - z0) * sj / N, zb = z0 + (z1 - z0) * (sj + 1) / N, ua = u0 + (u1 - u0) * sc / N, ub = u0 + (u1 - u0) * (sc + 1) / N;
             this.cellCut(g, H, emit, za, zb, ua, ub, fld, info, sootAt, nrm);
@@ -968,10 +987,10 @@ export class Wreck {
         if (B.sub(A).cross(C.sub(A)).dot(nw) >= 0) g.tri(vs[a], vs[b], vs[c]); else g.tri(vs[a], vs[c], vs[b]);
       }
     };
-    if (H.cap0 === 'closed') wall(0, H.tip, -1, null, K_HULL, PAINT_HULL, 1, 'shell');
+    if (H.cap0 === 'closed') wall(0, H.tip, -1, null, K_HULL, H.paint, 1, 'shell');
     if (H.cap1 === 'stern' || H.cap1 === 'closed') {
       const h = H.cap1 === 'stern' ? H.sternHole : null, T = H.block ?? 24 * H.scale;
-      wall(H.len, 1, 1, h, K_HULL, PAINT_HULL, 1, 'shell');
+      wall(H.len, 1, 1, h, K_HULL, H.paint, 1, 'shell');
       wall(H.len - T, H.inset(1, H.SKIN), -1, h, K_INNER, PAINT_INNER, 0, 'shell');
       if (!h) return;
       // the hole's bore through the block: torn round its edge (the mount ripped out), blackened
@@ -1299,6 +1318,7 @@ export class Wreck {
       // (drawn after the rest of the scene's opaque things - three sorts by material before depth, and the deck and the
       // ships cover much of it - and the skins last: from inside they are behind all the rest)
       m.renderOrder = layer === 'shell' ? 0.6 : 0.5;
+      if (layer === 'relief') { m.renderOrder = 0.65; m.userData.outside = this.hullBy[key.split('|')[0]]; }
       this.meshes.push(m);
     }
     this.chunks.clear();
@@ -1353,11 +1373,18 @@ export class Wreck {
     const U = this.mat.userData.U, cam = camera.position;
     U.wTime.value = t;
     U.wGlow.value = 0.8 + 0.2 * Math.sin(t * 0.7) * (this.effects ? 1 : 0);
-    for (const m of this.meshes) { const sp = m.geometry.boundingSphere; m.visible = sp.center.distanceTo(cam) - sp.radius < m.userData.range; }
-    const out = new Map();
+    // (the skin's relief is not seen from inside its piece; what is inside it is not seen from outside, past 300 m)
+    const out = new Map(), isOut = (H, margin) => {
+      const p = H.toLocal(cam, _v), k = H.k(p.z);
+      return !(p.z > -margin && p.z < H.len + margin && Math.abs(p.x) < k * H.HW + margin && Math.abs(p.y) < k * H.HH + margin);
+    };
+    for (const m of this.meshes) {
+      const sp = m.geometry.boundingSphere, H = m.userData.outside;
+      m.visible = sp.center.distanceTo(cam) - sp.radius < m.userData.range && !(H && !isOut(H, -24));
+    }
     for (const m of this.instMeshes) {
       const sp = m.boundingSphere, d = sp.center.distanceTo(cam) - sp.radius, H = m.userData.inside;
-      if (H && !out.has(H)) { const p = H.toLocal(cam, _v), k = H.k(p.z) + 0.1; out.set(H, !(p.z > -40 && p.z < H.len + 40 && Math.abs(p.x) < k * H.HW && Math.abs(p.y) < k * H.HH)); }
+      if (H && !out.has(H)) out.set(H, isOut(H, 10));
       m.visible = d < (H && out.get(H) ? Math.min(300, m.userData.range) : m.userData.range);
     }
     const near = this.nearLamps(cam, 8, 450, t);

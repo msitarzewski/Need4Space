@@ -513,12 +513,13 @@ export function blockQueue(configs, { W = 1920, H = 1080, frames = 24, warm = 12
   r.setPixelRatio(pr); r.setSize(ow, oh, false); comp.setPixelRatio(pr); comp.setSize(ow, oh); F.camera.aspect = ow / oh; F.camera.updateProjectionMatrix();
   gl.flush();
 }
-export function blockCollect() {
+// (q: the quantile reported - the median; with other pages sharing the GPU, a low one is steadier: 0.2)
+export function blockCollect(q = 0.5) {
   const gl = window.__feather.renderer.getContext(), res = {};
   let pending = 0;
-  for (const [n, q] of BL.plan) { if (!gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) { pending++; continue; } (res[n] ||= []).push(gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6); }
+  for (const [n, k] of BL.plan) { if (!gl.getQueryParameter(k, gl.QUERY_RESULT_AVAILABLE)) { pending++; continue; } (res[n] ||= []).push(gl.getQueryParameter(k, gl.QUERY_RESULT) / 1e6); }
   const out = {};
-  for (const [n, v] of Object.entries(res)) { v.sort((a, b) => a - b); out[n] = +v[v.length >> 1].toFixed(2); }
+  for (const [n, v] of Object.entries(res)) { v.sort((a, b) => a - b); out[n] = +v[Math.floor((v.length - 1) * q)].toFixed(2); }
   if (!pending) { for (const [, q] of BL.plan) gl.deleteQuery(q); BL.plan = []; }
   return { pending, out };
 }
