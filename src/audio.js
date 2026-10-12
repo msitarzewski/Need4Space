@@ -18,6 +18,7 @@ const MUSIC_LV = { off: 0, low: 0.3, mid: 0.5, high: 0.72 };     // (+2 dB on th
 const SFX_LV = { low: 0.4, mid: 0.65, high: 0.9 };
 const C_SOUND = 700;            // a stylised speed of sound for the Doppler shift (m/s): ships pass at ~300 m/s
 const VOICES = 5;               // rival engines heard at once (the nearest)
+const LITE_VOICES = 3;          // (in Laptop mode: each voice is ~1 % of a fast core, all the time)
 const ENV_WET = { open: 0.05, tunnel: 0.42, cave: 0.8 };
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 // Recorded hits: Kenney's Impact Sounds and Sci-fi Sounds packs (CC0, assets/sfx) - "the hit sound is really shitty"
@@ -42,6 +43,8 @@ export class GameAudio {
     this.L = new THREE.Vector3(); this.camPrev = new THREE.Vector3(); this.camVel = new THREE.Vector3(); this.hasPrev = false;
     this.lastCount = 0; this.passDone = -1; this.env = 'open'; this.airTime = 0; this.frame = {};
     this.gates = {};
+    this.lite = false;              // Laptop mode (main.js): a larger buffer, fewer rival voices
+    this.sleepers = [];
     this.loadSfx();
   }
 
@@ -86,7 +89,9 @@ export class GameAudio {
     if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
-    const c = (this.ctx = new AC({ latencyHint: 'interactive' }));
+    // (Laptop mode: a 40 ms buffer, not 10 - on a laptop's busy CPU the audio thread missed its deadline now and then:
+    // the sound stuttered)
+    const c = (this.ctx = new AC({ latencyHint: this.lite ? 0.04 : 'interactive' }));
     this.master = c.createGain();
     this.master.gain.value = this.muted ? 0 : 1;
     const lim = c.createDynamicsCompressor();
@@ -117,6 +122,29 @@ export class GameAudio {
   }
 
   gain(v, ...to) { const g = this.ctx.createGain(); g.gain.value = v; for (const x of to) g.connect(x); return g; }
+  // A chain's last gain that sleeps while it is silent: disconnected, nothing before it is computed (the browser only
+  // runs what reaches the output). Most of the sound is silent most of the time - the afterburner, airbrakes, wall
+  // grind, barrier buzz, rival voices with no rival near - and its oscillators and noise ran all the same: the audio
+  // thread's work was ~8-10 % of a fast core, ~2.5 % with them asleep.
+  sleeper(v = 0) {
+    const g = this.gain(v), connect = g.connect.bind(g);
+    g.outs = [];
+    g.connect = (...a) => { g.outs.push(a); return connect(...a); };
+    g.wake = () => { for (const a of g.outs) connect(...a); };
+    g.awake = true; g.quiet = 0;
+    return g;
+  }
+  // its level: woken before it sounds, asleep once faded out (six time constants). Asleep, its parameters are left
+  // alone - a node that is not run never clears its automation, and an event a frame would pile up.
+  level(g, v, t, tau) {
+    if (v > 1e-4) {
+      if (!g.awake) { g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(0, t); g.wake(); g.awake = true; }
+      g.quiet = 0;
+    } else if (!g.awake) return;
+    else if (!g.quiet) g.quiet = t;
+    else if (t - g.quiet > tau * 6) { g.disconnect(); g.awake = false; return; }
+    g.gain.setTargetAtTime(v, t, tau);
+  }
   filt(type, f, q = 0.7) { const x = this.ctx.createBiquadFilter(); x.type = type; x.frequency.value = f; x.Q.value = q; return x; }
   osc(type, f, detune = 0) { const o = this.ctx.createOscillator(); o.type = type; o.frequency.value = f; o.detune.value = detune; o.start(); return o; }
   loop(buf) { const s = this.ctx.createBufferSource(); s.buffer = buf; s.loop = true; s.start(0, Math.random() * 1.5); return s; }
@@ -173,25 +201,25 @@ export class GameAudio {
     P.burnF = this.filt('lowpass', 900, 0.7);
     P.crackle = this.gain(0.5);
     this.loop(this.white).connect(this.filt('lowpass', 40, 0.7)).connect(this.gain(6, P.crackle.gain));
-    P.burnG = this.gain(0, P.bus);
+    P.burnG = this.sleeper(); P.burnG.connect(P.bus);
     this.loop(this.brown).connect(P.burnF).connect(P.crackle).connect(P.burnG);
     P.bwF = this.filt('bandpass', 2400, 6);
     P.bw = this.osc('sawtooth', 900);
-    P.bwG = this.gain(0, P.bus);
+    P.bwG = this.sleeper(); P.bwG.connect(P.bus);
     P.bw.connect(P.bwF).connect(P.bwG);
     // airbrakes
-    P.airG = this.gain(0, P.bus);
+    P.airG = this.sleeper(); P.airG.connect(P.bus);
     this.loop(this.white).connect(this.filt('highpass', 3000, 0.7)).connect(P.airG);
     // wind and whistle, round the listener (no position)
     P.windF = this.filt('bandpass', 400, 0.7);
     P.windG = this.gain(0, this.sfxBus);
     this.loop(this.pink).connect(P.windF).connect(P.windG);
-    P.whistleG = this.gain(0, this.sfxBus);
+    P.whistleG = this.sleeper(); P.whistleG.connect(this.sfxBus);
     this.loop(this.white).connect(this.filt('bandpass', 3300, 9)).connect(P.whistleG);
     // metal on the wall: three resonances of white noise, shaken, at the contact
     P.grindPan = this.panner(12, 1);
     P.grindPan.connect(this.sfxBus);
-    P.grindG = this.gain(0, P.grindPan);
+    P.grindG = this.sleeper(); P.grindG.connect(P.grindPan);
     P.grindG.connect(this.gain(0.4, this.envSend));
     const gin = this.gain(1), gam = this.gain(0.5);
     this.loop(this.white).connect(gin);
@@ -201,7 +229,7 @@ export class GameAudio {
     // the barrier's crackle as the ship nears it
     P.buzzPan = this.panner(10, 1.2);
     P.buzzPan.connect(this.sfxBus);
-    P.buzzG = this.gain(0, P.buzzPan);
+    P.buzzG = this.sleeper(); P.buzzG.connect(P.buzzPan);
     const bF = this.filt('bandpass', 700, 1.5), bAM = this.gain(0.5);
     this.osc('sawtooth', 98).connect(bF);
     this.osc('sawtooth', 147.5).connect(bF);
@@ -216,7 +244,7 @@ export class GameAudio {
     const V = { pitch: [1, 0.94, 1.06, 0.9, 1.1][k % 5], dop: 1, ent: null };
     V.pan = this.panner(22, 1.15);
     V.pan.connect(this.sfxBus);
-    V.g = this.gain(0, V.pan);
+    V.g = this.sleeper(); V.g.connect(V.pan);
     V.g.connect(this.gain(0.3, this.envSend));
     V.lp = this.filt('lowpass', 2000, 0.9);
     V.lp.connect(V.g);
@@ -308,16 +336,18 @@ export class GameAudio {
     P.drone.frequency.setTargetAtTime(44 + 16 * ship.power + v * 0.03, t, 0.1);
     P.lfo.frequency.setTargetAtTime(6 + v * 0.05, t, 0.1);
     P.droneG.gain.setTargetAtTime(0.15 * ship.power * (ship.avionics ?? 1), t, 0.1);
-    P.burnG.gain.setTargetAtTime(0.42 * bo * spin, t, 0.04);
-    P.burnF.frequency.setTargetAtTime(500 + 900 * bo, t, 0.05);
-    P.bw.frequency.setTargetAtTime(f * 2.6, t, 0.06);
-    P.bwF.frequency.setTargetAtTime(f * 2.6, t, 0.06);
-    P.bwG.gain.setTargetAtTime(0.03 * bo * spin, t, 0.05);
+    this.level(P.burnG, 0.42 * bo * spin, t, 0.04);
+    this.level(P.bwG, 0.03 * bo * spin, t, 0.05);
+    if (P.burnG.awake) {
+      P.burnF.frequency.setTargetAtTime(500 + 900 * bo, t, 0.05);
+      P.bw.frequency.setTargetAtTime(f * 2.6, t, 0.06);
+      P.bwF.frequency.setTargetAtTime(f * 2.6, t, 0.06);
+    }
     const ab = ctl.airIn != null ? Math.abs(ctl.airIn) : (inp ? Math.max(inp.airL || 0, inp.airR || 0) : 0);
-    P.airG.gain.setTargetAtTime(Math.min(1, ab) * Math.min(1, v / 120) * 0.2, t, 0.05);
+    this.level(P.airG, Math.min(1, ab) * Math.min(1, v / 120) * 0.2, t, 0.05);
     P.windF.frequency.setTargetAtTime(300 + 1500 * vn, t, 0.1);
     P.windG.gain.setTargetAtTime(Math.min(0.3, vn * vn * 0.3), t, 0.1);
-    P.whistleG.gain.setTargetAtTime(Math.max(0, vn - 0.5) * 0.05, t, 0.1);
+    this.level(P.whistleG, Math.max(0, vn - 0.5) * 0.05, t, 0.1);
     this.place(P.pan, ship.root.position);
     // on the track: walls, barriers, landing, echo, gantries
     const onTrack = track && mode === 'race' && ctl.s != null;
@@ -342,8 +372,8 @@ export class GameAudio {
       this.passes(track, ctl.s, v);
     } else if (this.env !== 'open') this.env = 'open';
     this.envRet.gain.setTargetAtTime(ENV_WET[this.env], t, 0.25);
-    P.grindG.gain.setTargetAtTime(grind, t, grind > 0 ? 0.01 : 0.06);
-    P.buzzG.gain.setTargetAtTime(buzz, t, 0.05);
+    this.level(P.grindG, grind, t, grind > 0 ? 0.01 : 0.06);
+    this.level(P.buzzG, buzz, t, 0.05);
 
     // ---- the rivals' engines: the nearest five
     const ents = race && mode === 'race' ? race.entries.filter((e) => !e.player) : [];
@@ -354,18 +384,18 @@ export class GameAudio {
       if (dt > 0) { _w.copy(p).sub(e._ap).divideScalar(dt); if (_w.length() < 900) e._av.lerp(_w, 0.35); }
       e._ap.copy(p);
     }
-    const near = ents.filter((e) => e._ad < 900 && e.ship.engineOn).sort((a, b) => a._ad - b._ad).slice(0, VOICES);
+    const near = ents.filter((e) => e._ad < 900 && e.ship.engineOn).sort((a, b) => a._ad - b._ad).slice(0, this.lite ? LITE_VOICES : VOICES);
     for (const V of this.voices) if (V.ent && !near.includes(V.ent)) V.ent = null;
     for (const e of near) {
       if (this.voices.some((V) => V.ent === e)) continue;
       const V = this.voices.find((x) => !x.ent);
       if (!V) continue;
       V.ent = e; V.dop = 1;
-      V.g.gain.setValueAtTime(0, t);                                    // a new ship in this voice: from silence
+      if (V.g.awake) V.g.gain.setValueAtTime(0, t);                     // a new ship in this voice: from silence
       this.place(V.pan, e.ship.root.position, true);
     }
     for (const V of this.voices) {
-      if (!V.ent) { V.g.gain.setTargetAtTime(0, t, 0.08); continue; }
+      if (!V.ent) { this.level(V.g, 0, t, 0.08); continue; }
       const e = V.ent, r = e.racer, sh = e.ship, p = sh.root.position;
       _u.copy(L).sub(p);
       const d = Math.max(1, _u.length());
@@ -374,11 +404,12 @@ export class GameAudio {
       const dop = clamp((C_SOUND - this.camVel.dot(_u)) / (C_SOUND - e._av.dot(_u)), 0.55, 1.8);
       V.dop += (dop - V.dop) * 0.3;
       const rf = (140 + 900 * sh.spin * (0.75 + 0.25 * (r.throttle || 0) + 0.15 * (r.boosting || 0))) * V.pitch * V.dop;
+      this.level(V.g, 0.3 * sh.spin * (0.45 + 0.4 * (r.throttle || 0) + 0.3 * (r.boosting || 0)), t, 0.06);
+      if (!V.g.awake) continue;
       V.o.forEach((o) => o.frequency.setTargetAtTime(rf, t, 0.04));
       V.drone.frequency.setTargetAtTime(48 * V.pitch * V.dop, t, 0.04);
       V.roarF.frequency.setTargetAtTime((300 + 1400 * (r.throttle || 0) + 1200 * (r.boosting || 0)) * V.dop, t, 0.05);
       V.lp.frequency.setTargetAtTime(Math.min(700 + 9000 * Math.exp(-d / 200), 12000), t, 0.05);   // the air takes the highs
-      V.g.gain.setTargetAtTime(0.3 * sh.spin * (0.45 + 0.4 * (r.throttle || 0) + 0.3 * (r.boosting || 0)), t, 0.06);
       this.place(V.pan, p);
     }
 

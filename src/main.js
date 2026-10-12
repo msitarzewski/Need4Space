@@ -273,6 +273,7 @@ async function boot() {
     resize();
     fpsEl.style.display = v.fps ? '' : 'none';
     race?.setDifficulty(v.ai);                       // the rivals' AI difficulty (race.js AI_LEVELS)
+    audio.lite = !!v.laptop;                          // (fewer rival voices; its buffer is set when the sound starts)
     audio.setLevels(v.music, v.sfx);                 // music and effects volume
   }, integratedGPU(gpuName));
 
