@@ -53,6 +53,22 @@ const PADS = [['start', 360, 0], ['tunIn', -160, -10], ['tunIn', -160, 10], ['no
 // light gates over the deck: (point, metres after it, colour)
 const GATES = [['start', -60, 0x40c8ff], ['crest1', -90, 0xffb020], ['rollIn', -40, 0xb040ff], ['preLoop', -60, 0xff3a6a],
   ['crest2', -90, 0xffb020], ['west', 120, 0x40c8ff], ['cork', -330, 0x40ff9a]];
+// The structure's light colours (linear, HDR) and growth: the space circuit's blue; a map can bring its own (theme)
+export const SPACE_THEME = { field: [0.15, 0.55, 1.0], fieldFlash: [0.7, 0.85, 1.0], strip: [0.03, 0.32, 1.0], stripCore: [0.75, 0.92, 1.0],
+  lane: [0.04, 0.33, 1.0], laneCore: [0.75, 0.9, 1.0], spill: [0.06, 0.32, 1.0], stud: [0.7, 1.3, 2.6], trim: [0.08, 0.5, 1.3],
+  gantry: [1.0, 1.8, 3.2], lamp: [2.2, 2.6, 3.4], moss: false };
+let TH = SPACE_THEME;
+const g3 = (c) => `vec3(${c.map((x) => x.toFixed(3)).join(', ')})`;
+// A circuit: its control points and named features (another map passes its own; `start` is near the grid's line,
+// towers: the space map's towers on truss arms, meteor: its meteorite round the cave)
+export const SPACE_LAYOUT = { ctrl: CTRL, at: AT, loops: LOOPS, gaps: GAPS, tunnels: TUNNELS, caves: CAVES, pads: PADS,
+  gates: GATES, start: [0, 0, 430], towers: true, meteor: true };
+// a layout's control points from a list of [x, y, z, bank, name?]
+export function layout(points, rest) {
+  const ctrl = [], at = {};
+  for (const [x, y, z, bank = 0, name = null] of points) { if (name) at[name] = ctrl.length; ctrl.push([x, y, z, bank]); }
+  return { ctrl, at, loops: [], gaps: [], tunnels: [], caves: [], pads: [], gates: [], towers: false, meteor: false, ...rest };
+}
 
 function mergeTwo(a, b) {
   const g = new THREE.BufferGeometry(), A = a.toNonIndexed(), B = b.toNonIndexed();
@@ -140,8 +156,8 @@ function fieldMaterial() {
           ring += exp(-pow((d - age * 22.0) / 1.6, 2.0)) * exp(-age * 2.5) * hitS[k];
           flash += exp(-d * d / 6.0) * exp(-age * 7.0) * hitS[k];
         }
-        vec3 c = vec3(0.15, 0.55, 1.0) * (edge * (0.16 + 1.0 * near + 3.0 * ring) + 0.03 + 0.07 * scan * fade + ring * 0.6) * fade;
-        c += vec3(0.7, 0.85, 1.0) * flash * 2.0 * (1.0 - h);
+        vec3 c = ${g3(TH.field)} * (edge * (0.16 + 1.0 * near + 3.0 * ring) + 0.03 + 0.07 * scan * fade + ring * 0.6) * fade;
+        c += ${g3(TH.fieldFlash)} * flash * 2.0 * (1.0 - h);
         gl_FragColor = vec4(c, 1.0);
       }`,
   });
@@ -151,7 +167,9 @@ export const CAVE_R = 40, CAVE_MOUTH = 45;            // the cave's reach round 
 const _cv = new THREE.Vector3(), _cw = new THREE.Vector3();
 
 export class Track {
-  constructor() {
+  constructor(L = SPACE_LAYOUT) {
+    this.L = L;
+    const { ctrl: CTRL, at: AT, loops: LOOPS, gaps: GAPS, tunnels: TUNNELS, caves: CAVES, pads: PADS, gates: GATES } = L;
     const pts = CTRL.map(([x, y, z]) => new THREE.Vector3(x, y, z));
     this.curve = new THREE.CatmullRomCurve3(pts, true, 'centripetal');
     // an arc-length table fine enough for 2 m samples (three's default is 200 divisions: ~70 m on this lap, and the
@@ -222,6 +240,8 @@ export class Track {
     }
     this.tunnels = TUNNELS.map(([a, b]) => [this.at(a), this.at(b)]);
     this.caves = CAVES.map(([a, fa, b, fb]) => [this.at(a, fa), this.at(b, fb)]);
+    // covered stretches (the forest's tunnels of vines): no gantry, lamp post, board or gate inside one
+    this.canopies = (L.canopies || []).map(([a, fa, b, fb]) => [this.at(a, fa), this.at(b, fb)]);
     // the cave's centre line (a polyline the shaders test every pixel against: inside it, no sun and no sky light)
     this.caveLines = this.caves.map(([s0, s1]) => {
       const len = this.wrap(s1 - s0), pts = [];
@@ -241,7 +261,7 @@ export class Track {
     // minimap / HUD arrays (x, z)
     this.px = new Float32Array(n); this.pz = new Float32Array(n);
     for (let i = 0; i < n; i++) { this.px[i] = this.P[i].x; this.pz[i] = this.P[i].z; }
-    this.start = this.nearestIndex(new THREE.Vector3(0, 0, 430));
+    this.start = this.nearestIndex(new THREE.Vector3(...L.start));
     this.pads = PADS.map(([a, off, x]) => ({ s: this.at(a, off), x }));
     this.gates = GATES.map(([a, off, col]) => ({ s: this.at(a, off), col }));
   }
@@ -279,6 +299,11 @@ export class Track {
       k = Math.min(k, 1 - inside * ends);
     }
     return k;
+  }
+
+  inCanopy(s, pad = 0) {
+    for (const [s0, s1] of this.canopies) if (this.inSpan(s, s0 - pad, s1 + pad)) return true;
+    return false;
   }
 
   inTunnel(s, pad = 0) {
@@ -420,6 +445,7 @@ export class Track {
   }
 
   meshes(scene) {
+    TH = this.L.theme || SPACE_THEME;                // (the materials below are made with this circuit's colours)
     const W = TRACK_W / 2;
     const out = {};
     // a section drawn right-to-left faces the other way: mirror sections are reversed (their 'cut' flags move with
@@ -444,7 +470,25 @@ export class Track {
         .replace('mapN.xy *= normalScale;', 'mapN.xy *= normalScale;\n  mapN.xy += (texture2D(detailNormal, vNormalMapUv * detailRep).xy * 2.0 - 1.0) * 0.45;')
         .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n' + SPECULAR_AA);
     };
-    deckMat.customProgramCacheKey = () => 'feather-deck';
+    if (TH.moss) {
+      // moss creeping in from both walls - in places a hand's width, in places metres - broken up, in the seams
+      const before = deckMat.onBeforeCompile;
+      deckMat.onBeforeCompile = (sh) => {
+        before(sh);
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nfloat deckMoss = 0.0;')
+          .replace('#include <map_fragment>', `#include <map_fragment>
+  {
+    float x = abs(vMapUv.x - 0.5) * ${TRACK_W.toFixed(1)}, along = vMapUv.y * 40.0, edge = ${(TRACK_W / 2).toFixed(1)} - x;
+    float n1 = texture2D(detailMap, vec2(along / 23.0, x / 9.0)).r, n2 = texture2D(detailMap, vec2(along / 3.7, x / 2.9) + 0.31).r;
+    float reach = 0.5 + 2.4 * smoothstep(0.4, 0.75, texture2D(detailMap, vec2(along / 97.0, 0.17)).r);
+    float base = 1.0 - smoothstep(reach * 0.35, reach, edge);
+    deckMoss = smoothstep(0.42, 0.62, base * 0.85 + n1 * 0.45 + n2 * 0.25 - 0.35);
+    diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.035, 0.06, 0.015), vec3(0.08, 0.11, 0.025), n2), deckMoss);
+  }`)
+          .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.95, deckMoss);');
+      };
+    }
+    deckMat.customProgramCacheKey = () => (TH.moss ? 'feather-deck-moss' : 'feather-deck');
     this.deckMat = deckMat;
     out.deck = new THREE.Mesh(top, deckMat);
     const E = W + WALL_T;
@@ -454,7 +498,7 @@ export class Track {
       { a: [-E, -DECK], b: [-E, 0], n: [-1, 0], kind: HULL_SIDE },
     ]);
     // painted steel plates, computed per pixel (hull.js)
-    const metal = hullMaterial();
+    const metal = hullMaterial(TH.moss ? { moss: true, key: 'hull-moss' } : {});
     out.under = new THREE.Mesh(under, metal);
     // walls: inner face, top, outer face, both sides
     const wall = (s) => this.hullSweep([
@@ -470,7 +514,7 @@ export class Track {
         void main() {
           float u = abs(vUv.x - 0.5) * 2.0, aa = fwidth(u) * 1.5;
           float core = 1.0 - smoothstep(0.22 - aa, 0.22 + aa, u), body = exp(-u * u * 2.5);
-          gl_FragColor = vec4(vec3(0.03, 0.32, 1.0) * body * 1.6 + vec3(0.75, 0.92, 1.0) * core * 5.0, 1.0);
+          gl_FragColor = vec4(${g3(TH.strip)} * body * 1.6 + ${g3(TH.stripCore)} * core * 5.0, 1.0);
         }`,
     });
     const strip = (s) => {
@@ -501,8 +545,8 @@ export class Track {
     out.lips = this.gapLips(metal);
     out.tunnel = this.tunnel();
     out.gates = this.lightGates();
-    out.towers = this.towers(metal);
-    out.cave = this.cave();
+    out.towers = this.L.towers ? this.towers(metal) : [];
+    out.cave = this.L.meteor ? this.cave() : [];
     // the deck and walls receive but never cast: at a grazing sun, PCSS's blocker search found a plane's own
     // neighbouring texels and shaded the whole deck black. The ship and the gantries are the casters.
     for (const m of [out.deck, out.under, ...out.walls]) { m.castShadow = false; m.receiveShadow = true; }
@@ -966,7 +1010,7 @@ export class Track {
           core = mix(core, (1.0 - smoothstep(0.016 - aax, 0.016 + aax, ax)) * 0.33, far);
           halo = mix(halo, exp(-ax * ax / 0.004) * 0.5 * 0.35, far);
           float chase = 0.8 + 0.7 * pow(0.5 + 0.5 * sin(vUv.y * 0.06 - time * 4.0), 10.0);
-          vec3 c = vec3(0.04, 0.33, 1.0) * (lens * 2.4 + halo) + vec3(0.75, 0.9, 1.0) * core * 7.0;
+          vec3 c = ${g3(TH.lane)} * (lens * 2.4 + halo) + ${g3(TH.laneCore)} * core * 7.0;
           gl_FragColor = vec4(c * chase, 1.0);
         }`,
     });
@@ -982,7 +1026,7 @@ export class Track {
           float x = (vUv.x - 0.5) * 4.0, d = capsule(x, vUv.y);
           float chase = 0.8 + 0.7 * pow(0.5 + 0.5 * sin(vUv.y * 0.06 - time * 4.0), 10.0);
           float spill = mix(exp(-d * d / 0.35), exp(-x * x / 0.35) * 0.46, smoothstep(0.8, 3.0, fwidth(vUv.y)));
-          gl_FragColor = vec4(vec3(0.06, 0.32, 1.0) * spill * 0.16 * chase, 1.0);
+          gl_FragColor = vec4(${g3(TH.spill)} * spill * 0.16 * chase, 1.0);
         }`,
     });
     const housing = new THREE.MeshStandardMaterial({ color: 0x15171b, roughness: 0.3, metalness: 0.7,
@@ -1004,7 +1048,7 @@ export class Track {
   studs() {
     const every = Math.round(6 / this.step), n = Math.floor(this.n / every) * 2;
     const im = new THREE.InstancedMesh(new THREE.BoxGeometry(0.22, 0.05, 0.4),
-      new THREE.MeshBasicMaterial({ color: new THREE.Color(0.7, 1.3, 2.6) }), n);
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(...TH.stud) }), n);
     const M = new THREE.Matrix4(), W = TRACK_W / 2 - 2.4;
     let k = 0;
     for (let i = 0; i + every <= this.n; i += every) {
@@ -1084,10 +1128,10 @@ export class Track {
     this.gantryIdx = [];
     for (let i = this.start; i < this.start + this.n; i += every) {
       const s = (i % this.n) * this.step;
-      if (i === this.start || !(this.inGap(s, 30) || this.inLoop(s, 40) || this.inTunnel(s, 20) || this.inCave(s, 30))) this.gantryIdx.push(i % this.n);
+      if (i === this.start || !(this.inGap(s, 30) || this.inLoop(s, 40) || this.inTunnel(s, 20) || this.inCave(s, 30) || this.inCanopy(s, 25))) this.gantryIdx.push(i % this.n);
     }
     const fm = new THREE.InstancedMesh(merge(frame), new THREE.MeshStandardMaterial({ color: 0x5a616b, roughness: 0.5, metalness: 0.65 }), this.gantryIdx.length);
-    const gm = new THREE.InstancedMesh(merge(glow), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.0, 1.8, 3.2) }), this.gantryIdx.length);
+    const gm = new THREE.InstancedMesh(merge(glow), new THREE.MeshBasicMaterial({ color: new THREE.Color(...TH.gantry) }), this.gantryIdx.length);
     const M = new THREE.Matrix4();
     this.gantryIdx.forEach((i, k) => {
       this.basisAt(i, M);
@@ -1133,7 +1177,7 @@ export class Track {
     let last = -1e9;
     for (let i = 0; i < this.n; i++) {
       const k = this.kh[i];
-      if (Math.abs(k) < 0.0045 || i - last < Math.round(32 / this.step) || this.inGap(i * this.step, 10)) continue;
+      if (Math.abs(k) < 0.0045 || i - last < Math.round(32 / this.step) || this.inGap(i * this.step, 10) || this.inCanopy(i * this.step, 8)) continue;
       last = i;
       list.push({ i, side: -Math.sign(k) });                // the outside of the turn
     }
@@ -1165,12 +1209,12 @@ export class Track {
     const lensG = new THREE.BoxGeometry(0.9, 0.06, 0.24).translate(-1.15, 4.04, 0);
     const merge = (a, b) => { const g = mergeTwo(a, b); g.deleteAttribute('uv'); return g; };
     const mm = new THREE.InstancedMesh(merge(postG, armG), new THREE.MeshStandardMaterial({ color: 0x4a5058, roughness: 0.5, metalness: 0.6 }), n);
-    const lm = new THREE.InstancedMesh(lensG, new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 2.6, 3.4) }), n);
+    const lm = new THREE.InstancedMesh(lensG, new THREE.MeshBasicMaterial({ color: new THREE.Color(...TH.lamp) }), n);
     const M = new THREE.Matrix4(), mirror = new THREE.Matrix4().makeScale(-1, 1, 1);
     let used = 0;
     for (let k = 0; k < n; k++) {
       const i = k * every, side = k % 2 ? 1 : -1;
-      if (this.inGap(i * this.step, 6) || this.inLoop(i * this.step, 10) || this.inTunnel(i * this.step, 5) || this.inCave(i * this.step, 20)) continue;
+      if (this.inGap(i * this.step, 6) || this.inLoop(i * this.step, 10) || this.inTunnel(i * this.step, 5) || this.inCave(i * this.step, 20) || this.inCanopy(i * this.step, 8)) continue;
       this.basisAt(i, M);
       M.setPosition(this.P[i].clone().addScaledVector(this.R[i], side * X).addScaledVector(this.U[i], WALL_H));
       if (side < 0) M.multiply(mirror);
@@ -1186,7 +1230,7 @@ export class Track {
   // a lit trim along the deck's outer sides (it reads the track's line from other parts of the circuit)
   edgeTrims() {
     const E = TRACK_W / 2 + WALL_T + 0.01;
-    const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.08, 0.5, 1.3) });
+    const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(...TH.trim) });
     return [-1, 1].map((sd) => {
       const sec = [[sd * E, -0.55, 0, sd, 0], [sd * E, -0.38, 1, sd, 0]];
       return new THREE.Mesh(this.sweep(sd > 0 ? sec.slice().reverse() : sec, 10), mat);

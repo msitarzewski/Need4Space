@@ -7,6 +7,8 @@ import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { MeadowWorld, SUN_DIR as MEADOW_SUN, SUN_FOG } from './world.js';
 import { SpaceWorld, SUN_DIR as SPACE_SUN, SHADOW_HALF, SHADOW_NEAR, SHADOW_FAR, MID_HALF, MID_NEAR, MID_FAR, FAR_HALF, FAR_NEAR, FAR_FAR } from './space.js';
+import { ForestWorld, SUN_DIR as FOREST_SUN } from './forest.js';
+import { ATMO_GLSL, ATMO_FOG_CHUNK } from './atmo.js';
 import { TrackRacer, TRACK_W } from './track.js';
 import { patchShaders } from './look.js';
 import { smoothstep } from './noise.js';
@@ -25,7 +27,8 @@ import { Menu } from './menu.js';
 import { compileAll, deferBakes, runBakes, gpuIdle } from './bake.js';
 import { Q, setLite, integratedGPU, liteFiltering, memoryTier } from './quality.js';
 
-const MAP = new URLSearchParams(location.search).get('map') === 'meadow' ? 'meadow' : 'space';
+// the map: the circuit chosen in the menu (saved), or ?map=space / forest / meadow (the meadow: the old test range)
+const MAP = { meadow: 'meadow', forest: 'forest', space: 'space' }[new URLSearchParams(location.search).get('map') || savedSettings().map] || 'space';
 const SHIP_URL = { high: 'assets/racer_web.glb', mid: 'assets/racer_web_4k.glb', low: 'assets/racer_web_2k.glb' };   // (by memory tier)
 const LUTS = ['assets/agx_punchy_lut65.bin', 'assets/agx_mhc_lut65.bin'];   // Blender's AgX looks: Punchy, Medium High Contrast
 const status = (t) => (document.getElementById('loadtext').textContent = t);
@@ -45,10 +48,12 @@ const progress = (step, f = 0) => {
 const nextFrame = () => new Promise((r) => { requestAnimationFrame(() => r()); setTimeout(r, 50); });
 async function boot() {
   if (new URLSearchParams(location.search).has('bootprof')) (await import('./profile.js')).bootProfile();
-  const sunDir = MAP === 'space' ? SPACE_SUN : MEADOW_SUN;
-  patchShaders({ sunDir, sunFog: SUN_FOG, shadowHalf: MAP === 'space' ? FAR_HALF : 22, shadowDepth: 200,
-    cascades: MAP === 'space' ? [{ half: SHADOW_HALF, depth: SHADOW_FAR - SHADOW_NEAR }, { half: MID_HALF, depth: MID_FAR - MID_NEAR },
-      { half: FAR_HALF, depth: FAR_FAR - FAR_NEAR }] : null });
+  const sunDir = { space: SPACE_SUN, forest: FOREST_SUN, meadow: MEADOW_SUN }[MAP];
+  // (the forest uses the space map's cascades - the same boxes - and its own air for fog: atmo.js)
+  patchShaders({ sunDir, sunFog: SUN_FOG, shadowHalf: MAP !== 'meadow' ? FAR_HALF : 22, shadowDepth: 200,
+    cascades: MAP !== 'meadow' ? [{ half: SHADOW_HALF, depth: SHADOW_FAR - SHADOW_NEAR }, { half: MID_HALF, depth: MID_FAR - MID_NEAR },
+      { half: FAR_HALF, depth: FAR_FAR - FAR_NEAR }] : null,
+    ...(MAP === 'forest' ? { fogChunk: ATMO_FOG_CHUNK, fogPars: ATMO_GLSL, worldOnly: true } : {}) });
   const canvas = document.getElementById('view');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
   // the GPU driver reset (too long a job for a slow GPU, or out of memory): say so rather than a frozen screen
@@ -87,11 +92,12 @@ async function boot() {
     if (!baking) { status('Loading the Feather S1' + got); progress('ship', gotF); }
   });
   shipLoad.catch(() => {});
-  status(MAP === 'space' ? 'Building the circuit' : 'Raising the hills');
+  status(MAP === 'meadow' ? 'Raising the hills' : 'Building the circuit');
   progress('circuit');
   await nextFrame();
   deferBakes(true);
-  const world = MAP === 'space' ? new SpaceWorld(scene, renderer, camera) : new MeadowWorld(scene, renderer);
+  const world = MAP === 'space' ? new SpaceWorld(scene, renderer, camera) : MAP === 'forest' ? new ForestWorld(scene, renderer, camera)
+    : new MeadowWorld(scene, renderer);
   deferBakes(false);
   progress('circuit', 1);
   await runBakes(renderer, (what, k, n) => { status(`${what}  ${k} / ${n}`); progress(/Painting/.test(what) ? 'paint' : 'bakes', k / n); });
@@ -105,7 +111,7 @@ async function boot() {
     `plumes ${ship.plumes.length}, tangents repaired ${ship.tangentsFixed}`);
 
   const flight = new Flight(ship, world, world);
-  if (MAP === 'space') flight.gravity = 0;
+  if (MAP !== 'meadow') flight.gravity = 0;
   const track = world.track || null;
   const racer = track ? new TrackRacer(ship, track) : null;
   // eight rivals, cloned before the player's ship first animates (their canopies and rotors start at rest)
@@ -258,8 +264,8 @@ async function boot() {
     agx.enabled = v.tonemap !== 'aces';
     agx.setLook(v.tonemap === 'agx' ? 1 : 0);
     output.enabled = !agx.enabled;
-    agx.uniforms.exposure.value = Math.pow(2, v.exposure);
-    renderer.toneMappingExposure = 0.95 * Math.pow(2, v.exposure);
+    agx.uniforms.exposure.value = Math.pow(2, v.exposure) * (world.exposure ?? 1);       // (a map can set its own)
+    renderer.toneMappingExposure = 0.95 * Math.pow(2, v.exposure) * (world.exposure ?? 1);
     gtao.enabled = v.ao;
     smaa.enabled = v.aa !== 'msaa';
     const samples = v.aa === 'high' ? 8 : v.aa === 'fast' ? 2 : v.aa === 'smaa1' ? 0 : 4;   // the scene's MSAA (a new target when it changes)
@@ -270,7 +276,8 @@ async function boot() {
     blurOn = v.blur;
     Ship.brakeLights = v.brakeLights;
     const size = { high: 4096, medium: 2048 }[v.shadows];
-    if (renderer.shadowMap.enabled !== !!size) {
+    if (world.shadowMode) world.shadowMode(size, renderer, scene);
+    else if (renderer.shadowMap.enabled !== !!size) {
       renderer.shadowMap.enabled = !!size;
       scene.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => (m.needsUpdate = true)); });
     }
@@ -427,7 +434,7 @@ async function boot() {
   };
   const heroOrbit = () => { rig.mode = 'orbit'; Object.assign(rig.orbit, { yaw: 2.35, pitch: 0.16, dist: 22 }); rig.anchor = null; rig.idle = 0; };
   let pilot = null;                                      // past the flag the rivals' AI flies the player's cool-down lap
-  const menu = new Menu({ settings, hud, input, rig, camera, race, track, ship, world,
+  const menu = new Menu({ settings, hud, input, rig, camera, race, track, ship, world, map: MAP,
     mode: () => mode, engineOn: () => ship.engineOn, focus: () => ship.root.position,
     status: () => ({ race: race && mode === 'race' ? race.hud() : null }),
     startRace: () => { hud.hideResults(); setMode('race'); placeStart(false); resetLap(); heroOrbit(); engines(); },
@@ -665,11 +672,11 @@ async function boot() {
     else if (ship.engineOn) { state = ctl.boosting > 0.5 ? 'BOOST' : (mode === 'race' ? 'RACE' : 'FREE FLIGHT'); cls = 'ok'; }
     else if (ship.power > 0.01) { state = 'SHUTTING DOWN'; cls = 'warn'; }
     const f = ctl.forward;
-    hud.update(dt, { speed: ctl.speed, agl: MAP === 'space' && mode === 'free' ? NaN : ctl.agl, throttle: ctl.throttle,
+    hud.update(dt, { speed: ctl.speed, agl: MAP !== 'meadow' && mode === 'free' ? NaN : ctl.agl, throttle: ctl.throttle,
       boostEnergy: ctl.boostEnergy, boosting: ctl.boosting, state, stateClass: cls, camera: rig.name, assist: ctl.assist,
       invert: input.invert, lapTime: lap.started ? lap.time : NaN, lastLap: lap.last, bestLap: lap.best, lap: lap.lap,
       x: ctl.pos.x, z: ctl.pos.z, fx: f.x, fz: f.z, race: race ? race.hud() : null, mode });
-    audio.update(dt, { camera, ship, ctl, race, track, mode, inp });
+    audio.update(dt, { camera, ship, ctl, race, track, mode, inp, world });
     touch.setMode(mode);
   }
   requestAnimationFrame(frame);

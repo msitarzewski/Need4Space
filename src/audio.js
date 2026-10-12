@@ -19,7 +19,7 @@ const SFX_LV = { low: 0.4, mid: 0.65, high: 0.9 };
 const C_SOUND = 700;            // a stylised speed of sound for the Doppler shift (m/s): ships pass at ~300 m/s
 const VOICES = 5;               // rival engines heard at once (the nearest)
 const LITE_VOICES = 3;          // (in Laptop mode: each voice is ~1 % of a fast core, all the time)
-const ENV_WET = { open: 0.05, tunnel: 0.42, cave: 0.8 };
+const ENV_WET = { open: 0.05, tunnel: 0.42, cave: 0.8, canopy: 0.2 };
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 // Recorded hits: Kenney's Impact Sounds and Sci-fi Sounds packs (CC0, assets/sfx) - "the hit sound is really shitty"
 // (it was synthesised). Fetched and decoded while the game loads; each play takes a different take from the last one,
@@ -321,7 +321,7 @@ export class GameAudio {
   }
 
   // ---------------------------------------------------------------- per frame
-  update(dt, { camera, ship, ctl, race, track, mode, inp }) {
+  update(dt, { camera, ship, ctl, race, track, mode, inp, world }) {
     if (!this.ctx || this.ctx.state !== 'running') return;
     const c = this.ctx, t = c.currentTime, P = this.p;
     // paused (the menu over the game): the ship and the race fall back, the music plays on
@@ -384,7 +384,7 @@ export class GameAudio {
       if (air > 0.5) this.airTime += dt;
       else if (air <= 0.01) { if (this.airTime > 0.35) this.land(Math.min(1, this.airTime / 1.5)); this.airTime = 0; }
       // inside the tunnel or the meteorite: the echo opens
-      const env = track.inCave?.(ctl.s) ? 'cave' : track.inTunnel?.(ctl.s) ? 'tunnel' : 'open';
+      const env = track.inCave?.(ctl.s) ? 'cave' : track.inTunnel?.(ctl.s) ? 'tunnel' : track.inCanopy?.(ctl.s) ? 'canopy' : 'open';
       if (env !== this.env) { if (env !== 'open') this.whoomp(); this.env = env; }
       // gantries and light gates passing overhead
       this.passes(track, ctl.s, v);
@@ -395,6 +395,8 @@ export class GameAudio {
     if (this.musicDirect) this.musicVolume();
     this.level(P.grindG, grind, t, grind > 0 ? 0.01 : 0.06);
     this.level(P.buzzG, buzz, t, 0.05);
+
+    this.ambient(world, t, v);
 
     // ---- the rivals' engines: the nearest five
     const ents = race && mode === 'race' ? race.entries.filter((e) => !e.player) : [];
@@ -461,6 +463,73 @@ export class GameAudio {
         this.passby(fr.P.clone().addScaledVector(fr.U, g.h), v);
       }
     }
+  }
+
+  // ---------------------------------------------------------------- a map's own sounds (the forest moon)
+  // the roar of the two nearest waterfalls (where along each one is nearest you), birds calling round you now and
+  // then (lost under the engines at speed), and from far off the sky whales' calls
+  buildAmbient() {
+    const A = (this.amb = { falls: [], nextBird: 0, nextCall: 8 });
+    for (let k = 0; k < 2; k++) {
+      const pan = this.panner(80, 1.0);
+      pan.connect(this.sfxBus);
+      const g = this.sleeper();
+      g.connect(pan);
+      // the body of it low, a wash of falling water over that, the hiss of spray on top
+      this.loop(this.brown).connect(this.filt('lowpass', 240, 0.7)).connect(this.gain(1.3, g));
+      this.loop(this.pink).connect(this.filt('lowpass', 1100, 0.6)).connect(this.gain(0.9, g));
+      this.loop(this.white).connect(this.filt('bandpass', 5000, 0.7)).connect(this.gain(0.1, g));
+      A.falls.push({ g, pan });
+    }
+  }
+  ambient(world, t, speed) {
+    if (!world?.waters) return;
+    if (!this.amb) this.buildAmbient();
+    const A = this.amb, L = this.L;
+    const near = world.waters.falls.map((f) => {
+      let best = 1e9, bp = null;
+      for (const p of f.samples) { const d = p.distanceTo(L); if (d < best) { best = d; bp = p; } }
+      return { d: best, p: bp };
+    }).sort((a, b) => a.d - b.d);
+    A.falls.forEach((V, k) => {
+      const n = near[k];
+      this.level(V.g, n ? 0.6 * clamp(1 - n.d / 1500, 0, 1) ** 1.5 : 0, t, 0.3);
+      if (n && V.g.awake) this.place(V.pan, n.p);
+    });
+    const quiet = clamp(1 - speed / 220, 0, 1);
+    if (t > A.nextBird) {
+      A.nextBird = t + 0.8 + Math.random() * 3.2;
+      if (quiet > 0.1) this.bird(_v.set(L.x + (Math.random() - 0.5) * 240, L.y + (Math.random() - 0.3) * 60, L.z + (Math.random() - 0.5) * 240), quiet);
+    }
+    if (t > A.nextCall) {
+      A.nextCall = t + 22 + Math.random() * 30;
+      const w = world.creatures?.whalePos?.(Math.floor(Math.random() * 3));
+      if (w) this.whaleCall(w);
+    }
+  }
+  // a bird: a run of 2-6 quick whistled notes, each a little bend, from somewhere round you
+  bird(pos, v) {
+    const t = this.ctx.currentTime, o = this.out(pos, 40, 0.16 * v), n = 2 + Math.floor(Math.random() * 5);
+    const f0 = 1800 + Math.random() * 2400, kind = Math.random();
+    for (let i = 0; i < n; i++) {
+      const f = f0 * (1 + (Math.random() - 0.5) * 0.25), d = 0.06 + Math.random() * 0.1;
+      this.tone(t + i * (0.09 + Math.random() * 0.08), d, o, { f, f1: kind < 0.5 ? f * 1.35 : f * 0.72, v: 0.55, tau: d * 0.45, attack: 0.008 });
+    }
+  }
+  // a sky whale's call: a long low moan rising and falling, a formant through it, from kilometres off
+  whaleCall(pos) {
+    const t = this.ctx.currentTime, o = this.out(pos, 600, 0.9), bp = this.filt('bandpass', 420, 2.5);
+    bp.connect(o);
+    const f0 = 70 + Math.random() * 40;
+    const a = this.ctx.createOscillator(), g = this.ctx.createGain();
+    a.type = 'sawtooth';
+    a.frequency.setValueAtTime(f0, t);
+    a.frequency.linearRampToValueAtTime(f0 * 1.7, t + 1.6);
+    a.frequency.linearRampToValueAtTime(f0 * 0.8, t + 4.2);
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.35, t + 0.8); g.gain.setTargetAtTime(0, t + 3.4, 0.6);
+    bp.frequency.setValueAtTime(300, t); bp.frequency.linearRampToValueAtTime(700, t + 2); bp.frequency.linearRampToValueAtTime(350, t + 4);
+    a.connect(g).connect(bp);
+    a.start(t); a.stop(t + 7);
   }
 
   // ---------------------------------------------------------------- one-shots

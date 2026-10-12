@@ -32,7 +32,10 @@ const stats = (L) => [
   ['Racing line', clamp01(1 - (L.lane + L.wander) / 16)],
 ];
 
-const MAIN = [['race', 'Race'], ['free', 'Free flight'], ['settings', 'Settings'], ['controls', 'Controls'], ['support', 'Support']];
+const MAIN = [['race', 'Race'], ['free', 'Free flight'], ['circuit', 'Circuit'], ['settings', 'Settings'], ['controls', 'Controls'], ['support', 'Support']];
+// the circuits (main.js loads the one chosen: the page reloads into it)
+export const CIRCUITS = [['space', 'Space', 'The orbital circuit over the ringed gas giant: a meteorite to fly through, a glass tunnel, a loop'],
+  ['forest', 'Forest moon', 'High over a jungle moon: floating islands, a river arching over the track, a colossal tree, a glowworm cave']];
 // donations (the author's Revolut)
 const DONATE_URL = 'https://revolut.me/alexan_vic', DONATE_HANDLE = '@alexan_vic';
 const donate = () => window.open(DONATE_URL, '_blank', 'noopener');
@@ -46,6 +49,7 @@ const HINTS = {
   settings: K(['↑', '↓'], 'Option') + K(['←', '→'], 'Change') + K(['Esc'], 'Back'),
   controls: K(['Esc'], 'Back'),
   support: K(['Enter'], 'Donate on Revolut') + K(['Esc'], 'Back'),
+  circuit: K(['↑', '↓'], 'Select') + K(['Enter'], 'Fly it') + K(['Esc'], 'Back'),
   results: K(['←', '→'], 'Select') + K(['Enter'], 'Confirm') + K(['R'], 'Race again') + K(['Esc'], 'Main menu'),
 };
 const UP = new Set(['ArrowUp', 'KeyW']), DOWN = new Set(['ArrowDown', 'KeyS']);
@@ -92,8 +96,10 @@ export class Menu {
 
   build() {
     const h = this.h;
+    const map = h.map || 'space', mapName = CIRCUITS.find(([id]) => id === map)?.[1] || '';
     const item = ([act, name], i) => `<button class="m-item" data-act="${act}" tabindex="-1"><span class="m-num">${pad2(i)}</span>` +
-      `<span class="m-name">${name}</span>${act === 'race' || act === 'difficulty' ? '<span class="m-meta m-lvl"></span>' : ''}</button>`;
+      `<span class="m-name">${name}</span>${act === 'race' || act === 'difficulty' ? '<span class="m-meta m-lvl"></span>'
+        : act === 'circuit' ? `<span class="m-meta">${mapName}</span>` : act.startsWith('map:') && act === 'map:' + map ? '<span class="m-meta">Now</span>' : ''}</button>`;
     const main = MAIN.filter(([a]) => a !== 'race' || h.race);
     const pause = PAUSE.filter(([a]) => a !== 'difficulty' || h.race);
     const cards = LEVELS.map((L, i) => `<div class="d-slot" data-i="${i}" data-id="${L.id}" style="--c: var(--c-${L.id})">
@@ -119,6 +125,11 @@ export class Menu {
         <header class="d-head"><div class="m-kicker">Choose your rivals</div><h2 class="m-h2">Difficulty</h2></header>
         <div class="d-body"><div class="d-cards">${cards}</div>
           <div class="d-foot"><button class="m-cta" data-act="confirm" tabindex="-1"><span class="d-go">Start race</span><kbd>Enter</kbd></button></div></div>
+      </section>
+      <section class="m-screen" data-s="circuit">
+        <header><div class="m-kicker">Where to race</div><h2 class="m-h2">Circuit</h2></header>
+        <nav class="m-list">${CIRCUITS.map(([id, name]) => ['map:' + id, name]).map(item).join('')}</nav>
+        <div class="m-desc"></div>
       </section>
       <section class="m-screen" data-s="settings">
         <header><div class="m-kicker">Options</div><h2 class="m-h2">Settings</h2></header>
@@ -293,7 +304,7 @@ export class Menu {
   // ---------------------------------------------------------------- lists
   items() {
     const s = this.screen;
-    if (s !== 'main' && s !== 'pause' && s !== 'results') return [];
+    if (s !== 'main' && s !== 'pause' && s !== 'results' && s !== 'circuit') return [];
     return [...this.el.querySelectorAll(`.m-screen[data-s="${s}"] .m-item`)];
   }
 
@@ -318,6 +329,8 @@ export class Menu {
       settings: 'Picture, effects, audio and performance',
       controls: 'Keyboard, mouse and gamepad',
       support: 'Donate to keep Need4Space flying',
+      circuit: 'Space, or the forest moon',
+      ...Object.fromEntries(CIRCUITS.map(([id, , d]) => ['map:' + id, d])),
       resume: free ? 'Back to free flight' : 'Back to the race',
       restart: free ? 'Back over the start line' : 'Back to the grid and the lights',
       difficulty: 'The rivals’ pace and racecraft, changed at once',
@@ -457,7 +470,7 @@ export class Menu {
     const h = this.h;
     switch (a) {
       case 'race': ui('select'); this.go('diff', 'start'); break;
-      case 'settings': case 'controls': case 'support': ui('select'); this.go(a); break;
+      case 'settings': case 'controls': case 'support': case 'circuit': ui('select'); this.go(a); break;
       case 'donate': ui('select'); donate(); break;
       case 'difficulty': ui('select'); this.go('diff', this.ctx === 'results' ? 'restart' : 'apply'); break;
       case 'confirm': this.confirmDiff(); break;
@@ -471,6 +484,18 @@ export class Menu {
         break;
       case 'quit': case 'menu': ui('back'); this.toTitle(); break;
       case 'back': this.back(); break;
+      default:
+        if (a.startsWith('map:')) {                 // another circuit: saved, and the page reloads into it
+          const id = a.slice(4);
+          ui('select');
+          if (id === (h.map || 'space')) { this.back(true); break; }
+          h.settings.set('map', id);
+          this.busy = true;
+          document.getElementById('veil').classList.add('on');
+          const u = new URL(location.href);
+          u.searchParams.delete('map');
+          setTimeout(() => location.replace(u.href), 300);
+        }
     }
   }
 
@@ -589,7 +614,7 @@ export class Menu {
     cam.up.copy(this.up);
     cam.lookAt(v.look);
     // the subject right of centre, clear of the menu on the left (the difficulty cards sit in the middle)
-    const side = this.screen === 'main' || this.screen === 'settings' || this.screen === 'controls' || this.screen === 'support' ? 1 : 0;
+    const side = this.screen === 'main' || this.screen === 'settings' || this.screen === 'controls' || this.screen === 'support' || this.screen === 'circuit' ? 1 : 0;
     this.offK = (this.offK ?? side) + (side - (this.offK ?? side)) * (1 - Math.exp(-3 * dt));
     cam.rotateY(THREE.MathUtils.degToRad(v.fov * cam.aspect * 0.16 * this.offK));
     cam.fov = v.fov;

@@ -120,7 +120,8 @@ const LAYOUT = /* glsl */`
 `;
 
 // opts.color: the paint (linear)
-export function hullMaterial({ color = [0.12, 0.13, 0.145], key = 'hull' } = {}) {
+// moss: overgrown - moss on what sees the sky, in the seams and down the streaks (the forest circuit)
+export function hullMaterial({ color = [0.12, 0.13, 0.145], key = 'hull', moss = false } = {}) {
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.35 });
   mat.color.setRGB(...color);
   mat.onBeforeCompile = (sh) => {
@@ -176,7 +177,16 @@ varying vec2 vHullUV; varying vec2 vHullF; varying vec3 vHullT;`)
   // lamps in the girders' bellies: a 0.8 m lens every 12 m, on the face's middle
   float lampV = abs(hvl - 6.0), lampU = abs(hu - hW * 0.5);
   float hLamp = hK > 1.5 ? (1.0 - smoothstep(0.38, 0.4, lampV)) * (1.0 - smoothstep(0.11, 0.13, lampU)) : 0.0;
-  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.02), hLamp);`)
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.02), hLamp);
+  ${moss ? `{
+    float up = dot(normalize(vNormal), normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz));
+    float mn = n1.r * 0.55 + n2.g * 0.3 + n3.b * 0.15;
+    float hMoss = smoothstep(0.5, 0.62, mn + 0.25 * up + 0.15 * seamDirt + 0.1 * smoothstep(0.5, 0.8, streak)) * (1.0 - hLamp);
+    vec3 mc = mix(vec3(0.03, 0.055, 0.014), vec3(0.085, 0.12, 0.026), n3.b) * (0.8 + 0.4 * n2.g);
+    diffuseColor.rgb = mix(diffuseColor.rgb, mc, hMoss);
+    hullRough = mix(hullRough, 0.95, hMoss);
+    hullMetal = mix(hullMetal, 0.0, hMoss);
+  }` : ''}`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(hullRough, 0.2, hLamp);')
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n  metalnessFactor = hullMetal * (1.0 - hLamp);')
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>

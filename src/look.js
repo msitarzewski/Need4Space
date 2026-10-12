@@ -10,11 +10,11 @@ const v3 = (v) => { const [a, b, c] = v.isColor ? [v.r, v.g, v.b] : [v.x, v.y, v
 // into the shader as constants - the cave never moves). Inside, the sun and all sky light (ambient, hemisphere,
 // environment) go to nothing, fading in over the mouths; lamps and the ships' own lights are untouched. Must run
 // before the first lit material compiles.
-export function setCave(lines, R, mouth) {
-  const C = THREE.ShaderChunk;
-  if (C.common.includes('vCaveW') || !lines.length) return;
+// shade: { lines, R, mouth, amb } - covered stretches (the forest's tunnels of vines): only the sky's light is cut
+// there, to amb (the sun comes through the gaps in the leaves - their shadows are real ones)
+function polyK(name, lines, R, mouth) {
   const f = (v) => `vec3(${v.x.toFixed(2)}, ${v.y.toFixed(2)}, ${v.z.toFixed(2)})`;
-  let fn = 'float caveLight( vec3 w ) {\n\tfloat k = 1.0;\n';
+  let fn = `float ${name}( vec3 w ) {\n\tfloat k = 1.0;\n`;
   lines.forEach(({ pts, len }, c) => {
     const ctr = pts.reduce((a, p) => a.add(p), new THREE.Vector3()).divideScalar(pts.length);
     const bound = Math.max(...pts.map((p) => p.distanceTo(ctr))) + R + 10;
@@ -32,7 +32,14 @@ export function setCave(lines, R, mouth) {
 \t}
 `;
   });
-  fn += '\treturn k;\n}\n';
+  return fn + '\treturn k;\n}\n';
+}
+
+export function setCave(lines, R, mouth, shade = null) {
+  const C = THREE.ShaderChunk;
+  if (C.common.includes('vCaveW') || !lines.length) return;
+  const fn = polyK('caveLight', lines, R, mouth) + (shade?.lines.length ? polyK('shadeK0', shade.lines, shade.R, shade.mouth)
+    + `float shadeLight( vec3 w ) { return mix( ${shade.amb.toFixed(3)}, 1.0, shadeK0( w ) ); }\n` : 'float shadeLight( vec3 w ) { return 1.0; }\n');
   C.common += '\nvarying vec3 vCaveW;\n';
   C.project_vertex += '\n\tvCaveW = ( vec4( mvPosition.xyz - viewMatrix[ 3 ].xyz, 0.0 ) * viewMatrix ).xyz;\n';
   C.lights_pars_begin += '\n' + fn;
@@ -41,7 +48,7 @@ export function setCave(lines, R, mouth) {
   if (!L.includes(a)) throw new Error('lights chunk changed: cave patch not applied');
   C.lights_fragment_begin = 'float caveK = caveLight( vCaveW );\n' + L.replace(a, a + '\n\t\tdirectLight.color *= caveK;');
   C.lights_fragment_end = `{
-	float caveAmb = mix( 0.012, 1.0, caveK );
+	float caveAmb = mix( 0.012, 1.0, caveK ) * shadeLight( vCaveW );
 	irradiance *= caveAmb;
 	iblIrradiance *= caveAmb;
 	#if defined( RE_IndirectSpecular )
@@ -52,7 +59,11 @@ export function setCave(lines, R, mouth) {
 ` + C.lights_fragment_end;
 }
 
-export function patchShaders({ sunDir, sunFog, shadowHalf, shadowDepth, cascades = null, sunAngleDeg = 1.6, fogFalloff = 1 / 420 }) {
+// fogChunk: a map's own fog in place of the height fog (fogPars: what it needs, ahead of every lit fragment shader)
+// worldOnly: with a single directional shadow it is the world's map drawn once (the forest with shadows off): a soft
+// 8-tap lookup, not the PCSS search
+export function patchShaders({ sunDir, sunFog, shadowHalf, shadowDepth, cascades = null, sunAngleDeg = 1.6, fogFalloff = 1 / 420,
+  fogChunk = null, fogPars = '', worldOnly = false }) {
   const C = THREE.ShaderChunk;
   // Every light has a size: the sun's disc (and a lamp's bulb) widens the specular lobe a little (alpha + 0.014, the
   // sun's ~0.8 deg radius). On glass and clear coat at roughness 0.03 the sun's highlight was a 2-pixel spike thousands
@@ -137,6 +148,26 @@ export function patchShaders({ sunDir, sunFog, shadowHalf, shadowDepth, cascades
 		return mix( mix( mix( 1.0, s2, in2 ), s1, in1 ), s0, in0 );
 	}
 #endif`;
+    s += /* glsl */`
+#if defined( USE_SHADOWMAP )
+	// a map of the whole world drawn once (the forest's islands and trees, at any distance): 8 soft taps
+	float worldFilter( sampler2D map, vec2 size, vec4 coord, float bias ) {
+		vec3 sc = coord.xyz / coord.w;
+		sc.z += bias;
+		if ( sc.x <= 0.0 || sc.x >= 1.0 || sc.y <= 0.0 || sc.y >= 1.0 || sc.z >= 1.0 ) return 1.0;
+		float lit = 0.0;
+		for ( int i = 0; i < 8; i ++ ) lit += pcssLerp( map, size, sc.xy + pcssSpiral( i, 8.0 ) * 1.6 / size.x, sc.z );
+		return lit / 8.0;
+	}
+#endif
+#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS >= 4
+	// the world's own shadow: a fourth light's map
+	float worldShadow() {
+		return worldFilter( directionalShadowMap[ 3 ], directionalLightShadows[ 3 ].shadowMapSize, vDirectionalShadowCoord[ 3 ], directionalLightShadows[ 3 ].shadowBias );
+	}
+#else
+	float worldShadow() { return 1.0; }
+#endif`;
     const L = C.lights_fragment_begin;
     const old = `\t\t#if defined( USE_SHADOWMAP ) && ( UNROLLED_LOOP_INDEX < NUM_DIR_LIGHT_SHADOWS )
 \t\tdirectionalLightShadow = directionalLightShadows[ i ];
@@ -147,8 +178,11 @@ export function patchShaders({ sunDir, sunFog, shadowHalf, shadowDepth, cascades
     C.lights_fragment_begin = L.replace(old, `\t\t#if defined( USE_SHADOWMAP ) && ( UNROLLED_LOOP_INDEX < NUM_DIR_LIGHT_SHADOWS )
 \t\t#if NUM_DIR_LIGHT_SHADOWS >= 3
 \t\t#if UNROLLED_LOOP_INDEX == 0
-\t\tdirectLight.color *= ( directLight.visible && receiveShadow ) ? cascadeShadow() : 1.0;
+\t\tdirectLight.color *= ( directLight.visible && receiveShadow ) ? cascadeShadow() * worldShadow() : 1.0;
 \t\t#endif
+\t\t#elif NUM_DIR_LIGHT_SHADOWS == 1 && ${worldOnly ? 1 : 0}
+\t\tdirectionalLightShadow = directionalLightShadows[ i ];
+\t\tdirectLight.color *= ( directLight.visible && receiveShadow ) ? worldFilter( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, vDirectionalShadowCoord[ i ], directionalLightShadow.shadowBias ) : 1.0;
 \t\t#else
 \t\tdirectionalLightShadow = directionalLightShadows[ i ];
 \t\tdirectLight.color *= ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;
@@ -191,4 +225,8 @@ export function patchShaders({ sunDir, sunFog, shadowHalf, shadowDepth, cascades
 	#endif
 	gl_FragColor.rgb = mix( gl_FragColor.rgb, fogCol, fogFactor );
 #endif`;
+  if (fogChunk) {
+    C.fog_fragment = fogChunk;
+    C.fog_pars_fragment += `\n#ifdef USE_FOG\n${fogPars}\n#endif`;
+  }
 }
