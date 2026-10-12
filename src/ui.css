@@ -157,6 +157,8 @@ body.lite .hp { background: linear-gradient(115deg, rgba(9, 13, 19, 0.86), rgba(
 .bar.drift i[data-t="1"] { background: #3d8cff; box-shadow: 0 0 0.6rem #3d8cff; }
 .bar.drift i[data-t="2"] { background: #ff8c22; box-shadow: 0 0 0.6rem #ff8c22; }
 .bar.drift i[data-t="3"] { background: #d25cff; box-shadow: 0 0 0.8rem #d25cff; }
+.bar.drift.pulse { animation: driftPulse 0.35s ease-out; }
+@keyframes driftPulse { 0% { transform: skewX(-20deg) scaleY(2.6); filter: brightness(2.2); } 100% { transform: skewX(-20deg) scaleY(1); filter: none; } }
 .bar.thr i { background: rgba(238, 242, 246, 0.72); }
 .minor { display: flex; gap: 1.3rem; margin-top: 0.65rem; font: 700 0.74rem var(--ui); letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); }
 .minor b { color: var(--text); font-weight: 700; letter-spacing: 0.05em; }

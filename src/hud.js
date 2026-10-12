@@ -154,6 +154,9 @@ export class HUD {
   hideHelp() { $('help').classList.add('hidden'); }
 
   // a glow round the screen's edge (boost pad: orange, wall hit: blue), fading out
+  // a short pulse on an element (the drift meter reaching a step)
+  pulse(id) { retrigger($(id).parentElement, 'pulse'); }
+
   flash(colour, secs = 0.7) {
     const el = $('edgeflash');
     el.style.transition = 'none';

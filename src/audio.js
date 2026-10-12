@@ -660,6 +660,13 @@ export class GameAudio {
     this.burst(t, 0.5, o, { f: 400 * tier, f1: 3000 + 800 * tier, q: 1.4, v: 0.4, buf: this.pink });
     this.tone(t, 0.3, o, { type: 'sawtooth', f: 300 * tier, f1: 1200 * tier, v: 0.05, tau: 0.1, attack: 0.03 });
   }
+  // the drift's charge reaching a step: a bright chime, higher each step
+  driftTier(tier) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, o = this.out(null, 0, 0.35), f = [0, 880, 1175, 1568][tier];
+    this.tone(t, 0.35, o, { type: 'triangle', f, f1: f * 1.02, v: 0.3, tau: 0.12, attack: 0.005 });
+    this.tone(t + 0.05, 0.3, o, { f: f * 1.5, v: 0.15, tau: 0.1, attack: 0.005 });
+  }
   // a gravity flip: the field taking hold - a deep swell under a tone rising through the half turn
   flip() {
     if (!this.ctx || !this.gate('flip', 0.5)) return;

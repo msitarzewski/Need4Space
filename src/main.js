@@ -208,8 +208,8 @@ async function boot() {
   let aoHalf = false;
   gtao.setSize = (w, h) => { gtao.fullSize = [w, h]; gtaoSetSize(aoHalf ? Math.max(1, w >> 1) : w, aoHalf ? Math.max(1, h >> 1) : h); };
   const tp = track ? track.parts : null;
-  const noAO = () => [...(world.noAO || []), ...ship.fxObjects(), ...fx.pools.map((p) => p.points), fx.streaks.lines, fx.ring, fx.marks.mesh,
-    ...(tp ? [...tp.fields, ...tp.pads, ...tp.lanes, ...tp.gates.filter((m) => m.material.isShaderMaterial), tp.tunnel[0]].filter(Boolean) : []), ...(race ? race.noAO() : []), ...fx.waves,
+  const noAO = () => [...(world.noAO || []), ...ship.fxObjects(), ...fx.pools.map((p) => p.points), fx.streaks.lines, fx.ring, fx.marks.mesh, fx.trails.mesh,
+    ...(tp ? [...tp.fields, ...tp.pads, ...tp.lanes, ...tp.gates.filter((m) => m.material.isShaderMaterial), ...(tp.flips || []).filter((m) => m.material.transparent), tp.tunnel[0]].filter(Boolean) : []), ...(race ? race.noAO() : []), ...fx.waves,
     ...(world.dust ? [world.dust] : [])];
   gtao.render = (...a) => {        // glows, plumes, trails, particles, fields and decals must not occlude anything
     const hide = noAO().filter((o) => o.visible);
@@ -592,6 +592,9 @@ async function boot() {
             rig.shake = Math.max(rig.shake, 0.15 + 0.08 * e.tier);
             hud.flash(['', 'rgba(60,140,255,0.3)', 'rgba(255,140,40,0.32)', 'rgba(210,90,255,0.36)'][e.tier], 0.35);
           }
+        } else if (e.type === 'driftTier') {
+          if (camera.position.distanceTo(e.at) < 220) fx.driftTier(e.entry.ship, e.entry.racer, track.frame(e.s), e.tier);
+          if (e.player && mode === 'race') { audio.driftTier(e.tier); hud.pulse('dft'); }
         } else if (e.type === 'flip') {
           if (e.player && mode === 'race') { audio.flip(); hud.flash('rgba(150,70,255,0.22)', 0.6); }
         } else if (e.type === 'go') { hud.message('GO!', 1.2); audio.go(); }
