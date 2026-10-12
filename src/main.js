@@ -14,6 +14,7 @@ import { loadShip, Ship } from './ship.js';
 import { Flight } from './flight.js';
 import { CameraRig } from './camera.js';
 import { Input } from './input.js';
+import { TouchControls, isTouch } from './touch.js';
 import { FX } from './fx.js';
 import { HUD } from './hud.js';
 import { GameAudio } from './audio.js';
@@ -148,6 +149,7 @@ async function boot() {
   ship.root.add(headlight, headlight.target);
   const rivalLights = [0, 1, 2].map(() => { const l = new THREE.PointLight(0xffffff, 0, 70, 1.6); scene.add(l); return l; });
   const input = new Input(canvas);
+  const touch = isTouch() ? new TouchControls(input) : null;     // phones and tablets: sticks and buttons on screen
   const fx = new FX(scene, camera);
   fx.track = track;
   const hud = new HUD(mm, START);
@@ -275,7 +277,7 @@ async function boot() {
     race?.setDifficulty(v.ai);                       // the rivals' AI difficulty (race.js AI_LEVELS)
     audio.lite = !!v.laptop;                          // (fewer rival voices; its buffer is set when the sound starts)
     audio.setLevels(v.music, v.sfx);                 // music and effects volume
-  }, integratedGPU(gpuName));
+  }, integratedGPU(gpuName) || !!touch);                // (a phone or tablet: Laptop mode on a first visit too)
 
   const lap = { started: false, time: 0, last: Infinity, best: Infinity, lap: 1, idx: START, progress: 0, s: 0 };
   let autoChase = false, wasCrashed = false, t = 0;
@@ -630,7 +632,7 @@ async function boot() {
       }
     }
 
-    let state = 'ENGINES OFF  -  press E', cls = 'off';
+    let state = touch ? 'ENGINES OFF  -  tap Engines' : 'ENGINES OFF  -  press E', cls = 'off';
     if (ctl.crashed > 0) { state = 'CRASHED'; cls = 'bad'; }
     else if (ship.engineOn && !ship.ready) { state = ship.canopyT > 0.02 ? 'CANOPY CLOSING' : 'ENGINES STARTING'; cls = 'warn'; }
     else if (race && mode === 'race' && race.state === 'grid' && ship.engineOn) { state = 'ON THE GRID'; cls = 'warn'; }
@@ -643,6 +645,7 @@ async function boot() {
       invert: input.invert, lapTime: lap.started ? lap.time : NaN, lastLap: lap.last, bestLap: lap.best, lap: lap.lap,
       x: ctl.pos.x, z: ctl.pos.z, fx: f.x, fz: f.z, race: race ? race.hud() : null, mode });
     audio.update(dt, { camera, ship, ctl, race, track, mode, inp });
+    touch?.setMode(mode);
   }
   requestAnimationFrame(frame);
 }

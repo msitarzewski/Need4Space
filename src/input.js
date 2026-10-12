@@ -1,4 +1,5 @@
-// Keyboard, mouse (pointer-lock virtual stick) and gamepad, merged into one control state per frame.
+// Keyboard, mouse (pointer-lock virtual stick), gamepad and the touch sticks (touch.js), merged into one control state
+// per frame.
 import { clamp } from './noise.js';
 
 export class Input {
@@ -84,6 +85,17 @@ export class Input {
       s.camera = s.camera || edge(1);
       s.reset = s.reset || edge(9);
       this.padPrev = p.buttons.map((x) => x.value);
+    }
+    // touch: left stick steer / roll and pitch, right stick the throttle lever (up / down, as W / S) and the airbrakes
+    const t = this.touch?.state;
+    if (t) {
+      s.roll += t.lx;
+      s.pitch -= t.ly;                          // pushed up: as the up arrow
+      if (t.ry < -0.35) s.throttleUp = 1;
+      if (t.ry > 0.35) s.throttleDown = 1;
+      if (t.rx < -0.55) s.airL = 1;
+      if (t.rx > 0.55) s.airR = 1;
+      s.boost = s.boost || t.boost;
     }
     if (this.invert) s.pitch = -s.pitch;
     s.pitch = clamp(s.pitch, -1, 1);

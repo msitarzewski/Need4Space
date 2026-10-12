@@ -125,7 +125,15 @@ export class Menu {
         <div class="m-slot-settings"></div>
       </section>
       <section class="m-screen" data-s="controls">
-        <header><div class="m-kicker">Keyboard, mouse, gamepad</div><h2 class="m-h2">Controls</h2></header>
+        <header><div class="m-kicker"><span class="k-keys">Keyboard, mouse, gamepad</span><span class="k-touch">Touch</span></div><h2 class="m-h2">Controls</h2></header>
+        <div class="c-touch">
+          <div class="c-row"><span class="c-keys"><kbd>Left stick</kbd></span><span>Steer (free flight: roll, pitch)</span></div>
+          <div class="c-row"><span class="c-keys"><kbd>Right stick</kbd></span><span>Up: throttle - down: brake - sideways: airbrakes</span></div>
+          <div class="c-row"><span class="c-keys"><kbd>Boost</kbd></span><span>Boost (orange pads on the track kick too)</span></div>
+          <div class="c-row"><span class="c-keys"><kbd>Cam</kbd></span><span>Camera: chase, far, canopy, fly-by, orbit</span></div>
+          <div class="c-row"><span class="c-keys"><kbd>Engines</kbd></span><span>Engines start / stop (free flight)</span></div>
+          <div class="c-row"><span class="c-keys"><kbd>II</kbd></span><span>Pause menu</span></div>
+        </div>
         <div class="c-grid">${controlsHTML()}</div>
         <div class="c-pad"><b>Gamepad</b>${GAMEPAD}</div>
       </section>
@@ -144,6 +152,7 @@ export class Menu {
         <div class="m-desc"></div>
       </section>
       <section class="m-screen" data-s="results"><div class="m-slot-results"></div></section>
+      <button class="m-back" data-act="back" tabindex="-1">Back</button>
       <footer class="m-foot"><div class="m-hints"></div>
         <div class="m-info">${km ? `Circuit ${km} km &middot; ${LAPS} laps &middot; ${TEAMS.length} ships` : ''}</div></footer>`;
     this.el.querySelector('.m-slot-settings').append(h.settings.el);
@@ -160,6 +169,7 @@ export class Menu {
     this.h.settings.el.classList.toggle('hidden', screen !== 'settings');
     if (!screen) { document.getElementById('support-toast')?.classList.remove('on'); return; }   // (the last screen stays drawn while the menu fades out)
     this.el.dataset.ctx = this.ctx;
+    this.el.dataset.depth = this.stack.length > 1 || (this.ctx === 'pause' && screen !== 'pause') ? 'sub' : 'top';   // (touch: a Back button)
     this.el.dataset.screen = screen;
     for (const s of this.el.querySelectorAll('.m-screen')) s.classList.toggle('active', s.dataset.s === screen);
     this.el.querySelector('.m-hints').innerHTML = HINTS[screen] || '';
@@ -460,6 +470,7 @@ export class Menu {
         else this.leave(() => h.freeFlight(true));
         break;
       case 'quit': case 'menu': ui('back'); this.toTitle(); break;
+      case 'back': this.back(); break;
     }
   }
 
