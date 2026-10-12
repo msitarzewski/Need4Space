@@ -19,7 +19,8 @@ const UP = new THREE.Vector3(0, 1, 0);
 const f3 = (v, k = 2) => `vec3(${v.x.toFixed(k)}, ${v.y.toFixed(k)}, ${v.z.toFixed(k)})`;
 
 // The chambers, by metres in from the mouth (d): the section's half-widths at the deck's height (left, right), the roof
-// over the deck and the floor under it, how square it is (2 round .. 4 boxy) and how lumpy (m)
+// over the deck and the floor under it, how square it is (2 round .. 4 boxy), how lumpy (m), and how far its floor runs
+// off to one side (dx: the river's bed beside the way - to the left, inside the bend, where the deck banks down to it)
 export const CHAMBERS = [
   { name: 'mouth', d0: -90, d1: 50, wl: 48, wr: 48, up: 44, down: 26, sq: 2.2, amp: 5 },
   { name: 'gallery', d0: 70, d1: 225, wl: 46, wr: 46, up: 50, down: 26, sq: 2.4, amp: 5 },
@@ -28,7 +29,7 @@ export const CHAMBERS = [
   { name: 'hall', d0: 592, d1: 790, wl: 92, wr: 92, up: 62, down: 46, sq: 3.0, amp: 7 },
   { name: 'roots', d0: 822, d1: 1080, wl: 74, wr: 74, up: 96, down: 46, sq: 2.4, amp: 9 },
   { name: 'fungi', d0: 1112, d1: 1380, wl: 72, wr: 108, up: 72, down: 92, sq: 2.2, amp: 10 },
-  { name: 'river', d0: 1412, d1: 1640, wl: 58, wr: 58, up: 54, down: 50, sq: 2.6, amp: 6 },
+  { name: 'river', d0: 1412, d1: 1640, wl: 110, wr: 52, up: 54, down: 34, sq: 2.6, amp: 6, dx: -58 },
   { name: 'fissure', d0: 1672, d1: 1980, wl: 38, wr: 38, up: 104, down: 96, sq: 4.0, amp: 4 },
   { name: 'exit', d0: 2012, d1: 9999, wl: 50, wr: 50, up: 46, down: 28, sq: 2.2, amp: 5 },
 ];
@@ -48,7 +49,7 @@ function section(d, L) {
   let sum = w.reduce((a, b) => a + b, 0);
   if (sum < 1e-4) { let bi = 0, bd = 1e9; CHAMBERS.forEach((c, i) => { const q = Math.min(Math.abs(d - c.d0), Math.abs(d - c.d1)); if (q < bd) { bd = q; bi = i; } }); w[bi] = sum = 1; }
   const out = { w: {} };
-  for (const k of ['wl', 'wr', 'up', 'down', 'sq', 'amp']) out[k] = CHAMBERS.reduce((a, c, i) => a + c[k] * w[i], 0) / sum;
+  for (const k of ['wl', 'wr', 'up', 'down', 'sq', 'amp', 'dx']) out[k] = CHAMBERS.reduce((a, c, i) => a + (c[k] ?? 0) * w[i], 0) / sum;
   CHAMBERS.forEach((c, i) => (out.w[c.name] = w[i] / sum));
   // the mouths flare out
   const fl = 1 + 0.28 * smoothstep(30, -30, d) + 0.28 * smoothstep(L - 30, L + 30, d) + 0.5 * smoothstep(-10, -60, d) + 0.5 * smoothstep(L + 10, L + 60, d);
@@ -73,6 +74,7 @@ export function hollowCave(track, I) {
       const a = (j / NJ) * TAU, c = Math.cos(a), sn = Math.sin(a), e = 2 / sec.sq;
       let x = (c >= 0 ? sec.wr : sec.wl) * Math.sign(c) * Math.pow(Math.abs(c), e);
       let y = (sn >= 0 ? sec.up : sec.down) * Math.sign(sn) * Math.pow(Math.abs(sn), e);
+      if (sn < 0) x += sec.dx * Math.pow(-sn, 1.5);
       wv.copy(P).addScaledVector(Rl, x).addScaledVector(Ul, y);
       // lumps, a chamber's size across (and finer ones)
       const k = 1 / (16 + sec.amp * 3.5);
@@ -133,7 +135,7 @@ export function hollowCave(track, I) {
   const Rm = Math.max(...Ro);
   const H = { ...I, x: C.x, z: C.z, rx: Rm, rz: Rm, rot: 0, outline: Ro.map((v) => v / Rm), res: NU, rows: 30,
     // (no crags round the mouths: the cliff stands where the cave's walls meet it)
-    cragAt: (x, y, z) => smoothstep(70, 170, Math.min(Math.hypot(x - mouthIn.x, y - mouthIn.y, z - mouthIn.z), Math.hypot(x - mouthOut.x, y - mouthOut.y, z - mouthOut.z))) };
+    cragAt: (x, y, z) => smoothstep(150, 250, Math.min(Math.hypot(x - mouthIn.x, y - mouthIn.y, z - mouthIn.z), Math.hypot(x - mouthOut.x, y - mouthOut.y, z - mouthOut.z))) };
   const shape = islandShape(H);
   const outR = (x, z) => { const a = (Math.atan2(z - C.z, x - C.x) / TAU) * NU, j = Math.floor(a), t = a - j; return Ro[((j % NU) + NU) % NU] * (1 - t) + Ro[(((j + 1) % NU) + NU) % NU] * t; };
   const baseAt = (x, z) => { const a = (Math.atan2(z - C.z, x - C.x) / TAU) * NU, j = Math.floor(a), t = a - j; return I.top - (shape.base[((j % NU) + NU) % NU] * (1 - t) + shape.base[(((j + 1) % NU) + NU) % NU] * t); };
@@ -144,35 +146,60 @@ export function hollowCave(track, I) {
     return Math.hypot(p.x - C.x, p.z - C.z) - outR(p.x, p.z) * (1 + 0.03 * Math.sin(Math.PI * t));
   };
 
-  // ---- the mouths: where the track goes through the cliff. Beyond it the tube is laid back onto the cliff's face (a
-  // lip of rock round the hole the cliff has there, over its edge), short of the track's own way
-  const raw = grid.map((ring) => ring.map((p) => p.clone()));
-  const wayAt = (p, r0) => {
-    let best = r0, bd = 1e18;
-    for (let r = Math.max(0, r0 - 20); r <= Math.min(nR, r0 + 20); r++) { const q = rows[r].P.distanceToSquared(p); if (q < bd) { bd = q; best = r; } }
-    const dv = p.clone().sub(rows[best].P), x = dv.dot(rows[best].R), y = dv.dot(rows[best].U);
-    return Math.abs(x) < XC && y > YB && y < YT;
-  };
-  // (from 80 m in, out to where the way meets the cliff)
+  // ---- the mouths: where the track goes through the cliff (from 80 m in, out to where the way meets it)
   const crossing = (d0, dir) => {
     for (let d = d0 - dir * 80; dir * (d - d0) < PAD; d += dir * 2) { const rw = rowAt(d); if (outside(rw.P.clone().addScaledVector(rw.U, 6)) > 0) return rw; }
     return rowAt(d0 + dir * PAD);
   };
   const gateIn = crossing(0, -1), gateOut = crossing(L, 1);
-  const tubeOut = grid.map((ring) => ring.map(() => 0));
-  const nh = new THREE.Vector3();
   let pierced = 0;
-  grid.forEach((ring, r) => {
-    if (rows[r].d > gateIn.d + 45 && rows[r].d < gateOut.d - 45) { for (const p of ring) if (outside(p) > 0) pierced++; return; }
-    ring.forEach((p, j) => {
-      const o = outside(p);
-      if (o <= 0.8) return;
-      nh.set(p.x - C.x, 0, p.z - C.z).normalize();
-      const q = p.clone().addScaledVector(nh, -(o - 0.8) + 3.5 * (fbm3(p.x * 0.06, p.y * 0.06, p.z * 0.06, 3) - 0.35));
-      if (!wayAt(q, r)) p.copy(q); else tubeOut[r][j] = o > 5 ? 1 : 0;
-    });
+  grid.forEach((ring, r) => { if (rows[r].d > gateIn.d + 45 && rows[r].d < gateOut.d - 45) for (const p of ring) if (outside(p) > 0) pierced++; });
+  const nearRows = rows.filter((rw) => rw.d < gateIn.d + 120 || rw.d > gateOut.d - 120);
+  const nearest = (p) => { let br = null, bd = 1e18; for (const rw of nearRows) { const q = p.distanceToSquared(rw.P); if (q < bd) { bd = q; br = rw; } } return br; };
+  // inside the tube's section there (less a margin), and in the ships' way
+  const inTube = (p, margin) => {
+    const br = nearest(p), r = rows.indexOf(br), dv = p.clone().sub(br.P), x = dv.dot(br.Rl), y = dv.dot(br.Ul);
+    if (Math.abs(dv.dot(br.T)) > 8) return false;
+    const a = Math.atan2(y, x), j = ((Math.round((a / TAU) * NJ) % NJ) + NJ) % NJ, q = grid[r][j].clone().sub(br.P);
+    return Math.hypot(x, y) < Math.hypot(q.dot(br.Rl), q.dot(br.Ul)) - margin;
+  };
+  const inWay = (p) => {
+    const br = nearest(p), dv = p.clone().sub(br.P), x = dv.dot(br.R), y = dv.dot(br.U);
+    return Math.abs(dv.dot(br.T)) < 8 && Math.abs(x) < XC + 2 && y > -3 && y < YT + 12;
+  };
+  // the cliff round each mouth, finer than the hill's own (2 m): a patch of it laid over the hill's, with the mouth cut
+  // out of it where the tube runs through (the tube stands a little out of it: no gap between them)
+  const outRA = (a) => { const f = (a / TAU) * NU, j = Math.floor(f), t = f - j; return Ro[((j % NU) + NU) % NU] * (1 - t) + Ro[(((j + 1) % NU) + NU) % NU] * t; };
+  const portals = [gateIn, gateOut].map((gate) => {
+    const M = gate.P, a0 = Math.atan2(M.z - C.z, M.x - C.x), R0 = outRA(a0), W = 96, ylo = M.y - 76, yhi = M.y + 92, NX = 96, NYp = 84;
+    const pos = [], idx = [], isl = [], hole = [], way = [], v = new THREE.Vector3();
+    for (let i = 0; i <= NYp; i++) for (let j = 0; j <= NX; j++) {
+      const a = a0 + (-W + (2 * W * j) / NX) / R0, y = ylo + ((yhi - ylo) * i) / NYp;
+      const t = clamp((rimY - y) / (rimY - baseAt(C.x + Math.cos(a) * 100, C.z + Math.sin(a) * 100)), 0, 1), rho = outRA(a) * (1 + 0.03 * Math.sin(Math.PI * t)) + 0.6;
+      v.set(C.x + Math.cos(a) * rho, y, C.z + Math.sin(a) * rho);
+      pos.push(v.x, v.y, v.z); isl.push(0, 0);
+      hole.push(inTube(v, 1.5) ? 1 : 0); way.push(inWay(v) ? 1 : 0);
+    }
+    for (let i = 0; i < NYp; i++) for (let j = 0; j < NX; j++) {
+      const a = i * (NX + 1) + j, b = a + 1, c = a + NX + 1, d = c + 1;
+      for (const [p0, p1, p2] of [[a, c, b], [b, c, d]]) if (!(hole[p0] && hole[p1] && hole[p2]) && !(way[p0] || way[p1] || way[p2])) idx.push(p0, p1, p2);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('isl', new THREE.Float32BufferAttribute(isl, 2));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    // facing out of the hill
+    const n0 = new THREE.Vector3().fromBufferAttribute(g.attributes.normal, 0), p0 = new THREE.Vector3().fromBufferAttribute(g.attributes.position, 0).sub(C).setY(0);
+    if (n0.dot(p0) < 0) { const ix = g.index.array; for (let q = 0; q < ix.length; q += 3) { const tq = ix[q + 1]; ix[q + 1] = ix[q + 2]; ix[q + 2] = tq; } g.computeVertexNormals(); }
+    g.computeBoundingSphere();
+    return { g, a0, R0, W, ylo, yhi };
   });
-
+  const underPortal = (p) => portals.some((q) => {
+    let da = Math.atan2(p.z - C.z, p.x - C.x) - q.a0;
+    da = ((da + Math.PI) % TAU + TAU) % TAU - Math.PI;
+    return Math.abs(da * q.R0) < q.W - 16 && p.y > q.ylo + 16 && p.y < q.yhi - 16;
+  });
   // ---- the sinkholes: from the roof of their chamber up through the hill's top
   const shafts = SHAFTS.map((q) => {
     const rw = rowAt(q.d), sec = rw.sec, ax = rw.P.clone().addScaledVector(rw.Rl, q.x);
@@ -190,35 +217,13 @@ export function hollowCave(track, I) {
   });
   const inShaft = (p, k = 1, above = -1e9) => shafts.some((q) => p.y > Math.max(above, q.roof - 25) && Math.hypot(p.x - q.axis.x, p.z - q.axis.z) < q.r * k);
 
-  // ---- the hill's shell: a hole where each mouth and each sinkhole is (a triangle goes when all its corners are in)
+  // ---- the hill's shell: gone under the mouths' patches and over each sinkhole (a triangle goes when all its corners
+  // are in)
   {
-    const g = shape.geometry, pos = g.attributes.position, idx = g.index.array, keep = [], v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
-    const nearRows = rows.filter((rw) => rw.d < 120 || rw.d > L - 120);
-    const inTube = (p) => {
-      if (p.distanceTo(mouthIn) > 160 && p.distanceTo(mouthOut) > 160) return false;
-      let br = null, bd = 1e9;
-      for (const rw of nearRows) { const q = p.distanceToSquared(rw.P); if (q < bd) { bd = q; br = rw; } }
-      const r = rows.indexOf(br), dv = p.clone().sub(br.P), x = dv.dot(br.Rl), y = dv.dot(br.Ul), along = dv.dot(br.T);
-      if (Math.abs(along) > 8) return false;
-      const a = Math.atan2(y, x), j = ((Math.round((a / TAU) * NJ) % NJ) + NJ) % NJ, ring = raw[r][j];
-      const rr = Math.hypot(ring.clone().sub(br.P).dot(br.Rl), ring.clone().sub(br.P).dot(br.Ul));
-      return Math.hypot(x, y) < rr * 0.86 - 3;
-    };
-    // (and nothing of the cliff left hanging into the way through a mouth)
-    const inWay = (p) => {
-      if (p.distanceTo(mouthIn) > 160 && p.distanceTo(mouthOut) > 160) return false;
-      let br = null, bd = 1e9;
-      for (const rw of nearRows) { const q = p.distanceToSquared(rw.P); if (q < bd) { bd = q; br = rw; } }
-      const dv = p.clone().sub(br.P), x = dv.dot(br.R), y = dv.dot(br.U);
-      return Math.abs(dv.dot(br.T)) < 8 && Math.abs(x) < XC + 2 && y > YB - 2 && y < YT + 12;
-    };
-    const hole = (p) => inTube(p) || (p.y > I.top - 60 && inShaft(p, 1.35));
-    const flag = new Uint8Array(pos.count), way = new Uint8Array(pos.count);
-    for (let i = 0; i < pos.count; i++) { v[0].fromBufferAttribute(pos, i); flag[i] = hole(v[0]) ? 1 : 0; way[i] = inWay(v[0]) ? 1 : 0; }
-    for (let t = 0; t < idx.length; t += 3) {
-      const [a, b, c] = [idx[t], idx[t + 1], idx[t + 2]];
-      if (!(flag[a] && flag[b] && flag[c]) && !(way[a] || way[b] || way[c])) keep.push(a, b, c);
-    }
+    const g = shape.geometry, pos = g.attributes.position, idx = g.index.array, keep = [], v = new THREE.Vector3();
+    const flag = new Uint8Array(pos.count);
+    for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i); flag[i] = underPortal(v) || (v.y > I.top - 60 && inShaft(v, 1.35)) ? 1 : 0; }
+    for (let t = 0; t < idx.length; t += 3) if (!(flag[idx[t]] && flag[idx[t + 1]] && flag[idx[t + 2]])) keep.push(idx[t], idx[t + 1], idx[t + 2]);
     g.setIndex(keep);
   }
   // planting: none in a sinkhole or on its lip
@@ -227,7 +232,7 @@ export function hollowCave(track, I) {
   // ---- the tube's chunks: quads gone where they stand out of the hill, and under the sinkholes
   const tubeFlag = grid.map((ring, r) => ring.map((p) => {
     const rw = rows[r];
-    if (tubeOut[r][grid[r].indexOf(p)]) return 1;
+    if ((rw.d < gateIn.d + 45 || rw.d > gateOut.d - 45) && outside(p) > 3) return 1;
     return shafts.some((q) => p.y > rw.P.y + 18 && Math.hypot(p.x - q.axis.x, p.z - q.axis.z) < q.r * 0.92) ? 1 : 0;
   }));
   // normals from the grid (into the tube); per vertex: the island's attributes (no grass, a little deep)
@@ -294,7 +299,9 @@ export function hollowCave(track, I) {
   // ---- water: the lake in the cavern and the river along the floor of the last chambers - each a strip across the
   // tube at its level, wall to wall
   const lakeRow = rowAt(392), lakeY = lakeRow.P.y - 172;
-  const riverY = (d) => rowAt(d).P.y - (rowAt(d).sec.down - 9);
+  // (the river 12 m under the deck in its gallery - in sight beyond the walls, its bed off to the left - down in the
+  // fissure's slot after)
+  const riverY = (d) => { const rw = rowAt(d), k = rw.sec.w.fissure + rw.sec.w.exit; return rw.P.y - (12 * (1 - k) + (rw.sec.down - 9) * k); };
   const strip = (dFrom, dTo, yAt) => {
     const pos = [], uv = [], idx = [];
     let n = 0, along = 0, last = null, prev = -1;
@@ -379,7 +386,8 @@ ${shafts.map((q) => `	dh = length( w.xz - vec2( ${q.axis.x.toFixed(2)}, ${q.axis
   console.info(`hollow: cave ${(L / 1000).toFixed(2)} km, ${grid.length} rows, hill ${Math.round(Rm)} m across its widest, ${shafts.length} sinkholes, ` +
     `mouths ${Math.round(gateIn.d)} / ${Math.round(gateOut.d - L)} m from caveIn / caveOut${pierced ? `, ${pierced} points of the cave out of the hill!` : ''} (${Math.round(performance.now() - t0)} ms)`);
   return { L, sIn, sOut, rows, grid, NJ, rowAt, chunks, shape, topInfo, rimAt: shape.rimAt, I: { ...H, outline: undefined, cragAt: undefined }, C, outside,
-    shafts, shaftGeo, lake, lakeY, river, riverY, light, glsl, mouths, mouthIn: gateIn.P, mouthOut: gateOut.P, gates: [gateIn.d, gateOut.d], pierced };
+    shafts, shaftGeo, lake, lakeY, river, riverY, light, glsl, mouths, mouthIn: gateIn.P, mouthOut: gateOut.P, gates: [gateIn.d, gateOut.d], pierced,
+    portals: portals.map((q) => q.g) };
 }
 
 // ---------------------------------------------------------------- the dressing
@@ -481,10 +489,12 @@ function caveWaterMaterial(time, { flow = 0, hit = new THREE.Vector3(), beam = n
         float n = wN(vec2(vUv.x / 3.0, (vUv.y - flowT) / 9.0)) * 0.6 + wN(p / 1.7 + time * 0.3) * 0.4;
         float d = length(vW.xz - hit.xz), ring = sin(d * 0.6 - time * 4.0) * exp(-d / 70.0) * 0.5 + 0.5;
         float foam = smoothstep(0.62, 0.8, n) * (${flow > 0 ? '0.5' : '0.0'} + exp(-d / 45.0));
-        vec3 deep = vec3(0.004, 0.012, 0.012);
-        vec3 refl = vec3(0.025, 0.11, 0.1) * (0.6 + 0.8 * n) + vec3(1.0, 0.95, 0.8) * 0.9 * exp(-length(vW.xz - beam.xz) / 40.0) * (0.6 + 0.4 * ring);
+        vec3 deep = vec3(0.006, 0.02, 0.02) * (0.6 + 0.8 * n);
+        vec3 refl = vec3(0.04, 0.16, 0.15) * (0.6 + 0.8 * n) + vec3(1.0, 0.95, 0.8) * 0.9 * exp(-length(vW.xz - beam.xz) / 40.0) * (0.6 + 0.4 * ring);
         vec3 c = mix(deep, refl, fres) + vec3(0.6, 0.7, 0.68) * foam * 0.18 * (0.4 + 0.6 * ring)
           + vec3(0.55, 0.7, 0.75) * 0.3 * exp(-d / 26.0) * (0.5 + 0.5 * ring);                 // the churn where the fall lands
+        // (running water: long streaks of the glow on it, carried along)
+        c += vec3(0.3, 0.6, 0.58) * 0.14 * ${flow > 0 ? '1.0' : '0.0'} * smoothstep(0.55, 0.78, wN(vec2(vUv.x / 1.6, (vUv.y - flowT * 1.3) / 16.0)));
         gl_FragColor = vec4(c, 0.92);
       }`,
   });
@@ -536,63 +546,71 @@ export function caveDressing(scene, H, track, mats, dens = 1) {
     for (let j = 0; j < NJ; j++) {
       const p = grid[r][j], q = local(r, p);
       if (q.yl > 24 && q.y > 30) {                                       // the roof
-        if (rnd() < 0.5 * roofK * dens) dots.push(p.clone().addScaledVector(UP, -0.4));
-        if (rnd() < 0.2 * roofK * dens) threads.push({ p: p.clone().addScaledVector(UP, -0.5), len: Math.min(q.y - 26, 2 + Math.pow(rnd(), 1.4) * (w.cavern > 0.5 ? 45 : 14)), seed: rnd() });
+        if (rnd() < 0.5 * roofK * dens) dots.push(Object.assign(p.clone().addScaledVector(UP, -0.4), { r }));
+        if (rnd() < 0.2 * roofK * dens) threads.push({ r, p: p.clone().addScaledVector(UP, -0.5), len: Math.min(q.y - 26, 2 + Math.pow(rnd(), 1.4) * (w.cavern > 0.5 ? 45 : 14)), seed: rnd() });
       }
-      if (q.yl > -40 && q.yl < 30 && Math.abs(q.x) > XC && rnd() < (0.05 + 0.12 * w.fungi + 0.05 * w.gallery + 0.06 * w.hall) * dens) caps.push({ p, n: inward(r, p), hue: w.hall > 0.5 ? 0.9 + rnd() * 0.1 : rnd() * 0.88 });
+      if (q.yl > -40 && q.yl < 30 && Math.abs(q.x) > XC && rnd() < (0.05 + 0.12 * w.fungi + 0.05 * w.gallery + 0.06 * w.hall) * dens) caps.push({ r, p, n: inward(r, p), hue: w.hall > 0.5 ? 0.9 + rnd() * 0.1 : rnd() * 0.88 });
       // crystals: the throat's walls, here and there in the fissure and the cavern
       const ck = w.throat * 0.09 + w.fissure * 0.006;
       if (Math.abs(q.x) > XC + 2 && rnd() < ck * dens) crystals.push({ p, n: inward(r, p), s: 2 + Math.pow(rnd(), 2) * 7, hue: rnd() });
       // stalactites from the hall's roof (and the cavern's), stalagmites off its floor
       const sk = w.hall * 0.5 + w.cavern * 0.12 + w.throat * 0.06 + w.fissure * 0.04;
-      if (q.yl > 20 && rnd() < sk * dens) drips.push({ p, down: true, len: Math.min((q.y - YT - 3) * 0.95, 6 + Math.pow(rnd(), 1.6) * (w.cavern > 0.5 ? 70 : 34)), r: 0 });
-      if (q.yl < -16 && rnd() < sk * 0.6 * dens) drips.push({ p, down: false, len: Math.min(Math.abs(q.x) > XC + 4 ? 60 : (YB - q.y - 3), 4 + Math.pow(rnd(), 1.5) * 26), r: 0 });
+      if (q.yl > 20 && rnd() < sk * dens) drips.push({ r, p, down: true, len: Math.min((q.y - YT - 3) * 0.95, 6 + Math.pow(rnd(), 1.6) * (w.cavern > 0.5 ? 70 : 34)) });
+      if (q.yl < -16 && rnd() < sk * 0.6 * dens) drips.push({ r, p, down: false, len: Math.min(Math.abs(q.x) > XC + 4 ? 60 : (YB - q.y - 3), 4 + Math.pow(rnd(), 1.5) * 26) });
       // the giant fungi on the floor of their chamber
       if (w.fungi > 0.5 && q.yl < -30 && rnd() < 0.03 * w.fungi) shrooms.push({ p, r, s: 0.5 + rnd() * 0.8 });
     }
   }
+  // (each kind of thing in stretches of ~300 m: a draw a stretch, culled with it)
+  const REG = 100, regions = (list) => { const m = new Map(); for (const q of list) { const k = Math.floor(q.r / REG); if (!m.has(k)) m.set(k, []); m.get(k).push(q); } return [...m.values()]; };
+  const sphereOf = (pts, pad) => { const sp = new THREE.Sphere().setFromPoints(pts); sp.radius += pad; return sp; };
   // threads (instanced quads, the length down from the anchor)
-  {
+  const threadMat = threadMaterial(time);
+  for (const list of regions(threads)) {
     const g = new THREE.InstancedBufferGeometry(), N = 10, pos = [], idx = [];
     for (let i = 0; i <= N; i++) pos.push(-0.5, -i / N, 0, 0.5, -i / N, 0);
     for (let i = 0; i < N; i++) idx.push(i * 2, i * 2 + 2, i * 2 + 1, i * 2 + 1, i * 2 + 2, i * 2 + 3);
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setIndex(idx);
-    const an = new Float32Array(threads.length * 3), th = new Float32Array(threads.length * 2);
-    threads.forEach((q, i) => { an.set([q.p.x, q.p.y, q.p.z], i * 3); th.set([Math.max(1, q.len), q.seed], i * 2); });
+    const an = new Float32Array(list.length * 3), th = new Float32Array(list.length * 2);
+    list.forEach((q, i) => { an.set([q.p.x, q.p.y, q.p.z], i * 3); th.set([Math.max(1, q.len), q.seed], i * 2); });
     g.setAttribute('anchor', new THREE.InstancedBufferAttribute(an, 3));
     g.setAttribute('thread', new THREE.InstancedBufferAttribute(th, 2));
-    g.instanceCount = threads.length;
-    const m = new THREE.Mesh(g, threadMaterial(time));
-    m.frustumCulled = false; m.renderOrder = 3; m.name = 'cave-threads';
+    g.instanceCount = list.length;
+    g.boundingSphere = sphereOf(list.map((q) => q.p), 50);
+    const m = new THREE.Mesh(g, threadMat);
+    m.renderOrder = 3; m.name = 'cave-threads';
     out.push(m); noAO.push(m);
   }
   // the roofs' sky of lights
   const pr = { value: 1 };
-  {
-    const g = new THREE.BufferGeometry(), p = new Float32Array(dots.length * 3), sd = new Float32Array(dots.length);
-    dots.forEach((v, i) => { p.set([v.x + (rnd() - 0.5) * 3, v.y + (rnd() - 0.5) * 2, v.z + (rnd() - 0.5) * 3], i * 3); sd[i] = rnd(); });
+  const dotMat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    uniforms: { time, pr },
+    vertexShader: /* glsl */`attribute float seed; uniform float time, pr; varying float vB;
+      void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); vB = (0.55 + 0.45 * sin(time * (0.6 + seed) + seed * 30.0)) * (0.5 + seed);
+        gl_PointSize = pr * clamp(90.0 / -mv.z, 1.2, 3.5); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: /* glsl */`varying float vB;
+      void main() { float r = length(gl_PointCoord - 0.5); gl_FragColor = vec4(vec3(0.3, 0.9, 1.0) * vB * smoothstep(0.5, 0.0, r) * 1.4, 1.0); }`,
+  });
+  for (const list of regions(dots)) {
+    const g = new THREE.BufferGeometry(), p = new Float32Array(list.length * 3), sd = new Float32Array(list.length);
+    list.forEach((v, i) => { p.set([v.x + (rnd() - 0.5) * 3, v.y + (rnd() - 0.5) * 2, v.z + (rnd() - 0.5) * 3], i * 3); sd[i] = rnd(); });
     g.setAttribute('position', new THREE.BufferAttribute(p, 3));
     g.setAttribute('seed', new THREE.BufferAttribute(sd, 1));
-    const m = new THREE.Points(g, new THREE.ShaderMaterial({
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-      uniforms: { time, pr },
-      vertexShader: /* glsl */`attribute float seed; uniform float time, pr; varying float vB;
-        void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); vB = (0.55 + 0.45 * sin(time * (0.6 + seed) + seed * 30.0)) * (0.5 + seed);
-          gl_PointSize = pr * clamp(90.0 / -mv.z, 1.2, 3.5); gl_Position = projectionMatrix * mv; }`,
-      fragmentShader: /* glsl */`varying float vB;
-        void main() { float r = length(gl_PointCoord - 0.5); gl_FragColor = vec4(vec3(0.3, 0.9, 1.0) * vB * smoothstep(0.5, 0.0, r) * 1.4, 1.0); }`,
-    }));
-    m.frustumCulled = false; m.name = 'cave-lights';
+    g.computeBoundingSphere();
+    const m = new THREE.Points(g, dotMat);
+    m.name = 'cave-lights';
     out.push(m); noAO.push(m);
   }
   // fungi: shelf caps in clusters out of the walls, glowing (teal, violet, amber), lit too by the ships' lights
   const M = new THREE.Matrix4(), Qn = new THREE.Quaternion(), c = new THREE.Color(), S3 = new THREE.Vector3();
-  {
-    const cap = new THREE.SphereGeometry(1, 8, 3, 0, TAU, 0, Math.PI / 2).scale(1, 0.32, 1);
-    const im = new THREE.InstancedMesh(cap, new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.6, emissive: 0xffffff, emissiveIntensity: 1 }), caps.length * 4);
+  const capMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.6, emissive: 0xffffff, emissiveIntensity: 1 });
+  const capG = new THREE.SphereGeometry(1, 8, 3, 0, TAU, 0, Math.PI / 2).scale(1, 0.32, 1);
+  for (const list of regions(caps)) {
+    const im = new THREE.InstancedMesh(capG, capMat, list.length * 4);
     let n = 0;
-    for (const q of caps) {
+    for (const q of list) {
       const col = q.hue < 0.55 ? [0.02, 0.7, 0.55] : q.hue < 0.85 ? [0.45, 0.06, 0.8] : [0.8, 0.35, 0.03];
       for (let k = 0; k < 4; k++) {
         const s = 0.3 + rnd() * 0.8, p = q.p.clone().addScaledVector(q.n, 0.1).add(new THREE.Vector3((rnd() - 0.5) * 2, (rnd() - 0.5) * 1.6, (rnd() - 0.5) * 2));
@@ -604,13 +622,13 @@ export function caveDressing(scene, H, track, mats, dens = 1) {
       }
     }
     im.count = n;
-    im.material.onBeforeCompile = (sh) => {
+    capMat.onBeforeCompile = (sh) => {
       sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
   #ifdef USE_COLOR
     totalEmissiveRadiance = vColor * 0.55 * (0.3 + 0.7 * pow(max(dot(normalize(vNormal), mat3(viewMatrix) * vec3(0.0, -1.0, 0.0)), 0.0), 2.0));
   #endif`).replace('#include <color_fragment>', '');
     };
-    im.material.customProgramCacheKey = () => 'forest-fungi';
+    capMat.customProgramCacheKey = () => 'forest-fungi';
     im.computeBoundingSphere();
     im.name = 'cave-fungi';
     out.push(im);
@@ -693,35 +711,28 @@ export function caveDressing(scene, H, track, mats, dens = 1) {
     for (let i = 0; i < p.count; i++) { const y = p.getY(i), k = 1 + 0.22 * Math.sin(y * 9 + p.getX(i) * 3) * (1 + y); p.setX(i, p.getX(i) * k); p.setZ(i, p.getZ(i) * k); }
     cone.computeVertexNormals();
     cone.setAttribute('isl', new THREE.Float32BufferAttribute(new Float32Array(p.count * 2).map((_, i) => (i % 2 ? 0.25 : 0)), 2));
-    const cols = [];
-    for (const rw of rows) {
-      if (rw.sec.w.hall < 0.6 || rnd() > 0.08) continue;
-      const side = rnd() < 0.5 ? -1 : 1, x = side * (XC + 15 + rnd() * 26);
-      const base = rw.P.clone().addScaledVector(rw.Rl, x);
-      cols.push({ base, top: rw.P.y + rw.sec.up + 8, bot: rw.P.y - rw.sec.down - 8, r: 5 + rnd() * 6 });
-    }
-    const list = drips.filter((q) => q.len > 3);
-    const im = new THREE.InstancedMesh(cone, mats.rock, list.length + cols.length * 2);
-    let n = 0;
-    for (const q of list) {
+    const flip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI), mats4 = [];
+    for (const q of drips) {
+      if (q.len <= 3) continue;
       const r = q.len * (0.1 + rnd() * 0.08);
-      Qn.set(0, 0, 0, 1);
-      if (!q.down) Qn.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI);
-      M.compose(q.p.clone().addScaledVector(UP, q.down ? 2 : -2), Qn, S3.set(r, q.len + 2, r));
-      im.setMatrixAt(n++, M);
+      M.compose(q.p.clone().addScaledVector(UP, q.down ? 2 : -2), q.down ? new THREE.Quaternion() : flip, S3.set(r, q.len + 2, r));
+      mats4.push({ r: q.r, m: M.clone() });
     }
-    for (const q of cols) {
-      // a column: a stalactite and a stalagmite run together (each down / up past the middle)
-      const mid = (q.top + q.bot) / 2, h1 = q.top - mid + 6, h2 = mid - q.bot + 6;
-      M.compose(new THREE.Vector3(q.base.x, q.top, q.base.z), new THREE.Quaternion(), S3.set(q.r, h1, q.r));
-      im.setMatrixAt(n++, M);
-      M.compose(new THREE.Vector3(q.base.x, q.bot, q.base.z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI), S3.set(q.r * 1.15, h2, q.r * 1.15));
-      im.setMatrixAt(n++, M);
+    rows.forEach((rw, ri) => {
+      if (rw.sec.w.hall < 0.6 || rnd() > 0.08) return;
+      // a column: a stalactite and a stalagmite run together (each down / up past the middle), beside the way
+      const side = rnd() < 0.5 ? -1 : 1, base = rw.P.clone().addScaledVector(rw.Rl, side * (XC + 15 + rnd() * 26)), cr = 5 + rnd() * 6;
+      const top = rw.P.y + rw.sec.up + 8, bot = rw.P.y - rw.sec.down - 8, mid = (top + bot) / 2;
+      mats4.push({ r: ri, m: new THREE.Matrix4().compose(new THREE.Vector3(base.x, top, base.z), new THREE.Quaternion(), new THREE.Vector3(cr, top - mid + 6, cr)) });
+      mats4.push({ r: ri, m: new THREE.Matrix4().compose(new THREE.Vector3(base.x, bot, base.z), flip, new THREE.Vector3(cr * 1.15, mid - bot + 6, cr * 1.15)) });
+    });
+    for (const list of regions(mats4)) {
+      const im = new THREE.InstancedMesh(cone, mats.rock, list.length);
+      list.forEach((q, i) => im.setMatrixAt(i, q.m));
+      im.computeBoundingSphere();
+      im.name = 'cave-drips';
+      out.push(im);
     }
-    im.count = n;
-    im.computeBoundingSphere();
-    im.name = 'cave-drips';
-    out.push(im);
   }
   // the roots of the jungle overhead: down through the roof of their hall, twisting, down the walls into the floor
   // beside the way or arching over it high up; thin ones hanging
@@ -837,9 +848,13 @@ export function caveDressing(scene, H, track, mats, dens = 1) {
       g.setIndex(idx);
       parts.push(g);
     }
-    const m = new THREE.Mesh(mergeGeometries(parts), beamMaterial(time));
-    m.renderOrder = 5; m.name = 'cave-beams';
-    out.push(m); noAO.push(m);
+    const bm = beamMaterial(time);
+    for (const g of parts) {
+      g.computeBoundingSphere();
+      const m = new THREE.Mesh(g, bm);
+      m.renderOrder = 5; m.name = 'cave-beams';
+      out.push(m); noAO.push(m);
+    }
   }
   // what all this glow lights: a colour per vertex of the cave's rock (and the shafts'), added to its light - a faint
   // teal everywhere (the glowworms), pools round the fungi and the crystals, the daylight round the beams and the fall

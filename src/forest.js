@@ -343,9 +343,11 @@ export class ForestWorld {
       if (I.hollow) {
         // (built round its cave: no clearance to settle) the hill, the cave's chunks, the sinkholes' shafts
         const h = this.hollow, shell = new THREE.Mesh(h.shape.geometry, mat);
-        shell.castShadow = shell.receiveShadow = true;
-        shell.layers.set(2); shell.layers.enable(6);
+        // (and the finer cliff round its mouths)
+        const mouths = h.portals.map((g, k) => Object.assign(new THREE.Mesh(g, mat), { name: 'Hollow-mouth-' + k }));
+        for (const m of [shell, ...mouths]) { m.castShadow = m.receiveShadow = true; m.layers.set(2); m.layers.enable(6); }
         shell.name = 'Hollow';
+        scene.add(...mouths);
         this.caveMat = caveRock();
         const parts = [shell, ...h.chunks.map((g, k) => Object.assign(new THREE.Mesh(g, this.caveMat), { name: 'Hollow-cave-' + k })),
           ...h.shaftGeo.map((g, k) => Object.assign(new THREE.Mesh(g, this.caveMat), { name: 'Hollow-shaft-' + k }))];
