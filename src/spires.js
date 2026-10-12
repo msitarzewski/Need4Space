@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { Q } from './quality.js';
+import { TRACK_W } from './track.js';
 import { sunOnly } from './look.js';
 import { fbm, noise2, mulberry32, smoothstep } from './noise.js';
 
@@ -31,15 +32,30 @@ float spN(vec3 x) {
   vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(mix(spH(i), spH(i + vec3(1, 0, 0)), f.x), mix(spH(i + vec3(0, 1, 0)), spH(i + vec3(1, 1, 0)), f.x), f.y),
              mix(mix(spH(i + vec3(0, 0, 1)), spH(i + vec3(1, 0, 1)), f.x), mix(spH(i + vec3(0, 1, 1)), spH(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+vec2 spH2(vec2 p) { vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973)); q += dot(q, q.yzx + 33.33); return fract((q.xx + q.yz) * q.zy); }
+// meltwater scallops on a wall: the nearest cup's middle from p (cells of 1), and how far
+vec2 spCup(vec2 p, out float d1) {
+  vec2 i = floor(p), f = fract(p), m = vec2(0.0);
+  d1 = 9.0;
+  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec2 o = vec2(float(x), float(y)), r = o + 0.15 + 0.7 * spH2(i + o) - f;
+    float d = dot(r, r);
+    if (d < d1) { d1 = d; m = r; }
+  }
+  return m;
 }`;
 
 // Glacier ice: bands of old ice laid down year on year (deep blue, pale, a line of grit), warped; frost dulling it in
 // patches; snow wherever a face looks up; and its own light - the blue the ice lets through, strongest where it is
 // thin (the geometry's 'glow' per vertex) and seen straight on. lamps: the point and spot lights too (the cave)
 // shadows: false - no shadow map looked up at all (the cave, where the sun is cut)
-export function glacierMaterial({ key = 'glacier', lamps = false, glow = 1, side = THREE.FrontSide, snow = 1, shadows = true } = {}) {
+// walls: a sheer face's own look (the shelf's crevasse and cliffs) - the strata level and crisp, darker with depth,
+// meltwater scallops a few metres across all over it, sharp-rimmed (they catch the light at race speed)
+export function glacierMaterial({ key = 'glacier', lamps = false, glow = 1, side = THREE.FrontSide, snow = 1, shadows = true, walls = false } = {}) {
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0, side });
   if (!lamps) mat.defines = { ...mat.defines, FOLIAGE_SHADOW: '' };
+  if (walls) mat.defines = { ...mat.defines, SP_WALLS: '' };
   mat.onBeforeCompile = (sh) => {
     const lite = Q.lite ? '#define SP_LITE\n' : '';
     sh.vertexShader = lite + sh.vertexShader.replace('#include <common>', `#include <common>
@@ -60,12 +76,23 @@ ${GLSL_N}`)
     sh.fragmentShader = lite + (shadows ? '' : '#undef USE_SHADOWMAP\n') + sh.fragmentShader.replace('#include <common>', `#include <common>
 varying float vGlow; varying vec3 vGW; varying vec3 vGN; varying vec4 vGA;
 ${GLSL_N}
-float gSnow = 0.0, gBand = 0.0;`)
+// a line every period (m) along y, halfW wide, anti-aliased (fading to its average once thinner than a pixel)
+float spLine(float y, float period, float halfW) {
+  float d = abs(fract(y / period) - 0.5) * period, aw = fwidth(y) * 0.75;
+  return (1.0 - smoothstep(halfW - aw, halfW + aw, d)) * min(1.0, halfW / max(aw, 1e-4));
+}
+float gSnow = 0.0, gBand = 0.0, gSeam = 0.0;`)
       .replace('#include <map_fragment>', `#include <map_fragment>
   vec3 gn = normalize(vGN);
+#ifdef SP_WALLS
+  float y = vGW.y + vGA.x * 0.2;
+  float band = smoothstep(0.25, 0.75, 0.5 + 0.5 * sin(y * 0.3)) * (0.5 + 0.5 * sin(y * 0.057 + 1.3)) * smoothstep(-20.0, 90.0, vGW.y);
+  float grit = smoothstep(0.95, 0.99, 0.5 + 0.5 * sin(y * 0.115 + 0.7)) * smoothstep(0.3, 0.6, vGA.z);
+#else
   float y = vGW.y + vGA.x;
   float band = 0.5 + 0.5 * sin(y * 0.21) * (0.6 + 0.4 * sin(y * 0.047 + 1.3));
   float grit = smoothstep(0.93, 0.99, 0.5 + 0.5 * sin(y * 0.083 + 0.7)) * smoothstep(0.4, 0.7, vGA.z);
+#endif
   gBand = band;
   vec3 deep = vec3(0.008, 0.05, 0.1), pale = vec3(0.1, 0.34, 0.48);
   vec3 alb = mix(deep, pale, band * 0.8 + 0.2 * spN(vGW * 0.11));
@@ -73,6 +100,13 @@ float gSnow = 0.0, gBand = 0.0;`)
   float frost = smoothstep(0.45, 0.75, vGA.y * 0.7 + spN(vGW * 0.2) * 0.3);
   alb = mix(alb, vec3(0.32, 0.45, 0.55), frost * 0.45);
   gSnow = smoothstep(0.55, 0.75, gn.y + (vGA.w - 0.5) * 0.5) * ${snow.toFixed(2)};
+#ifdef SP_WALLS
+  // ledges along the strata, snow lying on them; seams of clear ice the light comes through
+  float ledge = spLine(y + 7.0, 23.0, 0.55), seam = spLine(y, 37.0, 0.3) * smoothstep(0.3, 0.6, vGA.z);
+  gSnow = max(gSnow, ledge * 0.85 * ${snow.toFixed(2)});
+  gSeam = seam;
+  alb = mix(alb, vec3(0.012, 0.012, 0.016), spLine(y + 3.0, 11.0, 0.18) * 0.6);
+#endif
   alb = mix(alb, vec3(0.62, 0.78, 1.0), gSnow);
   diffuseColor.rgb = alb;
   float gRough = mix(mix(0.08, 0.45, frost), 0.75, gSnow);`)
@@ -86,17 +120,32 @@ float gSnow = 0.0, gBand = 0.0;`)
     vec3 gv = (viewMatrix * vec4(g, 0.0)).xyz;
     normal = normalize(normal - (gv - normal * dot(gv, normal)) * 0.6 * (1.0 - gSnow));
   }
+#ifdef SP_WALLS
+  {
+    // the scallops: shallow cups (~8 m across, 6 m high, of uneven sizes) on the face's own plane, the normal tipped
+    // toward each cup's middle, steepest at its rim
+    vec3 nw = normalize(vGN);
+    bool xs = abs(nw.x) > abs(nw.z);
+    vec2 q = (xs ? vGW.zy : vGW.xy) * vec2(0.125, 0.17);
+    q += vec2(vGA.y, vGA.z) * 1.6;
+    float d1;
+    vec2 m = spCup(q, d1);
+    vec3 g = (xs ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0)) * m.x + vec3(0.0, 1.0, 0.0) * m.y;
+    vec3 gv = (viewMatrix * vec4(g, 0.0)).xyz;
+    normal = normalize(normal + (gv - normal * dot(gv, normal)) * (0.18 + 0.5 * d1) * (1.0 - gSnow));
+  }
+#endif
 #endif`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
   {
     float ndv = abs(dot(normal, normalize(vViewPosition)));
     // the light through the ice: blue, brighter in the paler bands, where it is thin, looked into straight
     float thru = vGlow * (0.35 + 0.65 * gBand) * (0.4 + 0.6 * ndv) * (1.0 - gSnow);
-    totalEmissiveRadiance += vec3(0.02, 0.32, 0.8) * thru * ${(0.32 * glow).toFixed(3)};
+    totalEmissiveRadiance += vec3(0.02, 0.32, 0.8) * thru * ${(0.32 * glow).toFixed(3)} + vec3(0.1, 0.65, 1.0) * gSeam * ${(0.9 * glow).toFixed(3)};
   }`);
     if (!lamps) sh.fragmentShader = sunOnly(sh.fragmentShader);
   };
-  mat.customProgramCacheKey = () => `ice-${key}-${lamps}-${glow}-${snow}-${shadows}-${Q.lite}`;
+  mat.customProgramCacheKey = () => `ice-${key}-${lamps}-${glow}-${snow}-${shadows}-${walls}-${Q.lite}`;
   return mat;
 }
 
@@ -249,9 +298,11 @@ export class TrackGrid {
     const tr = this.track, i = this.nearest(p);
     if (i < 0) return 1e9;
     const d = p.clone().sub(tr.P[i]);
+    // round a gravity flip: its rings and its tube (37 m round the way) and the half roll through them - a ball
+    if (tr.inFlip?.(i * tr.step, 60)) return d.length() - (TRACK_W / 2 + 18 + margin);
     const x = Math.abs(d.dot(tr.R[i])), y = d.dot(tr.U[i]), along = Math.abs(d.dot(tr.T[i]));
     if (along > 30) return Math.min(1e9, d.length() - 30);
-    const dx = x - (22 + 6 + margin), dy = y > 0 ? y - (26 + margin) : -y - (12 + margin);
+    const dx = x - (TRACK_W / 2 + 6 + margin), dy = y > 0 ? y - (26 + margin) : -y - (12 + margin);
     return Math.max(dx, dy);
   }
   // the least clearance of any vertex of a geometry (world positions)
@@ -317,7 +368,8 @@ export function glacier(track, s0, s1, { A = 280, B = 190, rimOut = 40, seed = 9
       // scallops: dimples a few metres across all over the walls
       const sc = Math.pow(Math.abs(Math.sin(a * 11 + s * 0.21 + n2 * 3) * Math.sin(s * 0.17 - a * 5)), 0.5);
       const r = 31 + 10 * (n1 - 0.5) + 2.2 * sc + flare * 12;
-      const x = ca * r * 1.12, y = 5 + sa * r * 0.8;
+      // (wide and low: the 56 m road and its barriers clear by ~8 m at the narrowest)
+      const x = ca * r * 1.42, y = 5 + sa * r * 0.88;
       pos.push(f.P.x + f.R.x * x + f.U.x * y, f.P.y + f.R.y * x + f.U.y * y, f.P.z + f.R.z * x + f.U.z * y);
       glow.push(0.45 + 0.55 * flare + 0.25 * (n2 - 0.5));
     }

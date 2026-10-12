@@ -4,6 +4,7 @@
 //    wind decides where the air is full of it), each streaked by its motion against the camera's
 //  - diamond dust: ice crystals hanging in the air, twinkling - flaring where they lie toward the sun (forward glints)
 //  - wakes: frost and ice dust torn off the deck behind every ship, billowing, drifting downwind, thinning out
+//  - geysers: vents in the open water off the ice shelf, steaming, erupting every few seconds
 import * as THREE from 'three';
 import { mulberry32 } from './noise.js';
 import { ICE_GLSL } from './frost.js';
@@ -258,6 +259,76 @@ export class Blizzard {
     scene.add(this.plume);
     this.meshes.push(this.plume);
     return this.plume;
+  }
+
+  // Vapour geysers: vents in the leads of open water - a slow column of steam always, and every few seconds an
+  // eruption: a jet thrown a hundred metres and more up, billowing out and bent downwind as it slows. Each puff runs
+  // its life over and again; how hard it was thrown is the vent's eruption at the moment it left (no state). Lit by
+  // the dusk like the snow, and from below by the water's glow. vents: [{ p: Vector3 (on the water), s: scale }]
+  geysers(scene, vents, per = 64) {
+    const n = vents.length * per, rnd = mulberry32(8080);
+    const quad = new THREE.PlaneGeometry(1, 1), g = new THREE.InstancedBufferGeometry();
+    g.index = quad.index;
+    g.setAttribute('position', quad.attributes.position);
+    g.setAttribute('uv', quad.attributes.uv);
+    const a = new Float32Array(n * 4), b = new Float32Array(n * 4);
+    vents.forEach((v, i) => {
+      const period = 7 + 6 * rnd(), off = rnd() * period;
+      for (let k = 0; k < per; k++) {
+        const j = i * per + k;
+        a.set([v.p.x, v.p.y, v.p.z, v.s], j * 4);
+        b.set([(k + rnd() * 0.7) / per, rnd(), period, off], j * 4);
+      }
+    });
+    g.setAttribute('ga', new THREE.InstancedBufferAttribute(a, 4));
+    g.setAttribute('gb', new THREE.InstancedBufferAttribute(b, 4));
+    g.instanceCount = n;
+    this.vents = new THREE.Mesh(g, new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false,
+      uniforms: { ...this.U, k: { value: 1 } },
+      vertexShader: /* glsl */`
+        ${ICE_GLSL}
+        ${SNOW_LIGHT}
+        uniform float time, k; uniform vec3 cam, wind;
+        attribute vec4 ga; attribute vec4 gb;
+        varying vec2 vUv; varying float vA; varying vec3 vC; varying float vR;
+        void main() {
+          vUv = uv; vR = gb.y;
+          float S = ga.w, life = 4.5;
+          float f = fract(gb.x + time / life), age = f * life, born = time - age;
+          // the vent's state when this puff left it: an eruption ~3 s long every period, a quiet steam between
+          float ph = mod(born + gb.w, gb.z);
+          float burst = smoothstep(0.0, 0.25, ph) * (1.0 - smoothstep(2.0, 3.2, ph));
+          float v0 = mix(9.0, 62.0 + 30.0 * fract(gb.y * 7.1), burst) * S;
+          // up and slowing (the air's drag), a little buoyancy, spreading out, carried off downwind more as it slows
+          float rise = v0 * (1.0 - exp(-age * 0.9)) / 0.9 + 3.0 * age;
+          float a0 = gb.y * 6.2832, spread = (1.5 + 5.0 * age) * S * (0.4 + 0.6 * fract(gb.y * 13.7));
+          vec3 p = ga.xyz + vec3(cos(a0) * spread, rise, sin(a0) * spread) + wind * 0.45 * age * (0.3 + 0.7 * smoothstep(0.0, 2.0, age));
+          float size = S * (4.0 + 9.0 * age) * (0.7 + 0.5 * burst) * (0.7 + 0.6 * fract(gb.y * 3.3));
+          vec4 mv = viewMatrix * vec4(p, 1.0);
+          float rot = gb.y * 6.28 + time * 0.3;
+          vec2 c = vec2(cos(rot), sin(rot));
+          mv.xy += mat2(c.x, c.y, -c.y, c.x) * position.xy * size;
+          gl_Position = projectionMatrix * mv;
+          // (faded near the camera: a puff filling the screen costs its every pixel)
+          vA = smoothstep(0.0, 0.06, f) * pow(1.0 - f, 1.4) * (0.07 + 0.3 * burst) * k * smoothstep(8.0, 60.0, -mv.z);
+          vC = bzLight(normalize(p - cam)) * 1.6 + vec3(0.0, 0.16, 0.34) * exp(-rise / (25.0 * S)) * 0.6;
+        }`,
+      fragmentShader: /* glsl */`
+        varying vec2 vUv; varying float vA; varying vec3 vC; varying float vR;
+        ${NOISE}
+        void main() {
+          vec2 q = vUv - 0.5;
+          float lump = bzN(vec3(q * 4.0, vR * 7.0)) * 0.7 + bzN(vec3(q * 9.0, vR * 3.0)) * 0.3;
+          float m = smoothstep(1.0, 0.1, length(q) * 2.0 + (lump - 0.5) * 0.8);
+          gl_FragColor = vec4(vC, m * vA);
+        }`,
+    }));
+    this.vents.frustumCulled = false;
+    this.vents.renderOrder = 3;
+    scene.add(this.vents);
+    this.meshes.push(this.vents);
+    return this.vents;
   }
 
   // one ship's wake this frame: n puffs at its tail p on the deck (up: the deck's up), thrown at a share of its velocity

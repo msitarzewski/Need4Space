@@ -1,6 +1,7 @@
 // The ice planet's ground: a frozen sea under the circuit - black ice clear enough to mirror the sky, cracked into
 // plates whose seams glow cyan from the water below, milky patches, drifts of snow combed by the wind into sastrugi,
-// pressure ridges, two rifts the track jumps - and a ring of dark peaks round the horizon.
+// pressure ridges, two rifts the track jumps; off the ice shelf the sea ice broken into floes, open water glowing
+// between them - and a ring of dark peaks round the horizon.
 // The surface is one tile (masks + relief) painted on the GPU at load and laid over the ground hex-tiled (each hex a
 // shifted copy, blended by height: no repeat to see); broad fields (drifts, the rifts' walls, the mountains) are per
 // vertex. Lit by the sun and the sky alone (look.js sunOnly) and the world's shadow map (no cascade search).
@@ -71,9 +72,12 @@ const TILE_GEN = /* glsl */`
   }
 `;
 
-const U = { iceMask: { value: null }, iceNrm: { value: null }, iceGlow: { value: null }, iceGlowT: { value: new THREE.Vector4(0, 0, 1, 1) } };
+const U = { iceMask: { value: null }, iceNrm: { value: null }, iceGlow: { value: null }, iceGlowT: { value: new THREE.Vector4(0, 0, 1, 1) },
+  floeMask: { value: null }, floeT: { value: new THREE.Vector4(0, 0, 0, 0) } };
 // the light pooled on the ice round what stands on it (a map over the ground: x0, z0, 1 / size)
 export function setGroundGlow(tex, x0, z0, size) { U.iceGlow.value = tex; U.iceGlowT.value.set(x0, z0, 1 / size, 1 / size); }
+// where the sea ice is broken (a map: r how open, g all water - under the shelf, its crevasse's floor)
+export function setFloes(tex, x0, z0, size) { U.floeMask.value = tex; U.floeT.value.set(x0, z0, 1 / size, 1 / size); }
 let maps = null;
 export function iceMaps(renderer) {
   if (maps) return maps;
@@ -145,14 +149,26 @@ void iceHexM(vec2 uv, out vec4 m) {
   m = (m0 * W.x + m1 * W.y + m2 * W.z) / (W.x + W.y + W.z);
 }
 float ihH3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+// the floes: distance to the nearest edge between two cells (F2 - F1, halved)
+float ihCell(vec2 p) {
+  vec2 i = floor(p), f = fract(p); float d1 = 9.0, d2 = 9.0; vec2 m1 = vec2(0.0), m2 = vec2(0.0);
+  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec2 o = vec2(float(x), float(y)), r = o + 0.1 + 0.8 * ihHash(i + o) - f;
+    float d = dot(r, r);
+    if (d < d1) { d2 = d1; m2 = m1; d1 = d; m1 = r; } else if (d < d2) { d2 = d; m2 = r; }
+  }
+  return dot(0.5 * (m1 + m2), normalize(m2 - m1));
+}
 `;
 
 // ---------------------------------------------------------------- the ground's shape
 // rifts: [{ c: Vector3 (middle), dir: unit (along it, horizontal), len, wid, depth }]
 export class IceSheet {
-  constructor(centre, rifts = []) {
+  // calm(x, z): 0..1 where the sea ice is broken into floes (flat: no drifts, no ridges)
+  constructor(centre, rifts = [], calm = null) {
     this.C = centre.clone();
     this.rifts = rifts.map((r) => ({ ...r, nrm: new THREE.Vector3(-r.dir.z, 0, r.dir.x) }));
+    this.calm = calm;
   }
 
   // { h: height (m), rift: 0..1 how deep in a rift, rock: 0..1 how much mountain, drift: 0..1 snow lying there }
@@ -161,12 +177,13 @@ export class IceSheet {
     // drifts of snow combed out along the wind (from the north-east): long low ridges, black ice swept bare between
     const a = x * -0.72 + z * 0.69, c = -x * 0.69 - z * 0.72;
     const dn = fbm(a / 300 + 4.1, c / 75 - 2.3, 4) + 0.12 * (noise2(x / 1800, z / 1800) - 0.5);
-    const drift = smoothstep(0.47, 0.6, dn);
+    const flat = 1 - (this.calm ? this.calm(x, z) : 0);
+    const drift = smoothstep(0.47, 0.6, dn) * flat;
     h += drift * (1.6 + 2.6 * smoothstep(0.55, 0.75, dn));
     // pressure ridges: sparse, sharp, wandering
     const wx = x + 160 * (noise2(x / 900, z / 900) - 0.5), wz = z + 160 * (noise2(x / 900 + 7.3, z / 900 + 3.1) - 0.5);
     const r = 1 - Math.abs(2 * noise2(wx / 380, wz / 380) - 1);
-    h += Math.pow(r, 16) * 8 * smoothstep(0.35, 0.6, noise2(x / 1500 + 2, z / 1500));
+    h += Math.pow(r, 16) * 8 * smoothstep(0.35, 0.6, noise2(x / 1500 + 2, z / 1500)) * flat;
     let rift = 0;
     for (const R of this.rifts) {
       const dx = x - R.c.x, dz = z - R.c.z, along = dx * R.dir.x + dz * R.dir.z, across = dx * R.nrm.x + dz * R.nrm.z;
@@ -257,9 +274,9 @@ attribute vec3 ice; varying vec3 vIce; varying vec3 vTW;`)
   vTW = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
     sh.fragmentShader = lite + sh.fragmentShader.replace('#include <common>', `#include <common>
 varying vec3 vIce; varying vec3 vTW;
-uniform sampler2D iceGlow; uniform vec4 iceGlowT;
+uniform sampler2D iceGlow, floeMask; uniform vec4 iceGlowT, floeT;
 ${HEX}
-float iceCrack = 0.0, iceSnow = 0.0;
+float iceCrack = 0.0, iceSnow = 0.0, iceWater = 0.0, iceLead = 0.0;
 vec2 iceG = vec2(0.0);`)
       .replace('#include <map_fragment>', `#include <map_fragment>
   vec4 im = vec4(0.14, 0.48, 0.51, 0.63), ib;
@@ -282,6 +299,26 @@ vec2 iceG = vec2(0.0);`)
   // fine drifts; patches of it out on the bare ice. None down the rifts' walls; on the peaks, wherever it can lie
   float sf = vIce.x * 0.75 + ib.g * 0.4 + im.g * 0.35 - 0.38;
   float snow = smoothstep(0.4, 0.54, sf) * (1.0 - smoothstep(0.05, 0.25, vIce.z)) * smoothstep(0.72, 0.9, up);
+  // off the shelf: floes ~60 m across (broken again into ~20 m pieces where it is most open), leads of open water
+  // between them as wide as the map says; the thin new ice along their edges
+  {
+    vec2 fu = (vTW.xz - floeT.xy) * floeT.zw;
+    if (fu.x > 0.0 && fu.y > 0.0 && fu.x < 1.0 && fu.y < 1.0) {
+      vec2 fm = texture2D(floeMask, fu).rg;
+      if (fm.x > 0.01) {
+        vec2 q = vTW.xz / 62.0;
+        float e = ihCell(q + 0.2 * vec2(sin(q.y * 1.7), sin(q.x * 1.3))), aw = fwidth(e) + 0.003, gw = 0.3 * fm.x * fm.x;
+        iceWater = 1.0 - smoothstep(gw - aw, gw + aw, e);
+        iceLead = (1.0 - smoothstep(gw, gw + 0.06, e)) * (1.0 - iceWater) * step(0.002, gw);
+#ifndef ICE_LITE
+        float e2 = ihCell(vTW.xz / 19.0 + 7.3), aw2 = fwidth(e2) + 0.003, g2 = 0.16 * smoothstep(0.45, 1.0, fm.x);
+        iceWater = max(iceWater, (1.0 - smoothstep(g2 - aw2, g2 + aw2, e2)) * step(0.001, g2));
+#endif
+      }
+      iceWater = max(iceWater, fm.y);
+    }
+  }
+  snow *= 1.0 - max(iceWater, iceLead * 0.7);
   float rock = vIce.y * smoothstep(0.78, 0.55, up + (im.g - 0.5) * 0.2);
   snow = mix(snow, smoothstep(0.42, 0.62, up + (ib.g - 0.5) * 0.35), vIce.y);
   vec3 blackIce = vec3(0.004, 0.012, 0.022), milk = vec3(0.07, 0.17, 0.25);
@@ -289,11 +326,13 @@ vec2 iceG = vec2(0.0);`)
   alb = mix(alb, vec3(0.012, 0.07, 0.13), smoothstep(0.1, 0.4, vIce.z));   // the rifts' walls: blue glacier ice
   alb = mix(alb, vec3(0.012, 0.016, 0.028) * (0.7 + 0.6 * im.b), rock);
   alb = mix(alb, vec3(0.6, 0.76, 1.0) * (0.9 + 0.1 * im.g) * (1.0 - 0.4 * vIce.y), snow);
+  alb = mix(alb, vec3(0.0012, 0.0035, 0.007), iceWater);
   diffuseColor.rgb = alb;
   iceSnow = snow;
   // the seams: the big plates' (hundreds of metres, metres wide) and the fine ones
-  iceCrack = (ib.r * (0.15 + 1.35 * smoothstep(0.55, 0.2, ib.b)) + im.r * 0.07) * (1.0 - snow) * (1.0 - vIce.y) * (1.0 - smoothstep(0.1, 0.4, vIce.z));
-  float iceRough = mix(mix(mix(0.09, 0.28, im.b), 0.6, rock), 0.72, snow);`)
+  iceCrack = (ib.r * (0.15 + 1.35 * smoothstep(0.55, 0.2, ib.b)) + im.r * 0.07) * (1.0 - snow) * (1.0 - vIce.y) * (1.0 - smoothstep(0.1, 0.4, vIce.z)) * (1.0 - iceWater);
+  float iceRough = mix(mix(mix(mix(0.09, 0.28, im.b), 0.6, rock), 0.72, snow), 0.025, iceWater);
+  iceG *= 1.0 - iceWater;`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = iceRough;')
       // (the sun's own glint off the black ice held to a glow: on a mirror-smooth sheet a low sun's highlight filled a
       // quarter of the frame with bloom)
@@ -307,6 +346,8 @@ vec2 iceG = vec2(0.0);`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
   // the seams: the sea's light through them, cyan, strongest at the cores; the rifts glow deeper down
   totalEmissiveRadiance += vec3(0.03, 0.55, 1.0) * iceCrack * 0.9 + vec3(0.0, 0.12, 0.3) * smoothstep(0.3, 1.0, vIce.z);
+  // the open water lit from below, the edges of the floes brightest
+  totalEmissiveRadiance += vec3(0.0, 0.03, 0.08) * iceWater * (0.5 + 0.8 * ib.b) + vec3(0.03, 0.5, 1.0) * iceLead * 0.4;
   {
     // what stands on the ice lights it: the crystals' colours pooled round their feet, stronger on snow
     vec2 gu = (vTW.xz - iceGlowT.xy) * iceGlowT.zw;
