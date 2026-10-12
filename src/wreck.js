@@ -33,6 +33,7 @@ const CHUNK = 160;                                            // a chunk's lengt
 const RANGE = { shell: 1e9, cast: 1e9, relief: 2600, main: 1800, detail: 500 };
 const ihash = (n) => { let h = Math.imul(n | 0, 374761393) ^ 0x5bd1e995; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
 const wrapA = (a) => a - TAU * Math.floor((a + Math.PI) / TAU);
+const gkey = (x, y, z) => (x + 1024) + 2048 * ((y + 1024) + 2048 * (z + 1024));      // a grid cell's number
 const f5 = (x) => (Math.abs(x) < 1e-9 ? '0.0' : x.toFixed(5));
 const g3v = (v) => `vec3(${f5(v.x)}, ${f5(v.y)}, ${f5(v.z)})`;
 
@@ -129,12 +130,16 @@ class Hull {
     this.planes.push({ n: new THREE.Vector3(0, 0, 1), d: this.len, face: 17 });
   }
 
-  // the octagon scaled k, inset by d (offset lines meet at the bisectors)
+  // the octagon scaled k, inset by d (offset lines meet at the bisectors; each worked out once)
   inset(k, d) {
-    return this.OCT.map((v, i) => {
+    const key = k * 1e4 + d, memo = (this.insets ||= new Map());
+    if (memo.has(key)) return memo.get(key);
+    const q = this.OCT.map((v, i) => {
       const na = this.OCTN[(i + 7) % 8], nb = this.OCTN[i], s = 1 + na[0] * nb[0] + na[1] * nb[1];
       return [k * v[0] - d * (na[0] + nb[0]) / s, k * v[1] - d * (na[1] + nb[1]) / s];
     });
+    if (memo.size < 4096) memo.set(key, q);
+    return q;
   }
   k(z) { return this.taper > 0 && z < this.taper ? this.tip + (1 - this.tip) * Math.max(0, z) / this.taper : 1; }
   toLocal(p, out = new THREE.Vector3()) { return out.copy(p).applyMatrix4(this.Mi); }
@@ -638,8 +643,8 @@ export class Wreck {
     this.tgrid = new Map();
     for (let s = s0; s < s1; s += 2) {
       tr.frame(s, f);
-      const q = { s: tr.wrap(s), P: f.P.clone(), T: f.T.clone(), U: f.U.clone(), R: f.R.clone() };
-      const k = `${Math.floor(q.P.x / cell)},${Math.floor(q.P.y / cell)},${Math.floor(q.P.z / cell)}`;
+      const q = { s: tr.wrap(s), P: f.P.clone(), T: f.T.clone(), U: f.U.clone(), R: f.R.clone(), flip: tr.inFlip(s, 40) };
+      const k = gkey(Math.floor(q.P.x / cell), Math.floor(q.P.y / cell), Math.floor(q.P.z / cell));
       (this.tgrid.get(k) || this.tgrid.set(k, []).get(k)).push(this.ts.length);
       this.ts.push(q);
     }
@@ -650,7 +655,7 @@ export class Wreck {
     const c = this.tcell, out = [], n = Math.ceil(r / c);
     const cx = Math.floor(p.x / c), cy = Math.floor(p.y / c), cz = Math.floor(p.z / c);
     for (let a = -n; a <= n; a++) for (let b = -n; b <= n; b++) for (let d = -n; d <= n; d++) {
-      for (const i of this.tgrid.get(`${cx + a},${cy + b},${cz + d}`) || []) if (this.ts[i].P.distanceToSquared(p) < r * r) out.push(this.ts[i]);
+      for (const i of this.tgrid.get(gkey(cx + a, cy + b, cz + d)) || []) if (this.ts[i].P.distanceToSquared(p) < r * r) out.push(this.ts[i]);
     }
     return out;
   }
@@ -665,8 +670,7 @@ export class Wreck {
   free(H, p, r = 0) {
     const w = H.toWorld(p, _w), XM = TRACK_HALF + 6;
     for (const q of this.near(w, r + 60)) {
-      const d = _v.subVectors(w, q.P), x = d.dot(q.R), y = d.dot(q.U), t = d.dot(q.T);
-      const flip = this.track.inFlip(q.s, 40);
+      const d = _v.subVectors(w, q.P), x = d.dot(q.R), y = d.dot(q.U), t = d.dot(q.T), flip = q.flip;
       if (Math.abs(t) < 2 + r && Math.abs(x) < (flip ? 44 : XM) + r && y > (flip ? -44 : -10) - r && y < (flip ? 48 : 20) + r) return false;
     }
     return true;
@@ -840,6 +844,7 @@ export class Wreck {
       const inner = (z, u, o) => { const q = H.inset(H.k(z), SKIN), qa = q[face], qb = q[(face + 1) % 8]; return o.set(qa[0] + (qb[0] - qa[0]) * u, qa[1] + (qb[1] - qa[1]) * u, z); };
       const nrm = (z) => (H.taper > 0 && z < H.taper ? H.planes[8 + face].n : H.planes[face].n);
       const fld = (z, u) => { outer(z, u, _v); return H.field(z, Math.atan2(_v.y, _v.x), info); };
+      const corner = new Map(), fc = (z, u) => { const k = z * 4096 + u * 4000; let f = corner.get(k); if (f === undefined) corner.set(k, (f = fld(z, u))); return f; };
       const T = new THREE.Vector3(b[0] - a[0], b[1] - a[1], 0).normalize(), tW = H.dirWorld(T, new THREE.Vector3());
       // a vertex of both skins at (z, u): the outer one, the inner one (bent outward together near an edge)
       const emit = (g, z, u, f, which, soot) => {
@@ -858,7 +863,7 @@ export class Wreck {
         const z0 = zz[j], z1 = zz[j + 1];
         for (let c = 0; c < nu; c++) {
           const u0 = c / nu, u1 = (c + 1) / nu;
-          const fs = [fld(z0, u0), fld(z1, u0), fld(z1, u1), fld(z0, u1), fld((z0 + z1) / 2, (u0 + u1) / 2)];
+          const fs = [fc(z0, u0), fc(z1, u0), fc(z1, u1), fc(z0, u1), fld((z0 + z1) / 2, (u0 + u1) / 2)];
           const lo = Math.min(...fs), hi = Math.max(...fs);
           if (hi < -edgeK) continue;                               // all hole
           const g = this.geo(H, (z0 + z1) / 2, 'shell');
@@ -1261,7 +1266,7 @@ export class Wreck {
     const dirs = [];
     for (const [x, y, z] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
       const a = new THREE.Vector3(x, y, z), t1 = new THREE.Vector3(y, z, x), t2 = new THREE.Vector3().crossVectors(a, t1);
-      dirs.push([a, ...[[0.7, 0.4], [-0.7, 0.4], [0, -0.8]].map(([p, q]) => a.clone().addScaledVector(t1, p).addScaledVector(t2, q).normalize())]);
+      dirs.push([a, ...[[0.7, 0.4], [-0.5, -0.6]].map(([p, q]) => a.clone().addScaledVector(t1, p).addScaledVector(t2, q).normalize())]);
     }
     this.skyDirs = dirs;
     for (const H of this.hulls) {
@@ -1292,7 +1297,7 @@ export class Wreck {
     let sc = 1;
     H.OCT.forEach((v, i) => { const np = H.OCTN[i][0] * p.x + H.OCTN[i][1] * p.y, dd = k * (H.OCTN[i][0] * v[0] + H.OCTN[i][1] * v[1]) - H.SKIN - 3; if (np > dd) sc = Math.min(sc, dd / np); });
     p.x *= sc; p.y *= sc;
-    const lit = S.opens.some((q) => (q.c ? q.c.distanceTo(p) : Math.abs(p.z - q.z)) < q.r);
+    const lit = !(H.hulk && H.hulk.how === 'far') && S.opens.some((q) => (q.c ? q.c.distanceTo(p) : Math.abs(p.z - q.z)) < q.r);
     const d = new THREE.Vector3(), O = new THREE.Vector3(), L = new THREE.Vector3();
     this.skyDirs.forEach((ds, a) => {
       let s = 0;
