@@ -53,7 +53,7 @@ const arcs = (x, z, h, y0, y1, list, last) => {
   });
   return { x, z, h };
 };
-pt(-100, 44, 1020); pt(-30, 44, 800); pt(0, 44, 560, 0, 'start'); pt(0, 46, 300);
+pt(-30, 44, 800); pt(0, 44, 560, 0, 'start'); pt(0, 46, 300);
 pt(0, 62, 40, 0, 'crest1'); pt(0, 44, -120); pt(-30, 40, -380);                              // the first rift
 // the crystal garden: sweepers among the giant crystals, climbing to a crest ~150 m over the ice
 pt(-180, 50, -640, -16); pt(-430, 74, -760, 14); pt(-700, 104, -940, -18, 'garden'); pt(-860, 132, -1230, 12); pt(-830, 146, -1540, 24);
@@ -64,26 +64,40 @@ pt(-120, 58, -2010, 0, 'rollIn'); pt(50, 58, -2015, 120); pt(220, 58, -2020, 240
 pt(880, 80, -1820, -32); pt(1060, 88, -1560, -12, 'caveIn'); pt(1130, 84, -1260, 0); pt(1150, 76, -960, 0, 'caveOut');
 // down the frozen falls in a corkscrew, the loop over the sea
 pt(1150, 70, -760, 0, 'preCork'); pt(1140, 52, -580, 120); pt(1120, 34, -400, 240); pt(1090, 24, -220, 0, 'cork');
-pt(1000, 24, 60, 0, 'preLoop');
+// (in line with the corkscrew's way out: it was a bend, the pad before the loop in it; the loop's way out 80 m to the
+// side of its way in, the step eased across it - taken evenly it kinked the way in and out)
+pt(1068, 24, 60, 0, 'preLoop');
 for (let k = 0; k <= 12; k++) {
   const a = (k / 12) * Math.PI * 2;
-  pt(1000 - 80 * k / 12, 104 - 80 * Math.cos(a), 220 + 80 * Math.sin(a), 0, k === 0 ? 'loopIn' : k === 12 ? 'loopOut' : null);
+  pt(1065 - 40 * (1 - Math.cos(a / 2)), 104 - 80 * Math.cos(a), 220 + 80 * Math.sin(a), 0, k === 0 ? 'loopIn' : k === 12 ? 'loopOut' : null);
 }
 // the second rift, then the long climb south to the ice shelf
-pt(915, 30, 420); pt(905, 48, 600, 0, 'crest2'); pt(890, 30, 760); pt(830, 38, 1030, -8, 'back'); pt(790, 70, 1330);
-pt(730, 120, 1600); pt(700, 145, 1800, 0, 'canyonIn');
+pt(950, 30, 420); pt(905, 48, 600, 0, 'crest2'); pt(890, 30, 760); pt(830, 38, 1030, -8, 'back'); pt(790, 72, 1330);
+pt(730, 112, 1600); pt(700, 132, 1800, 0, 'canyonIn');
 // down the crevasse that splits it: an S of ~300 m bends between its walls, a long right-hander, out of its western face
 // (shelf.js)
-const exit = arcs(700, 1800, Math.atan2(-30, 200), 145, 100,
-  [[60, 0], [170, 22], [300, -44], [300, 44], [170, -22], [100, 0], [500, -76], [60, 0]], 'canyonOut');
-// the dive off the cliff past the falls to the broken sea ice, among the bergs; north over the floes and home
+const exit = arcs(700, 1800, Math.atan2(-30, 200), 132, 100,
+  [[60, 0], [170, 18], [300, -36], [300, 36], [170, -18], [100, 0], [500, -76], [60, 0]], 'canyonOut');
+// the dive off the cliff past the falls to the broken sea ice, among the bergs; a long sweep right (~375 m: it was a
+// bend of ~220 m at the dive's foot) onto the way north over the floes, and home
 pt(exit.x + Math.sin(exit.h) * 260, 58, exit.z + Math.cos(exit.h) * 260, 0, 'dive');
-pt(exit.x + Math.sin(exit.h) * 500, 24, exit.z + Math.cos(exit.h) * 500); pt(-500, 22, 3150, 12); pt(-640, 24, 2990, 16);
-pt(-705, 28, 2780, 10);
+pt(exit.x + Math.sin(exit.h) * 400, 34, exit.z + Math.cos(exit.h) * 400);
+{
+  const px = exit.x + Math.sin(exit.h) * 500, pz = exit.z + Math.cos(exit.h) * 500, hx = Math.sin(exit.h), hz = Math.cos(exit.h);
+  const R = (px + 714) / (1 + hz), cx = px - hz * R, cz = pz + hx * R, a0 = Math.atan2(pz - cz, px - cx), n = 8;
+  for (let k = 0; k <= n; k++) {
+    const a = a0 + ((Math.PI - a0) * k) / n;
+    pt(cx + R * Math.cos(a), 24 + 4 * k / n, cz + R * Math.sin(a), k === 0 ? 0 : Math.round(16 * Math.sin((Math.PI * k) / n)));
+  }
+}
 // gravity flips: up onto the underside of the deck overhead, half a kilometre upside down over the floes (the bergs
 // hanging overhead, the aurora under the nose), and back down
 pt(-714, 30, 2560, 0, 'flipA'); pt(-714, 56, 2340, 180, 'flipB'); pt(-704, 58, 2060, 180, 'floes');
-pt(-680, 58, 1830, 180, 'flipC'); pt(-650, 36, 1630, 0, 'flipD'); pt(-520, 40, 1420, 12); pt(-300, 44, 1220, 10);
+pt(-680, 58, 1830, 180, 'flipC'); pt(-650, 36, 1630, 0, 'flipD');
+// home: 130 m on from the flip (a ship comes out of it in the air - the bend began there), then an S of two 400 m bends
+// onto the run to the line
+pt(-631, 37, 1501); pt(-613, 38, 1431, 8); pt(-584, 39, 1365, 13); pt(-543, 40, 1305, 13); pt(-491, 41, 1254, 8); pt(-432, 42, 1212);
+pt(-230, 44, 1099); pt(-169, 44, 1056, -8); pt(-117, 44, 1003, -13); pt(-75, 44, 941, -13); pt(-46, 44, 873, -8);
 
 export const ICE_LAYOUT = layout(P, {
   start: [0, 44, 560],
@@ -92,8 +106,8 @@ export const ICE_LAYOUT = layout(P, {
   caves: [['caveIn', -20, 'caveOut', 20]],
   flips: [['flipA', 'flipB'], ['flipC', 'flipD']],
   pads: [['start', 330, 0], ['garden', -260, -10], ['garden', -260, 10], ['arch', 120, 0], ['rollOut', 140, 0],
-    ['caveIn', 160, -10], ['preLoop', 20, 0], ['back', -120, 10], ['back', 260, -10], ['canyonIn', 380, 0],
-    ['dive', 120, -10], ['floes', 40, 0], ['flipD', 220, -10]],
+    ['caveIn', 160, -10], ['preLoop', 20, 0], ['back', -120, 10], ['back', 260, -10], ['canyonOut', -30, 0],
+    ['flipA', -180, -10], ['floes', 40, 0], ['flipD', 100, -10]],
   gates: [['start', -60, 0xff3aa8], ['crest1', -90, 0xffb020], ['garden', -40, 0x40ffd0], ['rollIn', -40, 0xb060ff],
     ['caveIn', -70, 0x40c8ff], ['preLoop', -40, 0xff3aa8], ['crest2', -90, 0xffb020], ['canyonIn', -80, 0x40c8ff],
     ['dive', -60, 0xffb020]],
