@@ -147,6 +147,10 @@ body.lite .hp { background: linear-gradient(115deg, rgba(9, 13, 19, 0.86), rgba(
 .bar { height: 0.5rem; background: rgba(255, 255, 255, 0.09); overflow: hidden; transform: skewX(-20deg); }
 .bar i { display: block; height: 100%; transform-origin: left; transform: scaleX(0); background: var(--text); }
 .bar.boost i { background: linear-gradient(90deg, #2c78d8, var(--boost)); }
+/* over full (a drift's top-up): gold filling over the full bar, bleeding back */
+.bar.boost { position: relative; }
+.bar.boost i.over { position: absolute; left: 0; top: 0; width: 100%; background: linear-gradient(90deg, #ffb428, #ffe79a); box-shadow: 0 0 0.7rem #ffb428; }
+.bar.boost.pulse { animation: driftPulse 0.35s ease-out; }
 #hud-speed.boost .bar.boost i { background: #c8e6ff; box-shadow: 0 0 0.8rem var(--boost); }
 #hud-speed.low .bar.boost { animation: low 0.7s steps(2) infinite; }
 .bar.thr { height: 0.3rem; }

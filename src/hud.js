@@ -223,6 +223,8 @@ export class HUD {
     const lit = Math.round(Math.min(1, s.speed / 360) * SEGS);
     if (lit !== this.lit) { this.segs.forEach((e, i) => e.classList.toggle('on', i < lit)); this.lit = lit; }
     $('bst').style.transform = `scaleX(${Math.max(0, Math.min(1, s.boostEnergy))})`;
+    const over = Math.max(0, Math.min(1, (s.boostEnergy - 1) / 0.5));
+    if (over !== this.over) { $('bstx').style.transform = `scaleX(${over})`; this.over = over; }
     $('thr').style.transform = `scaleX(${Math.max(0, Math.min(1, s.throttle))})`;
     // the drift's charge: shown while drifting, coloured by the step it has reached
     const dr = !!s.drifting;

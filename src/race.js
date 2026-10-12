@@ -394,6 +394,7 @@ export class Race {
     for (const e of this.entries) {
       const p = this.slot(e.slot);
       e.racer.place(s0 - p.back, e.ship.engineOn);
+      e.racer.boostEnergy = 1;                      // (a drift's top-up past full doesn't carry onto the grid)
       e.racer.x = p.x;
       e.racer.locked = true;
       e.racer.pose(0);

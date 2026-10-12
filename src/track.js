@@ -1619,8 +1619,13 @@ export const gripAt = (v) => 4.0 * (1 - 0.4 * smoothstep(100, 320, v));
 // started within 0.9 s of catching one that kicked - or the brake tapped again mid-drift, the stick still over - is a
 // step bigger (up to three): it slides deeper (7 % less grip a step) and livelier, starts with a share of charge,
 // charges a quarter faster and kicks 30 % harder a step.
+// "make successful drifting give a bit of boost energy, so it can go over the limit and after it stops drifting to
+// start going back to normal limit slowly unless it's used": a drift that kicks also tops the boost energy up (by its
+// step, more down a chain), past full to 1.5 at most; over full it bleeds back to full at 0.05 a second once the
+// drifting is over, unless the boost spends it first.
 export const DRIFT = { v: 55, tap: 0.4, rate: 1.3, grip: 0.55, keep: 0.8, drag: 0.12, brake: 0.1, onset: 2.2, caught: 0.14,
-  settle: 0.15, tiers: [0.5, 1.1, 1.8], kick: [12, 22, 32], chainWindow: 0.9, chainMax: 3 };
+  settle: 0.15, tiers: [0.5, 1.1, 1.8], kick: [12, 22, 32], chainWindow: 0.9, chainMax: 3, energy: [0.1, 0.18, 0.28] };
+export const ENERGY_MAX = 1.5, ENERGY_BLEED = 0.05;
 const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck
 
@@ -1672,7 +1677,9 @@ export class TrackRacer {
   endDrift(go) {
     const tier = this.driftTier;
     if (go && tier) {
-      this.driftKick += DRIFT.kick[tier - 1] * (1 + 0.3 * (this.chain || 0));
+      const k = 1 + 0.3 * (this.chain || 0);
+      this.driftKick += DRIFT.kick[tier - 1] * k;
+      this.boostEnergy = Math.min(ENERGY_MAX, this.boostEnergy + DRIFT.energy[tier - 1] * k);
       this.emit({ type: 'drift', tier, at: this.pos.clone() });
     }
     this.chainT = go && tier ? DRIFT.chainWindow : 0;       // the window to chain the next one
@@ -1745,7 +1752,11 @@ export class TrackRacer {
     this.driftS += ((this.drift ? 1 : 0) - this.driftS) * damp(5, dt);
     const wantBoost = inp.boost && this.boostEnergy > 0.02 && ship.ready;
     this.boosting += ((wantBoost ? 1 : 0) - this.boosting) * damp(6, dt);
-    this.boostEnergy = clamp(this.boostEnergy + (wantBoost ? -0.2 : 0.08) * dt, 0, 1);
+    // the boost spends the energy; under full it recharges, over full (a drift's top-up) it bleeds back once the
+    // drifting is over
+    const E = this.boostEnergy;
+    this.boostEnergy = wantBoost ? Math.max(0, E - 0.2 * dt) : E < 1 ? Math.min(1, E + 0.08 * dt)
+      : this.drift || this.chainT > 0 ? E : Math.max(1, E - ENERGY_BLEED * dt);
     // steering (A/D, arrows, mouse, stick), airbrakes (Z / X, bumpers): a sharper turn, more drag; drifting, a
     // livelier nose
     this.steerS += (steer + (brakeR - brakeL) * 0.8 - this.steerS) * damp(8, dt);

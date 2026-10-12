@@ -593,6 +593,7 @@ async function boot() {
           if (camera.position.distanceTo(e.at) < 300) { const f = track.frame(e.s); fx.driftKick(e.at, new THREE.Matrix4().makeBasis(f.R, f.U, f.T.clone().negate()), e.tier, mine); }
           if (mine) {
             audio.driftKick(e.tier);
+            hud.pulse('bst');
             ship.boostKick = Math.max(ship.boostKick, 0.4 + 0.2 * e.tier);
             rig.shake = Math.max(rig.shake, 0.15 + 0.08 * e.tier);
             hud.flash(['', 'rgba(60,140,255,0.3)', 'rgba(255,140,40,0.32)', 'rgba(210,90,255,0.36)'][e.tier], 0.35);
