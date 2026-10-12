@@ -566,7 +566,38 @@ float frN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
           .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.directSpecular = min(reflectedLight.directSpecular, vec3(0.6));');
       };
     }
-    deckMat.customProgramCacheKey = () => (TH.moss ? 'feather-deck-moss' : TH.frost ? 'feather-deck-frost' : 'feather-deck');
+    if (TH.sand) {
+      // the plates a warm sand-washed concrete; sand blown in against both walls (a hand's width to metres deep) and
+      // tongues of it combed across the deck by the wind
+      const before = deckMat.onBeforeCompile;
+      deckMat.onBeforeCompile = (sh) => {
+        before(sh);
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+float deckSand = 0.0;
+float snH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+float snN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(snH(i), snH(i + vec2(1, 0)), f.x), mix(snH(i + vec2(0, 1)), snH(i + vec2(1, 1)), f.x), f.y); }`)
+          .replace('#include <map_fragment>', `#include <map_fragment>
+  {
+    // (v split into whole 400 m and the rest: along the lap it runs to ~14 km and the noise wants small numbers)
+    float x = abs(vMapUv.x - 0.5) * ${TRACK_W.toFixed(1)}, along = mod(vMapUv.y * 40.0, 400.0), edge = ${(TRACK_W / 2).toFixed(1)} - x;
+    float side = step(0.5, vMapUv.x) * 17.0;
+    float n1 = snN(vec2(along / 7.0, x / 2.5) + side), n2 = snN(vec2(along / 1.1, x / 0.9) + side + 3.7);
+    float reach = 1.4 + 6.5 * smoothstep(0.25, 0.8, snN(vec2(along / 41.0, 1.3) + side));
+    float base = 1.0 - smoothstep(reach * 0.3, reach, edge + (n1 - 0.5) * 1.5);
+    float tongue = smoothstep(0.58, 0.8, snN(vec2((along + x * 0.9) / 6.5, x / 23.0) + 7.1))
+      * smoothstep(0.3, 0.6, snN(vec2(along / 110.0, 2.9)));
+    deckSand = clamp(smoothstep(0.35, 0.6, base * 0.9 + (n2 - 0.5) * 0.3) + tongue * (0.35 + 0.5 * n2), 0.0, 1.0);
+    diffuseColor.rgb *= vec3(2.3, 1.9, 1.4);
+    diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.4, 0.22, 0.1), vec3(0.54, 0.33, 0.16), n2), deckSand * 0.85);
+  }`)
+          .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.92, deckSand);')
+          .replace('mapN.xy *= normalScale;', 'mapN.xy *= normalScale * (1.0 - 0.8 * deckSand);')
+          // (a low sun's glint off the deck held to a glow: racing into the sunset it greyed the whole road)
+          .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.directSpecular = min(reflectedLight.directSpecular, vec3(0.8));');
+      };
+    }
+    deckMat.customProgramCacheKey = () => (TH.moss ? 'feather-deck-moss' : TH.frost ? 'feather-deck-frost' : TH.sand ? 'feather-deck-sand' : 'feather-deck');
     this.deckMat = deckMat;
     out.deck = new THREE.Mesh(top, deckMat);
     const E = W + WALL_T;

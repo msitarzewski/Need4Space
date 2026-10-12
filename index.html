@@ -2,7 +2,7 @@
 <html lang="en" data-level="normal">
 <head>
 <meta charset="utf-8">
-<meta name="build" content="8fc8d21">
+<meta name="build" content="b5578e1">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -29,6 +29,8 @@
   "./src/celestial.js": "./src/celestial.js?v=bd2c6125",
   "./src/creatures.js": "./src/creatures.js?v=1fe08c4a",
   "./src/deck.js": "./src/deck.js?v=f753e5a1",
+  "./src/desert.js": "./src/desert.js?v=5a168712",
+  "./src/dunes.js": "./src/dunes.js?v=640f9ac5",
   "./src/flight.js": "./src/flight.js?v=062a69d3",
   "./src/flora.js": "./src/flora.js?v=b6b5b247",
   "./src/forest.js": "./src/forest.js?v=32d18e12",
@@ -36,14 +38,15 @@
   "./src/fx.js": "./src/fx.js?v=6d7286d3",
   "./src/glacier.js": "./src/glacier.js?v=713ec629",
   "./src/greattree.js": "./src/greattree.js?v=cbbc7fda",
+  "./src/haze.js": "./src/haze.js?v=c8b82fe1",
   "./src/hud.js": "./src/hud.js?v=c04fbd08",
   "./src/hull.js": "./src/hull.js?v=e884b356",
   "./src/ice.js": "./src/ice.js?v=3da6ad80",
   "./src/input.js": "./src/input.js?v=d1035403",
   "./src/islands.js": "./src/islands.js?v=ab9862a0",
   "./src/look.js": "./src/look.js?v=93790b7f",
-  "./src/main.js": "./src/main.js?v=57f7e923",
-  "./src/menu.js": "./src/menu.js?v=9e785b70",
+  "./src/main.js": "./src/main.js?v=96c6958c",
+  "./src/menu.js": "./src/menu.js?v=0c8e6e73",
   "./src/music.js": "./src/music.js?v=3c383f64",
   "./src/noise.js": "./src/noise.js?v=d8a13c89",
   "./src/overgrowth.js": "./src/overgrowth.js?v=1ba16bf2",
@@ -52,14 +55,17 @@
   "./src/quality.js": "./src/quality.js?v=20a1d143",
   "./src/race.js": "./src/race.js?v=88041438",
   "./src/rock.js": "./src/rock.js?v=232e2ab8",
+  "./src/ruins.js": "./src/ruins.js?v=cb22fbfe",
+  "./src/sandstone.js": "./src/sandstone.js?v=b91ff8b6",
   "./src/scenery.js": "./src/scenery.js?v=fc1ed4ad",
-  "./src/settings.js": "./src/settings.js?v=0cbef777",
+  "./src/settings.js": "./src/settings.js?v=50ef0945",
   "./src/ship.js": "./src/ship.js?v=6807cc1e",
+  "./src/simoom.js": "./src/simoom.js?v=1414c873",
   "./src/skeleton.js": "./src/skeleton.js?v=f7312f0a",
   "./src/space.js": "./src/space.js?v=10c6f159",
   "./src/spires.js": "./src/spires.js?v=fffbe728",
   "./src/touch.js": "./src/touch.js?v=7092ba13",
-  "./src/track.js": "./src/track.js?v=163749eb",
+  "./src/track.js": "./src/track.js?v=df3809d2",
   "./src/water.js": "./src/water.js?v=29165f9f",
   "./src/world.js": "./src/world.js?v=07d44f5a",
   "./src/wreck.js": "./src/wreck.js?v=f45d895b"
@@ -76,6 +82,8 @@
 <link rel="modulepreload" href="./src/celestial.js?v=bd2c6125">
 <link rel="modulepreload" href="./src/creatures.js?v=1fe08c4a">
 <link rel="modulepreload" href="./src/deck.js?v=f753e5a1">
+<link rel="modulepreload" href="./src/desert.js?v=5a168712">
+<link rel="modulepreload" href="./src/dunes.js?v=640f9ac5">
 <link rel="modulepreload" href="./src/flight.js?v=062a69d3">
 <link rel="modulepreload" href="./src/flora.js?v=b6b5b247">
 <link rel="modulepreload" href="./src/forest.js?v=32d18e12">
@@ -83,14 +91,15 @@
 <link rel="modulepreload" href="./src/fx.js?v=6d7286d3">
 <link rel="modulepreload" href="./src/glacier.js?v=713ec629">
 <link rel="modulepreload" href="./src/greattree.js?v=cbbc7fda">
+<link rel="modulepreload" href="./src/haze.js?v=c8b82fe1">
 <link rel="modulepreload" href="./src/hud.js?v=c04fbd08">
 <link rel="modulepreload" href="./src/hull.js?v=e884b356">
 <link rel="modulepreload" href="./src/ice.js?v=3da6ad80">
 <link rel="modulepreload" href="./src/input.js?v=d1035403">
 <link rel="modulepreload" href="./src/islands.js?v=ab9862a0">
 <link rel="modulepreload" href="./src/look.js?v=93790b7f">
-<link rel="modulepreload" href="./src/main.js?v=57f7e923">
-<link rel="modulepreload" href="./src/menu.js?v=9e785b70">
+<link rel="modulepreload" href="./src/main.js?v=96c6958c">
+<link rel="modulepreload" href="./src/menu.js?v=0c8e6e73">
 <link rel="modulepreload" href="./src/music.js?v=3c383f64">
 <link rel="modulepreload" href="./src/noise.js?v=d8a13c89">
 <link rel="modulepreload" href="./src/overgrowth.js?v=1ba16bf2">
@@ -98,14 +107,17 @@
 <link rel="modulepreload" href="./src/quality.js?v=20a1d143">
 <link rel="modulepreload" href="./src/race.js?v=88041438">
 <link rel="modulepreload" href="./src/rock.js?v=232e2ab8">
+<link rel="modulepreload" href="./src/ruins.js?v=cb22fbfe">
+<link rel="modulepreload" href="./src/sandstone.js?v=b91ff8b6">
 <link rel="modulepreload" href="./src/scenery.js?v=fc1ed4ad">
-<link rel="modulepreload" href="./src/settings.js?v=0cbef777">
+<link rel="modulepreload" href="./src/settings.js?v=50ef0945">
 <link rel="modulepreload" href="./src/ship.js?v=6807cc1e">
+<link rel="modulepreload" href="./src/simoom.js?v=1414c873">
 <link rel="modulepreload" href="./src/skeleton.js?v=f7312f0a">
 <link rel="modulepreload" href="./src/space.js?v=10c6f159">
 <link rel="modulepreload" href="./src/spires.js?v=fffbe728">
 <link rel="modulepreload" href="./src/touch.js?v=7092ba13">
-<link rel="modulepreload" href="./src/track.js?v=163749eb">
+<link rel="modulepreload" href="./src/track.js?v=df3809d2">
 <link rel="modulepreload" href="./src/water.js?v=29165f9f">
 <link rel="modulepreload" href="./src/world.js?v=07d44f5a">
 <link rel="modulepreload" href="./src/wreck.js?v=f45d895b">
@@ -202,6 +214,6 @@
 })();
 </script>
 
-<script type="module" src="src/main.js?v=57f7e923"></script>
+<script type="module" src="src/main.js?v=96c6958c"></script>
 </body>
 </html>
