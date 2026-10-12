@@ -549,12 +549,12 @@ export function caveDressing(scene, H, track, mats, dens = 1) {
         if (rnd() < 0.5 * roofK * dens) dots.push(Object.assign(p.clone().addScaledVector(UP, -0.4), { r }));
         if (rnd() < 0.2 * roofK * dens) threads.push({ r, p: p.clone().addScaledVector(UP, -0.5), len: Math.min(q.y - 26, 2 + Math.pow(rnd(), 1.4) * (w.cavern > 0.5 ? 45 : 14)), seed: rnd() });
       }
-      if (q.yl > -40 && q.yl < 30 && Math.abs(q.x) > XC && rnd() < (0.05 + 0.12 * w.fungi + 0.05 * w.gallery + 0.06 * w.hall) * dens) caps.push({ r, p, n: inward(r, p), hue: w.hall > 0.5 ? 0.9 + rnd() * 0.1 : rnd() * 0.88 });
+      if (q.yl > -40 && q.yl < 30 && Math.abs(q.x) > XC && rnd() < (0.04 + 0.1 * w.fungi + 0.04 * w.gallery + 0.05 * w.hall) * dens) caps.push({ r, p, n: inward(r, p), hue: w.hall > 0.5 ? 0.9 + rnd() * 0.1 : rnd() * 0.88 });
       // crystals: the throat's walls, here and there in the fissure and the cavern
       const ck = w.throat * 0.09 + w.fissure * 0.006;
       if (Math.abs(q.x) > XC + 2 && rnd() < ck * dens) crystals.push({ p, n: inward(r, p), s: 2 + Math.pow(rnd(), 2) * 7, hue: rnd() });
       // stalactites from the hall's roof (and the cavern's), stalagmites off its floor
-      const sk = w.hall * 0.5 + w.cavern * 0.12 + w.throat * 0.06 + w.fissure * 0.04;
+      const sk = w.hall * 0.3 + w.cavern * 0.07 + w.throat * 0.035 + w.fissure * 0.025;
       if (q.yl > 20 && rnd() < sk * dens) drips.push({ r, p, down: true, len: Math.min((q.y - YT - 3) * 0.95, 6 + Math.pow(rnd(), 1.6) * (w.cavern > 0.5 ? 70 : 34)) });
       if (q.yl < -16 && rnd() < sk * 0.6 * dens) drips.push({ r, p, down: false, len: Math.min(Math.abs(q.x) > XC + 4 ? 60 : (YB - q.y - 3), 4 + Math.pow(rnd(), 1.5) * 26) });
       // the giant fungi on the floor of their chamber
@@ -608,12 +608,12 @@ export function caveDressing(scene, H, track, mats, dens = 1) {
   const capMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.6, emissive: 0xffffff, emissiveIntensity: 1 });
   const capG = new THREE.SphereGeometry(1, 8, 3, 0, TAU, 0, Math.PI / 2).scale(1, 0.32, 1);
   for (const list of regions(caps)) {
-    const im = new THREE.InstancedMesh(capG, capMat, list.length * 4);
+    const im = new THREE.InstancedMesh(capG, capMat, list.length * 3);
     let n = 0;
     for (const q of list) {
       const col = q.hue < 0.55 ? [0.02, 0.7, 0.55] : q.hue < 0.85 ? [0.45, 0.06, 0.8] : [0.8, 0.35, 0.03];
-      for (let k = 0; k < 4; k++) {
-        const s = 0.3 + rnd() * 0.8, p = q.p.clone().addScaledVector(q.n, 0.1).add(new THREE.Vector3((rnd() - 0.5) * 2, (rnd() - 0.5) * 1.6, (rnd() - 0.5) * 2));
+      for (let k = 0; k < 3; k++) {
+        const s = 0.35 + rnd() * 0.85, p = q.p.clone().addScaledVector(q.n, 0.1).add(new THREE.Vector3((rnd() - 0.5) * 2, (rnd() - 0.5) * 1.6, (rnd() - 0.5) * 2));
         Qn.setFromUnitVectors(UP, UP.clone().lerp(q.n, 0.35).normalize());
         M.compose(p, Qn, S3.set(s, s, s));
         im.setMatrixAt(n, M);
@@ -706,7 +706,7 @@ export function caveDressing(scene, H, track, mats, dens = 1) {
   }
   // stalactites and stalagmites: lumpy cones of the cave's rock; columns where one met the other, beside the way
   {
-    const cone = new THREE.ConeGeometry(1, 1, 9, 6, false).rotateX(Math.PI).translate(0, -0.5, 0);     // tip down, base at 0
+    const cone = new THREE.ConeGeometry(1, 1, 7, 4, false).rotateX(Math.PI).translate(0, -0.5, 0);     // tip down, base at 0
     const p = cone.attributes.position;
     for (let i = 0; i < p.count; i++) { const y = p.getY(i), k = 1 + 0.22 * Math.sin(y * 9 + p.getX(i) * 3) * (1 + y); p.setX(i, p.getX(i) * k); p.setZ(i, p.getZ(i) * k); }
     cone.computeVertexNormals();

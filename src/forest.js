@@ -129,7 +129,7 @@ const HERO = [
   { name: 'Cascade', x: -380, z: -800, top: 230, rx: 310, rz: 150, rot: 0.03, cliff: 130, depth: 430, seed: 12, hill: 6, lobes: 4, res: 224 },
   // the hill the cave runs through (its middle and outline come from the cave: cave.js; these for the rest to keep clear)
   { name: 'Hollow', x: -100, z: 1990, top: -75, rx: 470, rz: 470, cliff: 560, depth: 820, seed: 31, hill: 8, taper: 0.9, lobes: 3, crag: 0.55,
-    baseVar: 0.04, hollow: true },
+    baseVar: 0.04, plantStep: 15, hollow: true },
   // the rock the Great Tree's roots grip, far under the spiral
   { name: 'Roots', x: 300, z: 1290, top: -470, rx: 150, rz: 140, rot: 0.3, cliff: 60, depth: 260, seed: 41, hill: 4, lobes: 3, taper: 1.0, res: 160 },
   { name: 'Lantern', x: 225, z: -560, top: 235, rx: 150, rz: 175, rot: 0.4, cliff: 70, depth: 150, seed: 13, hill: 8, lobes: 2, taper: 0.7, settle: 'up', res: 192 },
@@ -258,6 +258,11 @@ export class ForestWorld {
     // the cave's dark, and the shade under the tunnels of vines (their centre lines: overgrowth.js)
     this.canopy = vineCanopy(this.track, (list) => leafCards(list, 'A', 17));
     setCave([], 40, 45, { lines: this.canopy.lines, R: 27, mouth: 22, amb: 0.3 }, { glsl: this.hollow.glsl });
+    // (where the dark has put the sun out, its shadow is not looked up: the deck, the ships, the cave's rock)
+    for (const sh of ['directLight.color *= ( directLight.visible && receiveShadow ) ? cascadeShadow() * worldShadow() : 1.0;',
+      'directLight.color *= ( directLight.visible && receiveShadow ) ? worldShadow() : 1.0;']) {
+      THREE.ShaderChunk.lights_fragment_begin = THREE.ShaderChunk.lights_fragment_begin.replace(sh, sh.replace('receiveShadow )', 'receiveShadow && caveK > 0.0 )'));
+    }
     this.track.meshes(scene);
     this.track.bakeDeck(renderer);
     this.noAO = [];
@@ -421,7 +426,7 @@ export class ForestWorld {
         bucket = sectors.get(key);
       }
       // trees: a jittered grid over the top, thinned by a noise (clearings), species by place
-      const r = Math.max(I.rx, I.rz) * 1.4, step = (I.far ? 26 : 10) / Math.sqrt(this.dens);
+      const r = Math.max(I.rx, I.rz) * 1.4, step = (I.plantStep ?? (I.far ? 26 : 10)) / Math.sqrt(this.dens);
       for (let gx = -r; gx <= r; gx += step) for (let gz = -r; gz <= r; gz += step) {
         const x = I.x + gx + (rnd() - 0.5) * step, z = I.z + gz + (rnd() - 0.5) * step;
         const t = isl.topInfo(x, z);
