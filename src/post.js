@@ -632,11 +632,20 @@ export class ShaftPass extends Pass {
     const q = () => new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });
     this.a = q(); this.b = q();
     const vs = /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+    // ("those lines are still there, from reflections": a glint on the ice, a spark or an engine core - a few pixels -
+    // went through the mask whole and the blur drew it out into a thin line toward the sun. The mask now takes the
+    // average over each 4 x 4 pixels it stands for, so only broad light - sky through a gap, the sun's glare - casts.)
     this.mask = new FullScreenQuad(new THREE.ShaderMaterial({
-      uniforms: { tIn: { value: null }, sun: { value: this.sunUV }, aspect: { value: 1 } }, vertexShader: vs,
-      fragmentShader: /* glsl */`uniform sampler2D tIn; uniform vec2 sun; uniform float aspect; varying vec2 vUv;
+      uniforms: { tIn: { value: null }, sun: { value: this.sunUV }, aspect: { value: 1 }, texel: { value: new THREE.Vector2(1 / 1920, 1 / 1080) } },
+      vertexShader: vs,
+      fragmentShader: /* glsl */`uniform sampler2D tIn; uniform vec2 sun, texel; uniform float aspect; varying vec2 vUv;
         void main() {
-          vec3 c = min(texture2D(tIn, vUv).rgb, vec3(12.0));
+          vec3 c = vec3(0.0);
+          for (int k = 0; k < 4; k++) {           // four bilinear taps: the 4 x 4 block's mean
+            vec2 o = vec2(k == 0 || k == 2 ? -1.0 : 1.0, k < 2 ? -1.0 : 1.0) * texel;
+            c += min(texture2D(tIn, vUv + o).rgb, vec3(12.0));
+          }
+          c *= 0.25;
           float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
           vec2 d = (vUv - sun) * vec2(aspect, 1.0);
           float near = exp(-dot(d, d) * 2.2);
@@ -647,7 +656,9 @@ export class ShaftPass extends Pass {
       uniforms: { tIn: { value: null }, sun: { value: this.sunUV }, len: { value: 1 } }, vertexShader: vs,
       fragmentShader: /* glsl */`uniform sampler2D tIn; uniform vec2 sun; uniform float len; varying vec2 vUv;
         void main() {
-          vec2 st = (sun - vUv) * len / 24.0, uv = vUv;
+          // (each pixel's samples start a random fraction of a step along: what banding is left dissolves into the ray)
+          float j = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+          vec2 st = (sun - vUv) * len / 24.0, uv = vUv + st * j;
           vec3 c = vec3(0.0); float w = 1.0, wsum = 0.0;
           for (int i = 0; i < 24; i++) { c += texture2D(tIn, uv).rgb * w; wsum += w; uv += st; w *= 0.95; }
           gl_FragColor = vec4(c / wsum, 1.0);
@@ -660,7 +671,11 @@ export class ShaftPass extends Pass {
     }));
   }
 
-  setSize(w, h) { for (const t of [this.a, this.b]) t.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2)); this.aspect = w / Math.max(1, h); }
+  setSize(w, h) {
+    for (const t of [this.a, this.b]) t.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2));
+    this.aspect = w / Math.max(1, h);
+    this.mask.material.uniforms.texel.value.set(1 / Math.max(1, w), 1 / Math.max(1, h));
+  }
 
   render(renderer, writeBuffer, readBuffer) {
     const m = this.mask.material.uniforms;
