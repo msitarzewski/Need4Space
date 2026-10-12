@@ -32,21 +32,28 @@ export const FAR_HALF = 170, FAR_NEAR = 100, FAR_FAR = 900;
 const P = [];
 const pt = (x, y, z, bank = 0, name = null) => P.push([x, y, z, bank, name]);
 pt(-1320, 40, 560, 0, 'start'); pt(-1320, 42, 260); pt(-1320, 58, 20, 0, 'crest1'); pt(-1320, 40, -140); pt(-1310, 34, -380);
-// the ruined city: a slalom between leaning towers, then straight through the one that fell across the way
-pt(-1250, 30, -640, 12); pt(-1330, 28, -1000, -14, 'city'); pt(-1250, 28, -1380, 14); pt(-1300, 30, -1700, 0, 'towerIn'); pt(-1300, 30, -2000, 0, 'towerOut');
-// up onto the high road over the dunes: two barrel rolls, the storm, the loop
-pt(-1250, 45, -2250, 18); pt(-1080, 70, -2430, 30); pt(-850, 95, -2520, 20);
+// the ruined city: a slalom between leaning towers (swinging ~25 m either way: at ~40 the bends asked ~270 m/s, the pads
+// in them more; each banked into its bend, not away), then straight through the one that fell across the way
+pt(-1268, 30, -640, -9); pt(-1316, 28, -1000, 10, 'city'); pt(-1266, 28, -1380, -10); pt(-1300, 30, -1700, 0, 'towerIn'); pt(-1300, 30, -2000, 0, 'towerOut');
+// up onto the high road over the dunes (a quarter turn of 540 m from the tower: it was ~300, and the pad after the
+// tower ran into it): two barrel rolls, the storm, the loop
+pt(-1282, 42, -2140, 8); pt(-1228, 53, -2270, 16); pt(-1142, 65, -2382, 20);
+pt(-1030, 77, -2468, 20); pt(-900, 88, -2522, 16); pt(-760, 100, -2540, 8);
 pt(-600, 105, -2540, 0, 'rollIn'); pt(-430, 105, -2540, 120); pt(-260, 105, -2540, 240); pt(-90, 105, -2540, 0, 'rollOut');
 pt(250, 112, -2500, 6, 'storm'); pt(650, 115, -2440, -6); pt(1000, 110, -2480, 0, 'preLoop');
+// (its way out 80 m to the side of its way in, the step eased across it: taken evenly it kinked the way in and out)
 for (let k = 0; k <= 12; k++) {
   const a = (k / 12) * Math.PI * 2;
-  pt(1150 + 80 * Math.sin(a), 190 - 80 * Math.cos(a), -2480 + 80 * k / 12, 0, k === 0 ? 'loopIn' : k === 12 ? 'loopOut' : null);
+  pt(1150 + 80 * Math.sin(a), 190 - 80 * Math.cos(a), -2480 + 40 * (1 - Math.cos(a / 2)), 0, k === 0 ? 'loopIn' : k === 12 ? 'loopOut' : null);
 }
-// the dive into the gorge: S-bends banked like a half-pipe under two natural bridges
+// the dive into the gorge: S-bends banked like a half-pipe under two natural bridges (swinging ~25 m either way: at
+// ~38 a ship at 280 m/s could not turn its slide over from one bend to the next)
 pt(1330, 104, -2390, 8); pt(1620, 80, -2260, 26); pt(1820, 40, -2030, 26); pt(1880, 0, -1760, 8, 'canyonIn');
-pt(1900, -40, -1450, -30); pt(1830, -60, -1120, -45, 'arch1'); pt(1910, -64, -760, 45); pt(1840, -66, -400, -45, 'arch2'); pt(1900, -64, -60, 0);
-// the wall: a hairpin round the gorge's end, banked almost upright, climbing out
-pt(2011, -64, 209, -30); pt(2280, -62, 320, 20, 'wallIn'); pt(2421, -52, 379, 70); pt(2480, -38, 520, 80, 'wall'); pt(2421, -22, 661, 70); pt(2280, -6, 720, 25, 'wallOut');
+pt(1896, -40, -1450, 24); pt(1844, -60, -1120, -45, 'arch1'); pt(1896, -64, -760, 45); pt(1846, -66, -400, -45, 'arch2');
+pt(1868, -65, -230, -20); pt(1890, -64, -60, -4);
+// out of the gorge a bend of ~400 m (it was ~180) and a straight to the wall: a hairpin round the gorge's end, banked
+// almost upright, climbing out
+pt(1917, -64, 41, -12); pt(1970, -64, 132, -18); pt(2044, -64, 207, -12); pt(2134, -63, 259, -2); pt(2280, -62, 320, 20, 'wallIn'); pt(2421, -52, 379, 70); pt(2480, -38, 520, 80, 'wall'); pt(2421, -22, 661, 70); pt(2280, -6, 720, 25, 'wallOut');
 // low over the dunes to the second chasm, then the flip: upside down into the sunset, and back
 pt(2080, 15, 745); pt(1850, 18, 790, -6); pt(1550, 16, 860); pt(1330, 26, 910); pt(1130, 42, 960, 0, 'crest2'); pt(960, 26, 1000); pt(760, 40, 1050);
 pt(560, 58, 1100, 0, 'flipA'); pt(350, 84, 1160, 180, 'flipB'); pt(100, 86, 1235, 180); pt(-110, 86, 1300, 180, 'flipC'); pt(-320, 60, 1370, 0, 'flipD');
