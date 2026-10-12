@@ -1,4 +1,4 @@
-// The menus: the title (Race / Free flight / Settings / Controls), the difficulty select, pause (Esc), settings,
+// The menus: the title (Race / Circuit / Settings / Controls), the difficulty select, pause (Esc), settings,
 // controls and the results' actions - by keyboard, mouse or gamepad. Behind the title a slow camera films the grid;
 // into the race the camera swings round to the ship (a blend) instead of cutting.
 // main.js calls: filter(inp) after reading the input (the menus keep the game's keys), camera(dt) after the rig, and
@@ -32,7 +32,8 @@ const stats = (L) => [
   ['Racing line', clamp01(1 - (L.lane + L.wander) / 16)],
 ];
 
-const MAIN = [['race', 'Race'], ['free', 'Free flight'], ['circuit', 'Circuit'], ['settings', 'Settings'], ['controls', 'Controls'], ['support', 'Support']];
+// ("remove the free flight option": the race on the track is the game)
+const MAIN = [['race', 'Race'], ['circuit', 'Circuit'], ['settings', 'Settings'], ['controls', 'Controls'], ['support', 'Support']];
 // the circuits (main.js loads the one chosen: the page reloads into it)
 export const CIRCUITS = [['space', 'Space', 'The orbital circuit over the ringed gas giant: a colossal broken derelict to thread, upside down through its hold, a meteorite to fly through, a glass tunnel, a loop'],
   ['forest', 'Forest moon', 'High over a jungle moon: floating islands, a river arching over the track, a colossal tree, two kilometres of caverns, a giant\'s skull, home upside down'],
@@ -60,7 +61,7 @@ const LEFT = new Set(['ArrowLeft', 'KeyA']), RIGHT = new Set(['ArrowRight', 'Key
 const EDGES = ['engine', 'canopy', 'camera', 'reset', 'respawn', 'help', 'mute', 'assist', 'invert', 'click', 'settings', 'mode'];
 
 export class Menu {
-  // h: { settings, hud, input, rig, camera, race, track, ship, world, startRace(), freeFlight(fromTitle), restart(), quit(),
+  // h: { settings, hud, input, rig, camera, race, track, ship, world, startRace(), restart(), quit(),
   //      status(), mode(), engineOn(), focus() }
   constructor(h) {
     this.h = h;
@@ -140,11 +141,10 @@ export class Menu {
       <section class="m-screen" data-s="controls">
         <header><div class="m-kicker"><span class="k-keys">Keyboard, mouse, gamepad</span><span class="k-touch">Touch</span></div><h2 class="m-h2">Controls</h2></header>
         <div class="c-touch">
-          <div class="c-row"><span class="c-keys"><kbd>Left stick</kbd></span><span>Steer (free flight: roll, pitch)</span></div>
+          <div class="c-row"><span class="c-keys"><kbd>Left stick</kbd></span><span>Steer (in the air: nose up / down)</span></div>
           <div class="c-row"><span class="c-keys"><kbd>Right stick</kbd></span><span>Up: throttle - down: brake - sideways: airbrakes. Drift: brake with the left stick hard over</span></div>
           <div class="c-row"><span class="c-keys"><kbd>Boost</kbd></span><span>Boost (orange pads on the track kick too)</span></div>
           <div class="c-row"><span class="c-keys"><kbd>Cam</kbd></span><span>Camera: chase, far, canopy, fly-by, orbit</span></div>
-          <div class="c-row"><span class="c-keys"><kbd>Engines</kbd></span><span>Engines start / stop (free flight)</span></div>
           <div class="c-row"><span class="c-keys"><kbd>II</kbd></span><span>Pause menu</span></div>
         </div>
         <div class="c-grid">${controlsHTML()}</div>
@@ -327,7 +327,6 @@ export class Menu {
     const free = this.h.mode() === 'free', km = this.h.track ? `${(this.h.track.length / 1000).toFixed(1)} km ` : '';
     return {
       race: `${LAPS} laps against ${TEAMS.length - 1} rivals on the ${km}circuit`,
-      free: 'Fly the circuit and the space round it at your own pace',
       settings: 'Picture, effects, audio and performance',
       controls: 'Keyboard, mouse and gamepad',
       support: 'Donate to keep Need4Space flying',
@@ -375,7 +374,6 @@ export class Menu {
     else if (c === 'KeyO') this.toggle('settings');
     else if (c === 'KeyH') this.toggle('controls');
     else if (this.screen === 'results' && c === 'KeyR') this.act('again');
-    else if (this.screen === 'results' && c === 'KeyG') this.act('free');
     else used = false;
     if (used) e.preventDefault();
   }
@@ -479,11 +477,6 @@ export class Menu {
       case 'resume': ui('select'); this.resume(); break;
       case 'restart': ui('select'); this.leave(() => h.restart()); break;
       case 'again': ui('select'); this.fromResults(() => h.restart()); break;
-      case 'free':
-        ui('select');
-        if (this.ctx === 'results') this.fromResults(() => h.freeFlight(false), false);
-        else this.leave(() => h.freeFlight(true));
-        break;
       case 'quit': case 'menu': ui('back'); this.toTitle(); break;
       case 'back': this.back(); break;
       default:

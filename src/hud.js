@@ -15,17 +15,15 @@ export const CONTROLS = [
     [['W', 'S'], 'Throttle up / down (S at zero: brake)'],
     [['S', 'A', 'D'], 'Drift: touch S and turn hard at speed; steer the slide with A / D (and W), catch it straight to kick out'],
     [['S', 'S'], 'Drift again soon after a kick, or tap S again mid-drift: a bigger drift (up to three steps)'],
-    [['A', 'D'], 'Steer (race), yaw (free flight)'],
-    [['←', '→', '↑', '↓'], 'Steer (race; in the air ↓ nose down, ↑ up), pitch and roll (free)'],
+    [['A', 'D'], 'Steer'],
+    [['←', '→', '↑', '↓'], 'Steer; in the air ↓ nose down, ↑ nose up'],
     [['Shift'], 'Boost (orange pads on the track kick too)'],
     [['Z', 'X'], 'Airbrakes left / right: sharper turns'],
-    [['Space', 'C'], 'Lift up / down (free flight)'],
     [['Mouse'], 'Click to steer (Esc releases)'],
   ]],
   ['Ship and track', [
     [['E'], 'Engines start / stop'],
     [['F'], 'Canopy open / close (engines off)'],
-    [['G'], 'Race on the track / free flight'],
     [['T'], 'Back on the track'],
     [['R'], 'Back to the start: restart the race'],
   ]],
@@ -39,9 +37,9 @@ export const CONTROLS = [
     [['Esc'], 'Pause menu'],
   ]],
 ];
-export const GAMEPAD = 'Left stick steer / fly (in the air: nose up / down), right stick yaw, RT / LT throttle (touch LT and throw ' +
-  'the stick over: drift; steer the slide, catch it straight to kick out), A boost, Y engines, X canopy, B camera, LB / RB airbrakes (race) or lift (free). ' +
-  'In the menus: d-pad, A select, B back; View pauses.';
+export const GAMEPAD = 'Left stick steer (in the air: nose up / down), RT / LT throttle (touch LT and throw the stick over: ' +
+  'drift; steer the slide, catch it straight to kick out), A boost, B camera, LB / RB airbrakes. In the menus: d-pad, A select, ' +
+  'B back; View pauses.';
 
 export const controlsHTML = () => CONTROLS.map(([group, rows]) => `<div class="c-group"><div class="c-title">${group}</div>${rows.map(([keys, what]) =>
   `<div class="c-row"><span class="c-keys">${keys.map((k) => `<kbd>${k}</kbd>`).join('')}</span><span>${what}</span></div>`).join('')}</div>`).join('');
@@ -197,7 +195,6 @@ export class HUD {
       <div class="r-actions">
         <button class="m-item" data-act="again" tabindex="-1"><kbd>R</kbd>Race again</button>
         <button class="m-item" data-act="difficulty" tabindex="-1">Difficulty</button>
-        <button class="m-item" data-act="free" tabindex="-1"><kbd>G</kbd>Free flight</button>
         <button class="m-item" data-act="menu" tabindex="-1"><kbd>Esc</kbd>Main menu</button>
       </div>`;
     $('results').classList.remove('hidden');

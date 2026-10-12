@@ -36,7 +36,6 @@ Click or press a key once to start the sound and music (browsers block audio unt
 | Esc / P | Pause menu |
 | O | Settings |
 | R | Restart the race |
-| G | Switch between race and free flight |
 | M | Mute |
 | H | Controls card |
 

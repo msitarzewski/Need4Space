@@ -1638,6 +1638,12 @@ export const gripAt = (v) => 4.0 * (1 - 0.4 * smoothstep(100, 320, v));
 export const DRIFT = { v: 55, tap: 0.4, rate: 1.3, grip: 0.55, keep: 0.8, drag: 0.12, brake: 0.1, onset: 2.2, caught: 0.14,
   settle: 0.15, tiers: [0.5, 1.1, 1.8], kick: [12, 22, 32], chainWindow: 0.9, chainMax: 3, energy: [0.1, 0.18, 0.28] };
 export const ENERGY_MAX = 1.5, ENERGY_BLEED = 0.05;
+// The player's help by the difficulty ("on normal drifts to gain easier and faster boost ... walls 30 % less harsh ...
+// 20 % faster boost gain on drift and 10 % boost gain overall; on hard only the drift's 10 % and 20 % less harsh; on
+// brutal no bonuses"): wall - the share of a wall knock's and a grind's speed loss paid; drift - the drift's charge
+// and energy top-up; recharge - the boost energy's own recharge. Rivals get none.
+export const PERKS = { normal: { wall: 0.7, drift: 1.2, recharge: 1.1 }, hard: { wall: 0.8, drift: 1.1, recharge: 1 },
+  brutal: { wall: 1, drift: 1, recharge: 1 } };
 const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck
 
@@ -1662,6 +1668,7 @@ export class TrackRacer {
     this.qAir = new THREE.Quaternion(); // the attitude in the air (pose)
     this.airT = 0;                      // 0 on the deck .. 1 well clear of it
     this.yawKick = 0;                   // heading turned in one step (a wall glance): the animation eases it in
+    this.perks = PERKS.brutal;          // the player's help by the difficulty (main.js); none for the rivals
     this.drift = 0;                     // drifting: the side (+1 right), 0 not
     this.driftCharge = 0; this.driftKick = 0; this.driftS = 0; this.slip = 0;
     this.pitchIn = 0;
@@ -1691,7 +1698,7 @@ export class TrackRacer {
     if (go && tier) {
       const k = 1 + 0.3 * (this.chain || 0);
       this.driftKick += DRIFT.kick[tier - 1] * k;
-      this.boostEnergy = Math.min(ENERGY_MAX, this.boostEnergy + DRIFT.energy[tier - 1] * k);
+      this.boostEnergy = Math.min(ENERGY_MAX, this.boostEnergy + DRIFT.energy[tier - 1] * k * this.perks.drift);
       this.emit({ type: 'drift', tier, at: this.pos.clone() });
     }
     this.chainT = go && tier ? DRIFT.chainWindow : 0;       // the window to chain the next one
@@ -1701,7 +1708,8 @@ export class TrackRacer {
   }
 
   place(s, hover) {
-    this.s = s; this.x = 0; this.y = hover ? HOVER : 0.002; this.vy = 0; this.vs = 0; this.vx = 0; this.psi = 0; this.slow = 0;
+    // (wrapped: a grid slot behind a start near the lap's 0 would be s < 0)
+    this.s = this.track.wrap(s); this.x = 0; this.y = hover ? HOVER : 0.002; this.vy = 0; this.vs = 0; this.vx = 0; this.psi = 0; this.slow = 0;
     this.throttle = 0; this.steerS = 0; this.yawRate = 0; this.boosting = 0;
     this.drift = 0; this.driftCharge = 0; this.driftKick = 0; this.driftK = 0; this.chain = 0; this.chainT = 0;
     this.pose(0);
@@ -1767,7 +1775,7 @@ export class TrackRacer {
     // the boost spends the energy; under full it recharges, over full (a drift's top-up) it bleeds back once the
     // drifting is over
     const E = this.boostEnergy;
-    this.boostEnergy = wantBoost ? Math.max(0, E - 0.2 * dt) : E < 1 ? Math.min(1, E + 0.08 * dt)
+    this.boostEnergy = wantBoost ? Math.max(0, E - 0.2 * dt) : E < 1 ? Math.min(1, E + 0.08 * this.perks.recharge * dt)
       : this.drift || this.chainT > 0 ? E : Math.max(1, E - ENERGY_BLEED * dt);
     // steering (A/D, arrows, mouse, stick), airbrakes (Z / X, bumpers): a sharper turn, more drag; drifting, a
     // livelier nose
@@ -1818,7 +1826,7 @@ export class TrackRacer {
     this.slip = Math.atan2(kept, Math.max(1, Math.abs(al2)));          // the way it goes off the nose (rad)
     if (this.drift) {
       if (Math.abs(this.slip) > 0.03) this.drift = this.driftSide = -Math.sign(this.slip);   // the side the tail is out
-      this.driftCharge += dt * smoothstep(0.12, 0.4, Math.abs(this.slip)) * dk * (1 + 0.25 * ch);
+      this.driftCharge += dt * smoothstep(0.12, 0.4, Math.abs(this.slip)) * dk * (1 + 0.25 * ch) * this.perks.drift;
       if (this.driftTier > tierWas) this.emit({ type: 'driftTier', tier: this.driftTier, at: this.pos.clone() });
     }
     // a drift's kick, paid over ~0.2 s along the way it goes
@@ -1852,7 +1860,7 @@ export class TrackRacer {
       this.grindSide = side;
       this.x = side * lim;
       // grinding along it drags: ~20 % of the speed for each second of contact (proportional - it never stops a ship)
-      this.vs *= Math.exp(-0.22 * dt);
+      this.vs *= Math.exp(-0.22 * this.perks.wall * dt);
       // the nose glances off: a heading into the wall is turned back along it
       if (this.psi * side > 0) {
         const p0 = this.psi;
@@ -1868,7 +1876,7 @@ export class TrackRacer {
         // me stuck sometimes"
         // "make the wall hits more punishing": a knock costs a share of the blow and, for a real blow, a share of
         // the speed too (a 20 m/s knock at 900 km/h: ~13 %); a graze costs little
-        this.slow = (this.slow || 0) + 0.45 * hit + 0.13 * Math.abs(this.vs) * smoothstep(3, 24, hit);
+        this.slow = (this.slow || 0) + (0.45 * hit + 0.13 * Math.abs(this.vs) * smoothstep(3, 24, hit)) * this.perks.wall;
         if (hit > 4) this.driftCharge = 0;
         // one event per knock, not one per step of grinding (each fired the jolt, shield, shake and thud again)
         if (hit > 1.5 && this.wallCool <= 0) {

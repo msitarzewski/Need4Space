@@ -13,7 +13,7 @@ import { DesertWorld, SUN_DIR as DESERT_SUN } from './desert.js';
 import { DUST_GLSL, DUST_FOG_CHUNK } from './haze.js';
 import { ICE_GLSL, ICE_FOG_CHUNK } from './frost.js';
 import { ATMO_GLSL, ATMO_FOG_CHUNK } from './atmo.js';
-import { TrackRacer, TRACK_W } from './track.js';
+import { TrackRacer, TRACK_W, PERKS } from './track.js';
 import { patchShaders } from './look.js';
 import { smoothstep } from './noise.js';
 import { loadShip, Ship } from './ship.js';
@@ -330,6 +330,7 @@ async function boot() {
     resize();
     fpsEl.style.display = v.fps ? '' : 'none';
     race?.setDifficulty(v.ai);                       // the rivals' AI difficulty (race.js AI_LEVELS)
+    if (racer) racer.perks = PERKS[v.ai] || PERKS.brutal;  // and the player's help by it
     touch.setPref(v.touch);                           // the on-screen sticks: Auto (a phone or tablet) / On / Off
     audio.lite = !!v.laptop;                          // (fewer rival voices; its buffer is set when the sound starts)
     audio.setLevels(v.music, v.sfx);                 // music and effects volume
@@ -469,11 +470,6 @@ async function boot() {
     mode: () => mode, engineOn: () => ship.engineOn, focus: () => ship.root.position,
     status: () => ({ race: race && mode === 'race' ? race.hud() : null }),
     startRace: () => { hud.hideResults(); setMode('race'); placeStart(false); resetLap(); heroOrbit(); engines(); },
-    freeFlight: (fromTitle) => {
-      hud.hideResults();
-      setMode('free');
-      if (fromTitle) { placeStart(false); resetLap(); heroOrbit(); engines(); } else hud.message('Free flight', 1.6);
-    },
     restart: () => {
       if (race && mode === 'race') hud.hideResults();
       placeStart(ship.engineOn);
@@ -521,13 +517,6 @@ async function boot() {
       autoChase = false;
       if (rig.mode === 'orbit') input.unlock();
       hud.message(rig.name, 1.2);
-    }
-    if (inp.mode && racer) {
-      if (mode === 'race' && (race.state === 'countdown' || race.state === 'racing')) hud.message('Finish the race first (R restarts it)', 2);
-      else {
-        setMode(mode === 'race' ? 'free' : 'race');
-        hud.message(mode === 'race' ? 'Race: on the track' : 'Free flight', 1.6);
-      }
     }
     if (inp.click && rig.mode !== 'orbit' && !settings.open) input.lock();
     if (inp.help) hud.toggleHelp();

@@ -62,7 +62,7 @@ export class Input {
       engine: this.was('KeyE'), canopy: this.was('KeyF'), camera: this.was('KeyV'),
       reset: this.was('KeyR'), respawn: this.was('KeyT'), help: this.was('KeyH'), mute: this.was('KeyM'),
       assist: this.was('KeyL'), invert: this.was('KeyI'), click: this.was('Mouse0'), settings: this.was('KeyO'),
-      mode: this.was('KeyG'), airL: k('KeyZ'), airR: k('KeyX'),
+      airL: k('KeyZ'), airR: k('KeyX'),
     };
     // gamepad (standard mapping)
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];

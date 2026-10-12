@@ -55,7 +55,7 @@ class TrackField {
   // { i, d (horizontal distance to the centre line), side (+1 right of it) } or null
   near(x, z) {
     const cx = Math.floor((x - this.x0) / this.cell), cz = Math.floor((z - this.z0) / this.cell);
-    if (cx < 0 || cz < 0 || cx >= this.nx || cz >= this.nz) return null;
+    if (!(cx >= 0 && cz >= 0 && cx < this.nx && cz < this.nz)) return null;      // (off the field, or not a number)
     const i0 = this.idx[cz * this.nx + cx];
     if (i0 < 0) return null;
     const tr = this.tr, n = tr.n, px = tr.px, pz = tr.pz;

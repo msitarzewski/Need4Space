@@ -523,7 +523,7 @@ export class DesertWorld {
     if (this.race) {
       this.race.entries.forEach((e, k) => {
         const w = (ws[k] ||= { pos: new THREE.Vector3(), vel: new THREE.Vector3(), sides: [new THREE.Vector3(), new THREE.Vector3()] });
-        const p = e.ship.root.position, i = Math.floor(e.racer.s / this.track.step) % this.track.n, R = this.track.R[i];
+        const p = e.ship.root.position, n = this.track.n, i = ((Math.floor(e.racer.s / this.track.step) % n) + n) % n, R = this.track.R[i];
         const g = this.dunes.height(p.x, p.z), rl = Math.hypot(R.x, R.z) || 1;
         w.pos.copy(p); w.vel.copy(e.racer.vel);
         // (the field's downwash blows the sand out from under the deck: it boils up past both its edges)
