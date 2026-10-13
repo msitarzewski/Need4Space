@@ -599,7 +599,7 @@ body.touch .k-touch { display: inline; }
 body.touch .sb-heading { padding-right: 10rem; }
 .sb-connection { padding: 0.5rem 0.8rem; border: 1px solid rgba(121, 219, 255, 0.3); font: 700 0.78rem var(--ui); letter-spacing: 0.12em; color: var(--accent); white-space: nowrap; }
 .sb-body { width: 100%; max-width: 78rem; margin-top: 2rem; }
-.sb-toolbar, .sb-filters, .sb-identity, .sb-summary { display: flex; align-items: center; gap: 1rem; }
+.sb-toolbar, .sb-filters, .sb-summary { display: flex; align-items: center; gap: 1rem; }
 .sb-toolbar { justify-content: space-between; }
 .sb-filters { flex-wrap: wrap; gap: 1.3rem; }
 .sb-tabs { display: flex; gap: 0.35rem; }
@@ -611,11 +611,10 @@ body.touch .sb-heading { padding-right: 10rem; }
 .sb-btn { color: #eaf6fc; white-space: nowrap; }
 .sb-btn:disabled { opacity: 0.55; cursor: default; }
 .sb-tabs button:focus-visible, .sb-btn:focus-visible, .sb-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.sb-identity { margin-top: 1.25rem; justify-content: space-between; }
-.sb-identity label, .sb-submit-form label { display: flex; align-items: center; gap: 0.8rem; font: 700 0.82rem var(--ui); color: var(--dim); letter-spacing: 0.07em; }
+.sb-submit-form label { display: flex; align-items: center; gap: 0.8rem; font: 700 0.82rem var(--ui); color: var(--dim); letter-spacing: 0.07em; }
 .sb-name { box-sizing: border-box; width: 15rem; padding: 0.65rem 0.8rem; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 0; background: rgba(4, 10, 17, 0.85); color: #fff; font: 600 1rem var(--ui); user-select: text; }
 .sb-name::placeholder { color: var(--faint); }
-.sb-rule { font: 600 0.85rem var(--ui); color: var(--dim); letter-spacing: 0.06em; }
+.sb-rule { margin-top: 1rem; font: 600 0.85rem var(--ui); color: var(--dim); letter-spacing: 0.06em; }
 .sb-summary { justify-content: space-between; margin-top: 1.5rem; margin-bottom: 0.7rem; }
 .sb-board-title { font: 700 1rem var(--display); color: #fff; letter-spacing: 0.08em; }
 .sb-updated { font: 600 0.84rem var(--ui); color: var(--dim); text-align: right; }
@@ -637,6 +636,7 @@ body.touch .sb-heading { padding-right: 10rem; }
 .sb-personal { display: flex; align-items: baseline; gap: 1rem; padding: 1rem 1.2rem; margin-top: 0.8rem; border: 1px solid rgba(255, 255, 255, 0.09); font: 600 0.92rem var(--ui); color: var(--dim); }
 .sb-personal b { color: #fff; font: 600 1.2rem var(--display); }
 .sb-personal-rank { margin-left: auto; }
+.sb-personal[hidden] { display: none; }
 .sb-submit-form { display: flex; flex-wrap: wrap; align-items: center; gap: 0.8rem 1.2rem; padding-top: 1rem; }
 .sb-submit-info { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem 0.8rem; flex: 1 1 18rem; }
 .sb-submit-info span { font: 700 0.82rem var(--ui); letter-spacing: 0.08em; color: var(--accent); }
@@ -660,8 +660,6 @@ body.touch .sb-heading { padding-right: 10rem; }
   .sb-tabs { width: 100%; }
   .sb-tabs button { flex: 1; text-align: center; padding: 0.65rem 0.4rem; }
   .sb-refresh { padding: 0.65rem 0.6rem; }
-  .sb-identity { flex-wrap: wrap; gap: 0.6rem; margin-top: 0.9rem; }
-  .sb-identity label { flex: 1; }
   .sb-name { width: min(15rem, 100%); }
   .sb-summary { margin-top: 1rem; gap: 0.5rem; }
   .sb-board-title { font-size: 0.82rem; }
@@ -675,7 +673,6 @@ body.touch .sb-heading { padding-right: 10rem; }
 }
 @media (max-height: 500px) {
   .sb-body { margin-top: 0.8rem; }
-  .sb-identity { margin-top: 0.6rem; }
   .sb-summary { margin-top: 0.7rem; }
   .sb-table-wrap { max-height: 38vh; }
   .sb-table td { padding-block: 0.45rem; }

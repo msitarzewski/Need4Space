@@ -32,20 +32,18 @@ export class Scoreboard {
         <div class="sb-tabs" aria-label="Circuit">${MAPS.map(([id, label]) => `<button type="button" data-sb-map="${id}">${label}</button>`).join('')}</div>
         <div class="sb-tabs sb-levels" aria-label="Difficulty">${LEVELS.map(([id, label]) => `<button type="button" data-sb-level="${id}" style="--sb-level:var(--c-${id})">${label}</button>`).join('')}</div>
       </div><button type="button" class="sb-btn sb-refresh">↻ <span>Refresh</span></button></div>
-      <div class="sb-identity"><label>Racing name <input class="sb-name" type="text" maxlength="24" autocomplete="nickname" placeholder="Enter your name" aria-label="Your racing name"></label><span class="sb-rule">3 laps · fastest race wins</span></div>
+      <div class="sb-rule">3 laps · fastest race wins</div>
       <div class="sb-summary"><span class="sb-board-title"></span><span class="sb-updated" aria-live="polite"></span></div>
       <div class="sb-table-wrap"><table class="sb-table"><thead><tr><th scope="col">Rank</th><th scope="col">Player</th><th scope="col">Race time</th><th scope="col">Best lap</th><th scope="col">Points</th></tr></thead><tbody></tbody></table>
         <div class="sb-empty" hidden><span>No times yet</span><p>Finish a race to set the first time.</p></div></div>
       <div class="sb-personal"><span>Your best</span><b>—</b><span class="sb-personal-rank"></span></div>
       <div class="sb-pending"></div></div>`;
-    this.el.querySelector('.sb-name').value = this.profile.name;
     this.el.addEventListener('click', (e) => {
       const map = e.target.closest('[data-sb-map]'), level = e.target.closest('[data-sb-level]');
       if (map) this.choose(map.dataset.sbMap, this.level);
       else if (level) this.choose(this.map, level.dataset.sbLevel);
       else if (e.target.closest('.sb-refresh')) this.refresh();
     });
-    this.el.querySelector('.sb-name').addEventListener('input', e => this.setName(e.target.value));
     addEventListener('need4space:race-reset', e => this.beginRun(e.detail));
     this.beginRun(this.h.race?.level || this.level);
     this.mark();
@@ -151,6 +149,7 @@ export class Scoreboard {
       body.append(row);
     });
     this.el.querySelector('.sb-empty').hidden = !!data.entries.length;
+    this.el.querySelector('.sb-personal').hidden = !data.personal;
     this.el.querySelector('.sb-personal b').textContent = time(data.personal?.entry.totalMs);
     this.el.querySelector('.sb-personal-rank').textContent = data.personal ? `#${data.personal.rank} of ${data.totalPlayers}` : '';
   }
