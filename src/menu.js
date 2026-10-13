@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { AI_LEVELS, LAPS, TEAMS } from './race.js';
 import { controlsHTML, GAMEPAD, fmt } from './hud.js';
+import { UPDATES, VERSION } from './changelog.js';
 
 const ui = (name) => window.__feather?.audio?.ui?.(name);
 const wake = () => window.__feather?.audio?.start?.();          // audio needs a user gesture: any menu key or click
@@ -119,11 +120,16 @@ export class Menu {
         <div class="d-sweep"></div>
       </button></div>`).join('');
     const km = h.track ? (h.track.length / 1000).toFixed(1) : null;
+    const U = UPDATES[0];                                // the latest update's notes on the title (changelog.js)
+    const news = `<aside class="m-news"><div class="n-head"><span class="n-tag">What's new</span>` +
+      `<span class="n-ver">v${U.version} &middot; ${U.date}</span></div><div class="n-name">${U.name}</div>` +
+      `<ul class="n-list">${U.notes.map((n) => `<li>${n}</li>`).join('')}</ul></aside>`;
     this.el.innerHTML = `<div class="m-bg"></div><div class="m-fade"></div><div class="m-pulse"></div><div class="m-scan"></div>
       <section class="m-screen" data-s="main">
-        <header><div class="m-kicker">Anti-gravity racing</div><h1 class="m-logo"><span>NEED</span><i>4</i><span>SPACE</span></h1><div class="m-sub">Feather S1</div></header>
+        <header><div class="m-kicker">Anti-gravity racing</div><h1 class="m-logo"><span>NEED</span><i>4</i><span>SPACE</span></h1><div class="m-sub">Feather S1 <span class="m-v">v${VERSION}</span></div></header>
         <nav class="m-list">${main.map(item).join('')}</nav>
         <div class="m-desc"></div>
+        ${news}
       </section>
       <section class="m-screen" data-s="diff">
         <div class="d-word" aria-hidden="true"></div>

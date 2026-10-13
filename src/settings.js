@@ -1,4 +1,6 @@
 // Settings (O): every look feature has a switch that changes the picture and costs what it costs; saved per browser.
+import { VERSION } from './changelog.js';
+
 const KEY = 'feather.settings.v4';
 export const DEFAULTS = { tonemap: 'aces', ao: true, bloom: true, shadows: 'high', scale: 1, exposure: 0, fps: true,
   blur: true, reflections: true, streaks: true, ai: 'easy', music: 'high', sfx: 'high', aa: 'smaa', aoRes: 'auto',
@@ -141,7 +143,7 @@ export class Settings {
         `<button tabindex="-1" data-k="${k}" data-v='${JSON.stringify(val)}'${k === 'ai' ? ` data-lv="${val}"` : ''} class="${this.v[k] === val ? 'on' : ''}">${t}</button>`)
         .join('')}</div></div>`).join('') +
       // which version is running (tools/stamp.py; a phone can keep an old one a while after an update)
-      `<div class="s-ver">Build ${document.querySelector('meta[name="build"]')?.content || 'dev'}</div>` +
+      `<div class="s-ver">Version ${VERSION} &middot; build ${document.querySelector('meta[name="build"]')?.content || 'dev'}</div>` +
       `<div class="s-ver">© 2026 vengeful180. All rights reserved.</div>`;
   }
 }
