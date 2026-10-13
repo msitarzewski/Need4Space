@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { AI_LEVELS, LAPS, TEAMS } from './race.js';
 import { controlsHTML, GAMEPAD, fmt } from './hud.js';
 import { UPDATES, VERSION } from './changelog.js';
+import { Scoreboard } from './scoreboard.js';
 
 const ui = (name) => window.__feather?.audio?.ui?.(name);
 const wake = () => window.__feather?.audio?.start?.();          // audio needs a user gesture: any menu key or click
@@ -36,7 +37,7 @@ const stats = (L) => [
 ];
 
 // ("remove the free flight option": the race on the track is the game)
-const MAIN = [['race', 'Race'], ['circuit', 'Circuit'], ['settings', 'Settings'], ['controls', 'Controls'], ['support', 'Support']];
+const MAIN = [['race', 'Race'], ['circuit', 'Circuit'], ['scoreboard', 'Scoreboard'], ['settings', 'Settings'], ['controls', 'Controls'], ['support', 'Support']];
 // the circuits (main.js loads the one chosen: the page reloads into it)
 export const CIRCUITS = [['space', 'Space', 'The orbital circuit over the ringed gas giant: a colossal broken derelict to thread, upside down through its hold, a meteorite to fly through, a glass tunnel, a loop'],
   ['forest', 'Forest moon', 'High over a jungle moon: floating islands, a river arching over the track, a colossal tree, two kilometres of caverns, a giant\'s skull, home upside down'],
@@ -45,7 +46,7 @@ export const CIRCUITS = [['space', 'Space', 'The orbital circuit over the ringed
 // donations (the author's Revolut)
 const DONATE_URL = 'https://revolut.me/alexan_vic', DONATE_HANDLE = '@alexan_vic';
 const donate = () => window.open(DONATE_URL, '_blank', 'noopener');
-const PAUSE = [['resume', 'Resume'], ['restart', 'Restart race'], ['difficulty', 'Difficulty'], ['settings', 'Settings'],
+const PAUSE = [['resume', 'Resume'], ['restart', 'Restart race'], ['difficulty', 'Difficulty'], ['scoreboard', 'Scoreboard'], ['settings', 'Settings'],
   ['controls', 'Controls'], ['quit', 'Quit to menu']];
 // a hint along the bottom: its keys and what they do, and clickable like the key ("can only go back pressing Esc"):
 // act - one action for the whole hint, or one per key (the arrows)
@@ -63,6 +64,7 @@ const HINTS = {
   controls: K(['Esc'], 'Back', 'back'),
   support: K(['Enter'], 'Donate on Revolut', 'ok') + K(['Esc'], 'Back', 'back'),
   circuit: K(['↑', '↓'], 'Select', UD) + K(['Enter'], 'Fly it', 'ok') + K(['Esc'], 'Back', 'back'),
+  scoreboard: K(['↑', '↓'], 'Circuit', UD) + K(['←', '→'], 'Difficulty', LR) + K(['R'], 'Refresh', 'refresh') + K(['Esc'], 'Back', 'back'),
   results: K(['←', '→'], 'Select', LR) + K(['Enter'], 'Confirm', 'ok') + K(['R'], 'Race again', 'again') + K(['Esc'], 'Main menu', 'back'),
 };
 const UP = new Set(['ArrowUp', 'KeyW']), DOWN = new Set(['ArrowDown', 'KeyS']);
@@ -88,8 +90,9 @@ export class Menu {
     this.diffI = Math.max(0, IDS.indexOf(h.settings.v.ai));
     this.diffMode = 'start';
     this.build();
+    this.board = new Scoreboard(this);
     this.setLevel(h.settings.v.ai, false);
-    h.settings.onSet = (k, v) => { if (k === 'ai') this.levelSet(v); };
+    h.settings.onSet = (k, v) => { if (k === 'ai') { this.levelSet(v); this.board.difficultyChanged(v); } };
     h.hud.onResults = () => this.showResults();
     h.hud.onHideResults = () => { if (this.ctx === 'results' && !this.busy) this.resume(); };
     addEventListener('keydown', (e) => this.key(e), true);       // capture: before input.js sees the key
@@ -180,6 +183,7 @@ export class Menu {
         <div class="m-desc"></div>
       </section>
       <section class="m-screen" data-s="results"><div class="m-slot-results"></div></section>
+      <section class="m-screen" data-s="scoreboard"></section>
       <button class="m-back" data-act="back" tabindex="-1">Back</button>
       <footer class="m-foot"><div class="m-hints"></div>
         <div class="m-info">${km ? `Circuit ${km} km &middot; ${LAPS} laps &middot; ${TEAMS.length} ships` : ''}</div></footer>`;
@@ -195,6 +199,7 @@ export class Menu {
     this.el.classList.toggle('on', !!screen);
     document.body.dataset.ui = screen ? this.ctx : 'game';
     this.h.settings.el.classList.toggle('hidden', screen !== 'settings');
+    this.board?.setOpen(screen === 'scoreboard');
     if (!screen) { document.getElementById('support-toast')?.classList.remove('on'); return; }   // (the last screen stays drawn while the menu fades out)
     this.el.dataset.ctx = this.ctx;
     this.el.dataset.depth = this.stack.length > 1 || (this.ctx === 'pause' && screen !== 'pause') ? 'sub' : 'top';   // (touch: a Back button)
@@ -276,6 +281,7 @@ export class Menu {
     const rig = this.h.rig;                        // the fly-by camera behind the table while the AI flies the cool-down lap
     if (!this.rigWas) { this.rigWas = rig.mode; rig.mode = 'cinematic'; rig.anchor = null; }
     this.h.input.unlock();
+    this.board.captureResult();
     this.show('results');
     this.nudge('results');
   }
@@ -346,6 +352,7 @@ export class Menu {
       controls: 'Keyboard, mouse and gamepad',
       support: 'Donate to keep Need4Space flying',
       circuit: 'Space, the forest moon, the ice planet or the desert planet',
+      scoreboard: 'The global top 10 for each circuit and difficulty',
       ...Object.fromEntries(CIRCUITS.map(([id, , d]) => ['map:' + id, d])),
       resume: free ? 'Back to free flight' : 'Back to the race',
       restart: free ? 'Back over the start line' : 'Back to the grid and the lights',
@@ -377,7 +384,16 @@ export class Menu {
       return;
     }
     e.stopImmediatePropagation();                  // the menu has the keyboard (key-ups still reach the game: no stuck keys)
+    if (e.target.matches('input, select, textarea')) {
+      if (c === 'Escape') { e.preventDefault(); e.target.blur(); this.back(); }
+      return;
+    }
     if (this.busy) return;
+    if (e.target.matches('.sb-tabs button, .sb-btn') && ['Enter', 'NumpadEnter', 'Space'].includes(c)) {
+      e.preventDefault();
+      if (!e.repeat) e.target.click();
+      return;
+    }
     wake();
     if (c === 'Escape' && performance.now() - (this.lockLost || 0) < 400) { e.preventDefault(); return; }   // the Esc that freed the mouse
     const dir = UP.has(c) ? -1 : DOWN.has(c) ? 1 : LEFT.has(c) ? -2 : RIGHT.has(c) ? 2 : 0;
@@ -389,6 +405,7 @@ export class Menu {
     else if (c === 'KeyO') this.toggle('settings');
     else if (c === 'KeyH') this.toggle('controls');
     else if (this.screen === 'results' && c === 'KeyR') this.act('again');
+    else if (this.screen === 'scoreboard' && c === 'KeyR') this.board.refresh();
     else used = false;
     if (used) e.preventDefault();
   }
@@ -438,11 +455,13 @@ export class Menu {
     if (k === 'back') this.back();
     else if (k === 'ok') this.ok();
     else if (k === 'again') this.act('again');
+    else if (k === 'refresh') this.board.refresh();
     else this.nav({ up: -1, down: 1, left: -2, right: 2 }[k] || 0);
   }
 
   nav(dir) {
     const s = this.screen, d = Math.sign(dir), vert = Math.abs(dir) === 1;
+    if (s === 'scoreboard') { this.board.nav(dir); return; }
     if (s === 'diff') { this.pick(this.diffI + d); return; }
     if (s === 'settings') {
       if (vert) { this.h.settings.move(d); ui('move'); } else if (this.h.settings.cycle(d) && this.h.settings.focusKey !== 'ai') ui('move');
@@ -458,6 +477,7 @@ export class Menu {
 
   ok() {
     const s = this.screen;
+    if (s === 'scoreboard') { this.board.refresh(); return; }
     if (s === 'diff') { this.confirmDiff(); return; }
     if (s === 'settings') {
       if (this.h.settings.focusKey === 'ai') { ui('select'); this.go('diff', 'apply'); } else if (this.h.settings.cycle(1, true)) ui('move');
@@ -494,7 +514,7 @@ export class Menu {
     const h = this.h;
     switch (a) {
       case 'race': ui('select'); this.go('diff', 'start'); break;
-      case 'settings': case 'controls': case 'support': case 'circuit': ui('select'); this.go(a); break;
+      case 'settings': case 'controls': case 'support': case 'circuit': case 'scoreboard': ui('select'); this.go(a); break;
       case 'donate': ui('select'); donate(); break;
       case 'difficulty': ui('select'); this.go('diff', this.ctx === 'results' ? 'restart' : 'apply'); break;
       case 'confirm': this.confirmDiff(); break;

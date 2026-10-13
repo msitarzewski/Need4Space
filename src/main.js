@@ -132,7 +132,7 @@ async function boot() {
   const mm = world.minimap;
   const heading = (i) => { const j = (i + 15) % mm.n; return Math.atan2(-(mm.px[j] - mm.px[i]), -(mm.pz[j] - mm.pz[i])); };
   const placeStart = (hover) => {
-    if (mode === 'race') race.reset();
+    if (mode === 'race') { race.reset(); dispatchEvent(new CustomEvent('need4space:race-reset', { detail: race.level })); }
     else if (MAP === 'meadow') flight.place(mm.px[START], mm.pz[START], heading(START), hover);
     else {                                               // free flight in space starts over the start line
       flight.place(0, 0, 0, false);
