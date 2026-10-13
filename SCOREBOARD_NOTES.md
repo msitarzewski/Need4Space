@@ -1,6 +1,6 @@
-# Scoreboard local preview
+# Need4Space scoreboard
 
-This work is on the local `scoreboard-local` branch in `D:\codex racer test\Need4Space-live`, based on the published performance commit `5ee31ace35f39ed008397b612750f02e366e73d8`. The public game and `D:\new opus test` have not been changed by this feature.
+This work is on the local `scoreboard-local` branch in `D:\codex racer test\Need4Space-live`, based on the published performance commit `5ee31ace35f39ed008397b612750f02e366e73d8`. Publication is being completed after local approval. `D:\new opus test` is not edited.
 
 Run `python serve.py 8805`, then open http://localhost:8805/?map=space and choose **Scoreboard**. It is also available from Pause and race results. The preview currently contains ten sample racing names on each of the sixteen boards; the sample times are not real online records.
 
@@ -52,3 +52,11 @@ Build `b385edd` removes the unbound racing-name input from the scoreboard. Name 
 The browser loaded Forest and opened Forest / Normal without console errors. It showed ten rows and no unbound name field or empty personal summary; Refresh and Back worked, and the completed-race submission form retained its name input. [Check record](<D:/codex racer test/profiling/scoreboard/name-field-check.json>) · [Updated screenshot](<D:/codex racer test/profiling/scoreboard/scoreboard-without-name-field.png>).
 
 References: [GitHub Pages hosting](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages), [repository content writes](https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents).
+
+## Online publication — 14 October 2026
+
+The hosted score API is `https://need4space-scores.leeloy.chatgpt.site/api/scoreboard`, built from the source in `D:\codex racer test\Need4Space-score-service`. Its Sites project is `appgprj_6ace9ed4b1808191b21530fb203e47a3`. The game remains at `https://vengeful180-dot.github.io/Need4Space/`. `scoreboard-config.json` now points to that HTTPS service. The service writes JSON records to the dedicated `scores` branch of `vengeful180-dot/Need4Space`, under `leaderboard/`. Its credential is an encrypted server environment secret and is absent from the game, source and deployment archive. The service accepts the game origin, validates complete three-lap times, and retries conflicting GitHub writes.
+
+The ten sample entries and local test races remain in the ignored local preview data. They are not uploaded to the online boards. The browsing name field remains removed; name entry appears only with a finished-race Save time form.
+
+The hosted JavaScript storage tests passed for all sixteen boards, top-ten ranking, aliases, completed races, Unicode, GitHub conflicts, CORS and bounded requests. Hosted checks passed for all sixteen boards, CORS preflight, invalid-race rejection, simultaneous real GitHub saves, same-name best-time retention and a fresh-session read. The persisted GitHub JSON was verified independently. The final live browser check and cleanup of temporary release entries will be recorded after publication.
