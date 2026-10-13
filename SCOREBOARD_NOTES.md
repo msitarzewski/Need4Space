@@ -1,8 +1,8 @@
 # Need4Space scoreboard
 
-This work is on the local `scoreboard-local` branch in `D:\codex racer test\Need4Space-live`, based on the published performance commit `5ee31ace35f39ed008397b612750f02e366e73d8`. Publication is being completed after local approval. `D:\new opus test` is not edited.
+The global scoreboard is live at https://vengeful180-dot.github.io/Need4Space/. The game source is in `D:\codex racer test\Need4Space-live`, branch `scoreboard-local`, published to GitHub `main`. The feature starts from commit `5ee31ace35f39ed008397b612750f02e366e73d8`; the release commit is `ebf5039b282577479823f15723e7f3d9f1f9d798`, build `b385edd`. `D:\new opus test` is not edited.
 
-Run `python serve.py 8805`, then open http://localhost:8805/?map=space and choose **Scoreboard**. It is also available from Pause and race results. The preview currently contains ten sample racing names on each of the sixteen boards; the sample times are not real online records.
+Choose **Scoreboard** from the main menu, Pause or race results. For an isolated local mock preview, temporarily set the endpoint in `scoreboard-config.json` to `./api/scoreboard`, run `python serve.py 8805`, then open http://localhost:8805/?map=space. The ignored local dataset contains sample racing names; those entries are not uploaded to the global boards.
 
 - Separate global top ten for Space, Forest, Ice and Desert, on Easy, Normal, Hard and Brutal.
 - Ranked by the total time of a completed three-lap race. Best lap is from that recorded race; points use the existing race score.
@@ -14,7 +14,7 @@ Run `python serve.py 8805`, then open http://localhost:8805/?map=space and choos
 
 The local server stores scores in `.local/scoreboard.json`, which is ignored by Git. Separate browser sessions using this server see the same scores. Names are rendered as text, not HTML. No physics, AI, track, ship, rendering options or frame-rate limits were changed.
 
-## Shared online storage after preview approval
+## Storage configuration
 
 GitHub Pages serves static files; it cannot accept score writes by itself. The included Python score service can store scores in GitHub using a credential held only by the service. No token belongs in browser JavaScript, `scoreboard-config.json`, or a public file.
 
@@ -43,7 +43,7 @@ The seven storage tests passed. Browser checks passed for all sixteen boards, ke
 
 Initial UI verification build: `83196ef`. The current source and protected-reference audit is [recorded here](<D:/codex racer test/profiling/scoreboard/audit.json>). The JavaScript race/save checks are in [the local race records](<D:/codex racer test/profiling/scoreboard-final>), and the UI/refresh checks are in [flow.json](<D:/codex racer test/profiling/scoreboard/flow.json>). [Initial desktop screenshot](<D:/codex racer test/profiling/scoreboard/scoreboard-desktop.png>) · [Touch screenshot](<D:/codex racer test/profiling/scoreboard/scoreboard-touch.png>).
 
-The GitHub adapter was tested against a simulated API, including recovery from a concurrent write. Real GitHub storage and online hosting have not been enabled. This is the local visual review stage requested by the user.
+The Python GitHub adapter was initially tested against a simulated API. The hosted JavaScript adapter and real online storage were subsequently verified as recorded below.
 
 ## Browsing screen correction — 14 October 2026
 
@@ -59,4 +59,6 @@ The hosted score API is `https://need4space-scores.leeloy.chatgpt.site/api/score
 
 The ten sample entries and local test races remain in the ignored local preview data. They are not uploaded to the online boards. The browsing name field remains removed; name entry appears only with a finished-race Save time form.
 
-The hosted JavaScript storage tests passed for all sixteen boards, top-ten ranking, aliases, completed races, Unicode, GitHub conflicts, CORS and bounded requests. Hosted checks passed for all sixteen boards, CORS preflight, invalid-race rejection, simultaneous real GitHub saves, same-name best-time retention and a fresh-session read. The persisted GitHub JSON was verified independently. The final live browser check and cleanup of temporary release entries will be recorded after publication.
+The hosted JavaScript storage tests passed for all sixteen boards, top-ten ranking, aliases, completed races, Unicode, GitHub conflicts, CORS and bounded requests. Hosted checks passed for all sixteen boards, CORS preflight, invalid-race rejection, simultaneous real GitHub saves, same-name best-time retention and a fresh-session read. The persisted GitHub JSON was verified independently. The live browser passed all sixteen map/difficulty selections without console errors. The actual Save time form saved the three-lap result with the correct total, best lap and points; a separate fresh browser session read it back. Manual and automatic refresh, Back and removal of the unbound browsing name field also passed. Temporary release-check entries were then removed by matching their exact names, times and recording timestamps; the player record submitted during verification was preserved. All sixteen boards were checked again after cleanup.
+
+Release evidence is in `D:\codex racer test\profiling\scoreboard`: `pages-deployment.json`, `service-deployment.json`, `hosted-api-check.json`, `hosted-save-check.json`, `live-browser-check.json`, `live-files.json`, `release-score-cleanup.json` and `clean-live-boards.json`. GitHub Pages deployment `7050457806` succeeded for the release. The hosted service source commit is `ab83f048d99dfa1544ea97bdbcf830dbe9143ed1`; deployment `appgdep_6acea0ec04ec8191b9710ad1449dab31` succeeded. The protected reference audit reported no changes.
