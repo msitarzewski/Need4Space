@@ -28,7 +28,7 @@ import { agxPass, speedBlurPass, LayeredRenderPass, DeckSSRPass, StreakPass, Blo
 import { Settings, savedSettings } from './settings.js';
 import { Race, Driver } from './race.js';
 import { Menu } from './menu.js';
-import { compileAll, deferBakes, runBakes, gpuIdle } from './bake.js';
+import { compileAll, deferBakes, runBakes, gpuIdle, postJobs } from './bake.js';
 import { Q, setLite, integratedGPU, liteFiltering, memoryTier } from './quality.js';
 
 // the map: the circuit chosen in the menu (saved), or ?map=space / forest / ice / desert / meadow (the meadow: the old test range)
@@ -358,7 +358,11 @@ async function boot() {
     renderer.setRenderTarget(scenePass.msaa);
     const jobs = [[scene, camera]];
     if (world.sky) jobs.push([world.sky, world.skyCam]);
-    await compileAll(renderer, jobs, (k, n) => { status(`Compiling shaders  ${k} / ${n}`); progress('compile', k / n); });
+    // Submit post shaders with the scene shaders instead of blocking on each warm-up draw.
+    // OutputPass uses these defines for the renderer's ACES/sRGB output on its first draw.
+    if (output.enabled) output.material.defines = { SRGB_TRANSFER: '', ACES_FILMIC_TONE_MAPPING: '' };
+    const post = postJobs(composer.passes.filter((p) => p.enabled || p === lens));
+    await compileAll(renderer, [...jobs, ...post], (k, n) => { status(`Compiling shaders  ${k} / ${n}`); progress('compile', k / n); });
     renderer.setRenderTarget(null);
     // the textures onto the GPU one at a time (an 8K map and its mips is one long job on a slow GPU)
     const texs = new Set();

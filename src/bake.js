@@ -12,7 +12,10 @@ import * as THREE from 'three';
 
 export async function compileAll(renderer, jobs, progress) {
   const progs = new Set();
-  for (const [s, c] of jobs) for (const m of renderer.compile(s, c)) progs.add(renderer.properties.get(m).currentProgram);
+  for (const [s, c] of jobs) for (const m of renderer.compile(s, c)) {
+    // A shared material can have separate mesh/instance and front/back programs.
+    for (const p of renderer.properties.get(m).programs.values()) progs.add(p);
+  }
   progs.delete(undefined);
   const n = progs.size;
   while (progs.size) {
@@ -45,6 +48,23 @@ export function bakeLater(compile, draw) {
 
 const _cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 export const quadJob = (quad) => [quad._mesh, _cam];
+
+// Full-screen passes that reuse one quad (AO, SMAA) expose several materials.
+export function postJobs(passes) {
+  const jobs = [];
+  for (const pass of passes) {
+    for (const quad of Object.values(pass)) if (quad?._mesh?.material) jobs.push(quadJob(quad));
+    if (pass.fsQuad) {
+      const materials = Object.values(pass).filter((v) => v?.isShaderMaterial);
+      if (materials.length) {
+        const mesh = Object.create(pass.fsQuad._mesh);
+        mesh.material = materials;
+        jobs.push([mesh, _cam]);
+      }
+    }
+  }
+  return jobs;
+}
 
 export async function runBakes(renderer, progress) {
   const jobs = queue.splice(0);
