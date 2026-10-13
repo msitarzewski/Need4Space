@@ -217,6 +217,16 @@ export function patchShaders({ sunDir, sunFog, shadowHalf, shadowDepth, cascades
 \t\t#endif
 \t\t#endif`);
   }
+  // The mid/far cascade lights only carry shadow maps. The atmospheric maps'
+  // fourth light carries the world map too; Space's fourth light is planet-shine.
+  if (cascades) {
+    const L = C.lights_fragment_begin, from = L.indexOf('DirectionalLight directionalLight;');
+    const to = L.indexOf('#pragma unroll_loop_end', from), direct = /RE_Direct\( directLight[^;]*;/g;
+    const loop = L.slice(from, to);
+    if (from < 0 || to < 0 || [...loop.matchAll(direct)].length !== 1) throw new Error('lights chunk changed: shadow-only patch not applied');
+    C.lights_fragment_begin = L.slice(0, from) + loop.replace(direct, (m) =>
+      `#if UNROLLED_LOOP_INDEX != 1 && UNROLLED_LOOP_INDEX != 2${worldOnly ? ' && UNROLLED_LOOP_INDEX != 3' : ''}\n\t\t${m}\n\t\t#endif`) + L.slice(to);
+  }
   C.shadowmap_pars_fragment = s;
 
   // ---- height fog with sun in-scatter (fogDensity = extinction per metre at y = 0)
