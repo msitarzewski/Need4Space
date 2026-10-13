@@ -103,7 +103,7 @@ export class LayeredRenderPass extends Pass {
   constructor(sky, skyCam, scene, camera, samples = 4, split = 500) {
     super();
     Object.assign(this, { sky, skyCam, scene, camera, split });
-    this.msaa = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples });
+    this.msaa = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples, resolveDepthBuffer: false });
     this.clean = new FullScreenQuad(new THREE.ShaderMaterial({ ...SANITIZE, uniforms: { tDiffuse: { value: null } } }));
     this.farCam = new THREE.PerspectiveCamera();
     this.nearCam = new THREE.PerspectiveCamera();
@@ -125,21 +125,36 @@ export class LayeredRenderPass extends Pass {
 
   render(renderer, writeBuffer) {
     const ac = renderer.autoClear;
+    const gl = renderer.getContext(), blit = gl.blitFramebuffer;
+    let deferResolve = true;
+    // r170 resolves after every render(), but only the completed scene colour is sampled.
+    // Keep resolves of other targets (including transmission) and the final scene slice.
+    if (this.msaa.samples) gl.blitFramebuffer = (...args) => {
+      if (!deferResolve || renderer.getRenderTarget() !== this.msaa) blit.apply(gl, args);
+    };
     renderer.autoClear = false;
-    renderer.setRenderTarget(this.msaa);
-    renderer.setClearColor(0x000000, 1);
-    renderer.clear(true, true, true);
-    renderer.shadowMap.autoUpdate = false;
-    renderer.shadowMap.needsUpdate = true;               // consumed by the scene render below (the sky has no shadows)
-    if (this.sky) renderer.render(this.sky, this.skyCam);
-    renderer.clearDepth();
-    const cam = this.camera;
-    if (this.split > 0 && cam.isPerspectiveCamera && cam.far > this.split * 2) {
-      renderer.render(this.scene, this.slice(this.farCam, this.split, cam.far, 1 << 4));      // (the shadow maps update here)
+    try {
+      renderer.setRenderTarget(this.msaa);
+      renderer.setClearColor(0x000000, 1);
+      renderer.clear(true, true, true);
+      renderer.shadowMap.autoUpdate = false;
+      renderer.shadowMap.needsUpdate = true;               // consumed by the scene render below (the sky has no shadows)
+      if (this.sky) renderer.render(this.sky, this.skyCam);
       renderer.clearDepth();
-      renderer.render(this.scene, this.slice(this.nearCam, cam.near, this.split, 1 << 3));
-    } else renderer.render(this.scene, cam);
-    renderer.autoClear = ac;
+      const cam = this.camera;
+      if (this.split > 0 && cam.isPerspectiveCamera && cam.far > this.split * 2) {
+        renderer.render(this.scene, this.slice(this.farCam, this.split, cam.far, 1 << 4));      // (the shadow maps update here)
+        renderer.clearDepth();
+        deferResolve = false;
+        renderer.render(this.scene, this.slice(this.nearCam, cam.near, this.split, 1 << 3));
+      } else {
+        deferResolve = false;
+        renderer.render(this.scene, cam);
+      }
+    } finally {
+      gl.blitFramebuffer = blit;
+      renderer.autoClear = ac;
+    }
     this.clean.material.uniforms.tDiffuse.value = this.msaa.texture;
     renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
     this.clean.render(renderer);
