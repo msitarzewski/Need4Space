@@ -1,5 +1,7 @@
 # Need4Space
 
+© 2026 vengeful180. All rights reserved. This is proprietary software: see [LICENSE](LICENSE).
+
 An anti-gravity racer in space, built in the browser with [three.js](https://threejs.org/). You race the **Feather S1**, a hover-racer modelled and texture-baked in Blender, against eight AI rivals over three laps on one of four circuits (pick one under Circuit in the menu):
 
 - **Space** (26.6 km): past a ringed gas giant, through 12 km of a colossal derelict broken in three and a graveyard of wrecks, a meteorite you fly through, jump gaps, a vertical loop, barrel rolls and a glass tunnel.
@@ -66,3 +68,11 @@ Need4Space is free. If you enjoy it, you can support development on Revolut: [re
 - **Music:** three original tracks composed in code (`src/music.js`): *Ring Runner*, *Nebula Drift* and *Hyperlane*. They are synthesised in the browser and play as a playlist.
 - **Engine and world sounds:** synthesised at runtime (`src/audio.js`).
 - **Engine:** [three.js](https://threejs.org/) r170 and [meshoptimizer](https://github.com/zeux/meshoptimizer), both MIT-licensed and loaded from jsDelivr.
+
+## License
+
+© 2026 vengeful180. All rights reserved.
+
+Need4Space - its code, models, worlds, textures, music and sound - is proprietary. You may play it at its official
+site, but you may not copy, modify, redistribute, re-host or reuse any part of it without written permission. The
+full terms are in [LICENSE](LICENSE). The third-party components credited above keep their own licences.

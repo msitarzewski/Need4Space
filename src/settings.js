@@ -141,6 +141,7 @@ export class Settings {
         `<button tabindex="-1" data-k="${k}" data-v='${JSON.stringify(val)}'${k === 'ai' ? ` data-lv="${val}"` : ''} class="${this.v[k] === val ? 'on' : ''}">${t}</button>`)
         .join('')}</div></div>`).join('') +
       // which version is running (tools/stamp.py; a phone can keep an old one a while after an update)
-      `<div class="s-ver">Build ${document.querySelector('meta[name="build"]')?.content || 'dev'}</div>`;
+      `<div class="s-ver">Build ${document.querySelector('meta[name="build"]')?.content || 'dev'}</div>` +
+      `<div class="s-ver">© 2026 vengeful180. All rights reserved.</div>`;
   }
 }
