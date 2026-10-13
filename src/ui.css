@@ -313,6 +313,12 @@ body.lite .m-news { backdrop-filter: none; background: linear-gradient(115deg, r
   font: 700 0.8rem var(--ui); letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); pointer-events: none; }
 .m-hints { display: flex; flex-wrap: wrap; gap: 0.6rem 1.6rem; }
 .m-hints span { display: inline-flex; align-items: center; gap: 0.4rem; }
+/* the hints work as buttons too (menu.js K) */
+.m-hints .hk { pointer-events: auto; cursor: pointer; transition: color 0.15s; }
+.m-hints kbd { transition: border-color 0.15s, background 0.15s, color 0.15s, transform 0.1s; }
+.m-hints .hk:hover { color: var(--text); }
+.m-hints span.hk:hover kbd, .m-hints kbd.hk:hover { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.m-hints span.hk:active kbd, .m-hints kbd.hk:active { transform: translateY(1px); }
 .m-info { color: var(--faint); white-space: nowrap; }
 
 /* pause */

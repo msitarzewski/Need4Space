@@ -47,16 +47,23 @@ const DONATE_URL = 'https://revolut.me/alexan_vic', DONATE_HANDLE = '@alexan_vic
 const donate = () => window.open(DONATE_URL, '_blank', 'noopener');
 const PAUSE = [['resume', 'Resume'], ['restart', 'Restart race'], ['difficulty', 'Difficulty'], ['settings', 'Settings'],
   ['controls', 'Controls'], ['quit', 'Quit to menu']];
-const K = (keys, what) => `<span>${keys.map((k) => `<kbd>${k}</kbd>`).join('')}${what}</span>`;
+// a hint along the bottom: its keys and what they do, and clickable like the key ("can only go back pressing Esc"):
+// act - one action for the whole hint, or one per key (the arrows)
+const K = (keys, what, act) => {
+  const one = typeof act === 'string';
+  const key = (k, i) => (!one && act?.[i] ? `<kbd class="hk" data-key="${act[i]}">${k}</kbd>` : `<kbd>${k}</kbd>`);
+  return `<span${one ? ` class="hk" data-key="${act}"` : ''}>${keys.map(key).join('')}${what}</span>`;
+};
+const UD = ['up', 'down'], LR = ['left', 'right'];
 const HINTS = {
-  main: K(['↑', '↓'], 'Select') + K(['Enter'], 'Confirm'),
-  pause: K(['↑', '↓'], 'Select') + K(['Enter'], 'Confirm') + K(['Esc'], 'Resume'),
-  diff: K(['←', '→'], 'Choose') + K(['Enter'], 'Confirm') + K(['Esc'], 'Back'),
-  settings: K(['↑', '↓'], 'Option') + K(['←', '→'], 'Change') + K(['Esc'], 'Back'),
-  controls: K(['Esc'], 'Back'),
-  support: K(['Enter'], 'Donate on Revolut') + K(['Esc'], 'Back'),
-  circuit: K(['↑', '↓'], 'Select') + K(['Enter'], 'Fly it') + K(['Esc'], 'Back'),
-  results: K(['←', '→'], 'Select') + K(['Enter'], 'Confirm') + K(['R'], 'Race again') + K(['Esc'], 'Main menu'),
+  main: K(['↑', '↓'], 'Select', UD) + K(['Enter'], 'Confirm', 'ok'),
+  pause: K(['↑', '↓'], 'Select', UD) + K(['Enter'], 'Confirm', 'ok') + K(['Esc'], 'Resume', 'back'),
+  diff: K(['←', '→'], 'Choose', LR) + K(['Enter'], 'Confirm', 'ok') + K(['Esc'], 'Back', 'back'),
+  settings: K(['↑', '↓'], 'Option', UD) + K(['←', '→'], 'Change', LR) + K(['Esc'], 'Back', 'back'),
+  controls: K(['Esc'], 'Back', 'back'),
+  support: K(['Enter'], 'Donate on Revolut', 'ok') + K(['Esc'], 'Back', 'back'),
+  circuit: K(['↑', '↓'], 'Select', UD) + K(['Enter'], 'Fly it', 'ok') + K(['Esc'], 'Back', 'back'),
+  results: K(['←', '→'], 'Select', LR) + K(['Enter'], 'Confirm', 'ok') + K(['R'], 'Race again', 'again') + K(['Esc'], 'Main menu', 'back'),
 };
 const UP = new Set(['ArrowUp', 'KeyW']), DOWN = new Set(['ArrowDown', 'KeyS']);
 const LEFT = new Set(['ArrowLeft', 'KeyA']), RIGHT = new Set(['ArrowRight', 'KeyD']);
@@ -418,11 +425,20 @@ export class Menu {
   click(e) {
     if (this.busy || !this.open) return;
     wake();
+    const hk = e.target.closest('[data-key]');               // a hint along the bottom, clicked: as its key
+    if (hk) { this.press(hk.dataset.key); return; }
     const slot = e.target.closest('.d-slot');
     if (slot) { const i = +slot.dataset.i; if (i === this.diffI) this.confirmDiff(); else this.pick(i); return; }
     const b = e.target.closest('[data-act]');
     if (b) this.act(b.dataset.act);
     else if (e.target.closest('button[data-k]') && !e.target.closest('[data-lv]')) ui('move');
+  }
+
+  press(k) {
+    if (k === 'back') this.back();
+    else if (k === 'ok') this.ok();
+    else if (k === 'again') this.act('again');
+    else this.nav({ up: -1, down: 1, left: -2, right: 2 }[k] || 0);
   }
 
   nav(dir) {
