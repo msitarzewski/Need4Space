@@ -29,6 +29,7 @@ export class Scoreboard {
     this.map = this.h.map;
     this.level = this.h.settings.v.ai;
     this.cache = new Map();
+    this.refreshRequest = 0;
     this.el = menu.el.querySelector('[data-s="scoreboard"]');
     this.el.innerHTML = `<div class="sb-heading"><div><div class="m-kicker">Top 10</div><h2 class="m-h2">Global scoreboard</h2></div>
       <span class="sb-connection">Connecting</span></div>
@@ -97,7 +98,9 @@ export class Scoreboard {
   setOpen(open) {
     clearInterval(this.poll);
     this.open = open;
-    if (!open) return;
+    if (!open) { this.refreshRequest++; this.refreshing = null; return; }
+    if (this.menu.ctx === 'results' && this.result) { this.map = this.result.map; this.level = this.result.difficulty; }
+    this.mark();
     this.renderPending();
     this.refresh();
     this.poll = setInterval(() => { if (document.visibilityState === 'visible') this.refresh(true); }, 15000);
@@ -122,11 +125,13 @@ export class Scoreboard {
   async refresh(quiet = false) {
     const map = this.map, level = this.level, key = map + ':' + level;
     if (this.refreshing === key) return;
+    const request = ++this.refreshRequest;
     this.refreshing = key;
     const button = this.el.querySelector('.sb-refresh'); button.disabled = true;
     if (!quiet) this.el.querySelector('.sb-updated').textContent = 'Refreshing…';
     try {
       const data = await this.request({ map, difficulty: level, name: this.profile.name });
+      if (request !== this.refreshRequest) return;
       this.cache.set(key, data);
       if (this.map === map && this.level === level) {
         this.render(data);
@@ -134,11 +139,11 @@ export class Scoreboard {
         this.el.querySelector('.sb-updated').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
       }
     } catch (e) {
-      if (this.map === map && this.level === level) {
+      if (request === this.refreshRequest && this.map === map && this.level === level) {
         this.el.querySelector('.sb-connection').textContent = 'Offline';
         this.el.querySelector('.sb-updated').textContent = e.message;
       }
-    } finally { if (this.refreshing === key) { this.refreshing = null; button.disabled = false; } }
+    } finally { if (request === this.refreshRequest) { this.refreshing = null; button.disabled = false; } }
   }
 
   render(data) {
@@ -188,6 +193,9 @@ export class Scoreboard {
   }
 
   rememberSaved(score, data) {
+    this.refreshRequest++;
+    this.refreshing = null;
+    this.el.querySelector('.sb-refresh').disabled = false;
     const name = data.submittedName || data.personal.entry.name;
     const receipt = { name, message: data.alreadySubmitted ? `Already saved as ${name}`
       : data.improved ? `Saved · #${data.rank}${data.rank > 10 ? ' · outside the top 10' : ''}` : `Best race kept · ${time(data.personal.entry.totalMs)}` };
@@ -218,7 +226,11 @@ export class Scoreboard {
         const data = await this.request(null, { ...score, name });
         this.cache.set(score.map + ':' + score.difficulty, data);
         this.rememberSaved(score, data);
-        if (this.open && this.map === score.map && this.level === score.difficulty) { this.render(data); this.el.querySelector('.sb-connection').textContent = data.storage === 'local' ? 'Local preview' : 'Global'; }
+        if (this.open && this.map === score.map && this.level === score.difficulty) {
+          this.render(data);
+          this.el.querySelector('.sb-connection').textContent = data.storage === 'local' ? 'Local preview' : 'Global';
+          this.el.querySelector('.sb-updated').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        }
       } catch (e) { status.textContent = e.message; this.lockForms(score.runId, false); }
       finally { this.saving = false; }
     });
