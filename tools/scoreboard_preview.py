@@ -2,6 +2,7 @@
 import json
 import sys
 import urllib.request
+import uuid
 
 base = sys.argv[1] if len(sys.argv) > 1 else 'http://127.0.0.1:8805'
 with urllib.request.urlopen(base + '/api/scoreboard?map=space&difficulty=easy') as response:
@@ -13,7 +14,7 @@ for map_id, fastest in [('space', 276000), ('forest', 156000), ('ice', 154000), 
         for place, name in enumerate(names):
             total = fastest + index * 310 + place * 2487 + place * place * 93
             lap = total // 3
-            score = dict(name=name,
+            score = dict(runId=str(uuid.uuid4()), name=name,
                          map=map_id, difficulty=level, totalMs=total, lapsMs=[lap + 128, lap - 75, total - lap * 2 - 53], points=45 - place * 2)
             request = urllib.request.Request(base + '/api/scoreboard', data=json.dumps(score).encode(), headers={'Content-Type': 'application/json'})
             with urllib.request.urlopen(request) as response:

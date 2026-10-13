@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 import urllib.error
+import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scoreboard import ScoreStore
@@ -15,7 +16,7 @@ from scoreboard import ScoreStore
 
 def result(i=0, total=180000, map_id='space', difficulty='normal'):
     one = total // 3
-    return dict(name='Pilot ' + str(i), map=map_id, difficulty=difficulty,
+    return dict(runId=str(uuid.uuid4()), name='Pilot ' + str(i), map=map_id, difficulty=difficulty,
                 totalMs=total, lapsMs=[one, one, total - one * 2], points=42)
 
 
@@ -82,6 +83,44 @@ class ScoreboardChecks(unittest.TestCase):
         self.store.submit(another)
         self.assertEqual(self.store.read('space', 'normal')['totalPlayers'], 2)
         self.assertEqual(self.store.read('space', 'normal', 'Pilot 0')['personal']['entry']['totalMs'], 180000)
+
+    def test_same_race_cannot_be_saved_under_another_name(self):
+        score = result(0)
+        self.store.submit(score)
+        replay = self.store.submit({**score, 'name': 'Other name'})
+        self.assertTrue(replay['alreadySubmitted'])
+        self.assertEqual(replay['submittedName'], 'Pilot 0')
+        self.assertEqual(replay['totalPlayers'], 1)
+
+    def test_receipt_survives_a_faster_race_and_restart(self):
+        first = result(0)
+        self.store.submit(first)
+        self.store.submit(result(0, 170000))
+        replay = ScoreStore(self.path).submit({**first, 'name': 'Other name'})
+        self.assertTrue(replay['alreadySubmitted'])
+        self.assertEqual(replay['totalPlayers'], 1)
+        self.assertEqual(replay['personal']['entry']['totalMs'], 170000)
+
+    def test_concurrent_replay_only_keeps_one_name(self):
+        score = result(0)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            replies = list(pool.map(self.store.submit, [score, {**score, 'name': 'Other name'}]))
+        self.assertEqual(sum(r['alreadySubmitted'] for r in replies), 1)
+        self.assertEqual(self.store.read('space', 'normal')['totalPlayers'], 1)
+
+    def test_legacy_record_does_not_gain_a_second_name(self):
+        score = result(0)
+        score.pop('runId')
+        from scoreboard import empty, validate_score
+        old = validate_score(score)
+        old.pop('runId')
+        state = empty()
+        state['boards']['space:normal'] = [old]
+        self.path.write_text(json.dumps(state))
+        replay = self.store.submit({**score, 'name': 'Other name'})
+        self.assertTrue(replay['alreadySubmitted'])
+        self.assertEqual(replay['submittedName'], 'Pilot 0')
+        self.assertEqual(replay['totalPlayers'], 1)
 
     def test_boards_are_separate_and_persist_after_restart(self):
         for map_id in ('space', 'forest', 'ice', 'desert'):

@@ -37,7 +37,7 @@ const stats = (L) => [
 ];
 
 // ("remove the free flight option": the race on the track is the game)
-const MAIN = [['race', 'Race'], ['circuit', 'Circuit'], ['scoreboard', 'Scoreboard'], ['settings', 'Settings'], ['controls', 'Controls'], ['support', 'Support']];
+const MAIN = [['race', 'Race'], ['circuit', 'Circuit'], ['scoreboard', 'Global scoreboard'], ['settings', 'Settings'], ['controls', 'Controls'], ['support', 'Support']];
 // the circuits (main.js loads the one chosen: the page reloads into it)
 export const CIRCUITS = [['space', 'Space', 'The orbital circuit over the ringed gas giant: a colossal broken derelict to thread, upside down through its hold, a meteorite to fly through, a glass tunnel, a loop'],
   ['forest', 'Forest moon', 'High over a jungle moon: floating islands, a river arching over the track, a colossal tree, two kilometres of caverns, a giant\'s skull, home upside down'],
@@ -46,7 +46,7 @@ export const CIRCUITS = [['space', 'Space', 'The orbital circuit over the ringed
 // donations (the author's Revolut)
 const DONATE_URL = 'https://revolut.me/alexan_vic', DONATE_HANDLE = '@alexan_vic';
 const donate = () => window.open(DONATE_URL, '_blank', 'noopener');
-const PAUSE = [['resume', 'Resume'], ['restart', 'Restart race'], ['difficulty', 'Difficulty'], ['scoreboard', 'Scoreboard'], ['settings', 'Settings'],
+const PAUSE = [['resume', 'Resume'], ['restart', 'Restart race'], ['difficulty', 'Difficulty'], ['scoreboard', 'Global scoreboard'], ['settings', 'Settings'],
   ['controls', 'Controls'], ['quit', 'Quit to menu']];
 // a hint along the bottom: its keys and what they do, and clickable like the key ("can only go back pressing Esc"):
 // act - one action for the whole hint, or one per key (the arrows)

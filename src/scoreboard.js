@@ -2,7 +2,7 @@ import { LAPS } from './race.js';
 
 const MAPS = [['space', 'Space'], ['forest', 'Forest'], ['ice', 'Ice'], ['desert', 'Desert']];
 const LEVELS = [['easy', 'Easy'], ['normal', 'Normal'], ['hard', 'Hard'], ['brutal', 'Brutal']];
-const PROFILE = 'need4space.pilot.v1', PENDING = 'need4space.pending-time.v1';
+const PROFILE = 'need4space.pilot.v1', PENDING = 'need4space.pending-time.v1', SAVED = 'need4space.saved-runs.v1';
 const load = (key) => { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } };
 const save = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage unavailable */ } };
 const time = (ms) => {
@@ -22,11 +22,15 @@ export class Scoreboard {
     this.pending = load(PENDING);
     if (!this.pending || !MAPS.some(([id]) => id === this.pending.map) || !LEVELS.some(([id]) => id === this.pending.difficulty)
       || !Number.isInteger(this.pending.totalMs) || !Array.isArray(this.pending.lapsMs) || this.pending.lapsMs.length !== LAPS) this.pending = null;
+    if (this.pending && !this.pending.runId) { this.pending.runId = crypto.randomUUID(); save(PENDING, this.pending); }
+    const receipts = load(SAVED);
+    this.savedRuns = new Map(receipts && typeof receipts === 'object' && !Array.isArray(receipts) ? Object.entries(receipts) : []);
+    if (this.pending && this.savedRuns.has(this.pending.runId)) { this.pending = null; save(PENDING, null); }
     this.map = this.h.map;
     this.level = this.h.settings.v.ai;
     this.cache = new Map();
     this.el = menu.el.querySelector('[data-s="scoreboard"]');
-    this.el.innerHTML = `<div class="sb-heading"><div><div class="m-kicker">Global top 10</div><h2 class="m-h2">Scoreboard</h2></div>
+    this.el.innerHTML = `<div class="sb-heading"><div><div class="m-kicker">Top 10</div><h2 class="m-h2">Global scoreboard</h2></div>
       <span class="sb-connection">Connecting</span></div>
       <div class="sb-body"><div class="sb-toolbar"><div class="sb-filters">
         <div class="sb-tabs" aria-label="Circuit">${MAPS.map(([id, label]) => `<button type="button" data-sb-map="${id}">${label}</button>`).join('')}</div>
@@ -49,7 +53,7 @@ export class Scoreboard {
     this.mark();
   }
 
-  beginRun(level) { this.runLevel = level; this.changed = false; }
+  beginRun(level) { this.runLevel = level; this.changed = false; this.runId = crypto.randomUUID(); this.result = null; }
   difficultyChanged(level) {
     const race = this.h.race;
     if (race?.racing && !race.player.finished && level !== this.runLevel) this.changed = true;
@@ -158,12 +162,13 @@ export class Scoreboard {
     const race = this.h.race, player = race?.player;
     if (!player?.finished || player.laps.length !== LAPS || !Number.isFinite(player.finishTime)) return;
     const slot = document.getElementById('results');
+    slot.querySelector('.sb-result')?.remove();
     const panel = document.createElement('div'); panel.className = 'sb-result'; slot.querySelector('.r-score').after(panel);
     if (this.changed) { panel.textContent = 'Difficulty changed during this race. Finish a race on one difficulty to save its time.'; return; }
-    this.pending = { map: this.h.map, difficulty: this.runLevel,
+    if (!this.result) this.result = { runId: this.runId, map: this.h.map, difficulty: this.runLevel,
       totalMs: Math.round(player.finishTime * 1000), lapsMs: player.laps.map(t => Math.round(t * 1000)), points: race.total };
-    save(PENDING, this.pending);
-    this.submissionForm(panel, this.pending);
+    if (!this.savedRuns.has(this.result.runId)) { this.pending = this.result; save(PENDING, this.pending); }
+    this.submissionForm(panel, this.result);
     this.setName(this.profile.name);
   }
 
@@ -172,27 +177,49 @@ export class Scoreboard {
     if (this.pending) this.submissionForm(slot, this.pending);
   }
 
+  lockForms(runId, locked, receipt) {
+    for (const form of this.menu.el.querySelectorAll('.sb-submit-form')) {
+      if (form.dataset.runId !== runId) continue;
+      const input = form.querySelector('input'), button = form.querySelector('button');
+      if (input) { input.disabled = locked; if (receipt) input.value = receipt.name; }
+      if (button) { button.disabled = locked; if (receipt) button.textContent = 'Saved'; }
+      if (receipt) form.querySelector('.sb-submit-status').textContent = receipt.message;
+    }
+  }
+
+  rememberSaved(score, data) {
+    const name = data.submittedName || data.personal.entry.name;
+    const receipt = { name, message: data.alreadySubmitted ? `Already saved as ${name}`
+      : data.improved ? `Saved · #${data.rank}${data.rank > 10 ? ' · outside the top 10' : ''}` : `Best race kept · ${time(data.personal.entry.totalMs)}` };
+    this.savedRuns.set(score.runId, receipt);
+    save(SAVED, Object.fromEntries([...this.savedRuns].slice(-128)));
+    if (this.pending?.runId === score.runId) { this.pending = null; save(PENDING, null); }
+    this.setName(name);
+    this.lockForms(score.runId, true, receipt);
+  }
+
   submissionForm(slot, score) {
+    if (!score.runId) score.runId = crypto.randomUUID();
+    const receipt = this.savedRuns.get(score.runId);
     slot.innerHTML = `<form class="sb-submit-form"><div class="sb-submit-info"><span>Save your race time</span><b>${time(score.totalMs)}</b><small>${MAPS.find(([id]) => id === score.map)[1]} / ${LEVELS.find(([id]) => id === score.difficulty)[1]}</small></div>
       <label>Racing name <input class="sb-name" name="name" type="text" maxlength="24" autocomplete="nickname" placeholder="Enter your name" required></label>
       <button class="sb-btn sb-save" type="submit">Save time</button><div class="sb-submit-status" role="status"></div></form>`;
-    const form = slot.querySelector('form'), input = form.querySelector('input'); input.value = this.profile.name;
+    const form = slot.querySelector('form'), input = form.querySelector('input'); form.dataset.runId = score.runId; input.value = this.profile.name;
+    this.lockForms(score.runId, !!receipt || this.saving === score.runId, receipt);
     input.addEventListener('input', () => this.setName(input.value));
     form.addEventListener('submit', async e => {
       e.preventDefault();
-      if (this.saving) return;
-      const name = cleanName(input.value), status = form.querySelector('.sb-submit-status'), button = form.querySelector('button');
+      if (this.savedRuns.has(score.runId) || this.saving) return;
+      const name = cleanName(input.value), status = form.querySelector('.sb-submit-status');
       if (!name) { status.textContent = 'Enter your racing name.'; input.focus(); return; }
       this.setName(name); input.value = name;
-      this.saving = true; button.disabled = true; status.textContent = 'Saving…';
+      this.saving = score.runId; this.lockForms(score.runId, true); status.textContent = 'Saving…';
       try {
         const data = await this.request(null, { ...score, name });
         this.cache.set(score.map + ':' + score.difficulty, data);
-        status.textContent = data.improved ? `Saved · #${data.rank}${data.rank > 10 ? ' · outside the top 10' : ''}` : `Best race kept · ${time(data.personal.entry.totalMs)}`;
-        button.textContent = 'Saved';
-        if (this.pending?.totalMs === score.totalMs && this.pending.map === score.map && this.pending.difficulty === score.difficulty) { this.pending = null; save(PENDING, null); }
+        this.rememberSaved(score, data);
         if (this.open && this.map === score.map && this.level === score.difficulty) { this.render(data); this.el.querySelector('.sb-connection').textContent = data.storage === 'local' ? 'Local preview' : 'Global'; }
-      } catch (e) { status.textContent = e.message; button.disabled = false; }
+      } catch (e) { status.textContent = e.message; this.lockForms(score.runId, false); }
       finally { this.saving = false; }
     });
   }

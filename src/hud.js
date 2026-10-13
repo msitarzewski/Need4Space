@@ -192,7 +192,7 @@ export class HUD {
       <div class="r-actions">
         <button class="m-item" data-act="again" tabindex="-1"><kbd>R</kbd>Race again</button>
         <button class="m-item" data-act="difficulty" tabindex="-1">Difficulty</button>
-        <button class="m-item" data-act="scoreboard" tabindex="-1">Scoreboard</button>
+        <button class="m-item" data-act="scoreboard" tabindex="-1">Global scoreboard</button>
         <button class="m-item" data-act="menu" tabindex="-1"><kbd>Esc</kbd>Main menu</button>
       </div>`;
     $('results').classList.remove('hidden');

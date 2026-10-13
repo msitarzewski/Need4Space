@@ -16,6 +16,10 @@ LEVELS = ('easy', 'normal', 'hard', 'brutal')
 LIMIT = 10
 
 
+def legacy_id(score):
+    return 'legacy:' + ':'.join(str(v) for v in [score['totalMs'], *score['lapsMs'], score['points']])
+
+
 def board_key(map_id, difficulty):
     if map_id not in MAPS or difficulty not in LEVELS:
         raise ValueError('Choose a valid circuit and difficulty.')
@@ -43,19 +47,36 @@ def validate_score(data):
     points = data.get('points', 0)
     if isinstance(points, bool) or not isinstance(points, int) or not 0 <= points <= 100000:
         raise ValueError('Invalid points.')
+    run_id = data.get('runId')
+    if run_id is not None and (not isinstance(run_id, str) or not re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', run_id)):
+        raise ValueError('Invalid race identifier.')
     return dict(map=data['map'], difficulty=data['difficulty'], name=name,
                 totalMs=data['totalMs'], bestLapMs=min(laps), lapsMs=laps, points=points,
-                recordedAt=datetime.now(timezone.utc).isoformat())
+                recordedAt=datetime.now(timezone.utc).isoformat(),
+                runId=run_id or legacy_id(dict(totalMs=data['totalMs'], lapsMs=laps, points=points)))
 
 
 def empty():
     return {'schema': 1, 'boards': {}, 'updatedAt': None}
 
 
+def submitted_name(state, key, score):
+    names = state.get('submissions', {}).get(key, {})
+    found = names.get(score['runId']) or names.get(legacy_id(score))
+    if found:
+        return found
+    return next((row['name'] for row in state['boards'].get(key, [])
+                 if row.get('runId') == score['runId'] or not row.get('runId') and legacy_id(row) == legacy_id(score)), None)
+
+
 def merge(state, score):
     state = copy.deepcopy(state)
     key = board_key(score['map'], score['difficulty'])
     rows = state['boards'].setdefault(key, [])
+    submissions = state.setdefault('submissions', {}).setdefault(key, {})
+    for row in rows:
+        submissions.setdefault(row.get('runId') or legacy_id(row), row['name'])
+    submissions[score['runId']] = score['name']
     previous = next((r for r in rows if r['name'].casefold() == score['name'].casefold()), None)
     improved = previous is None or score['totalMs'] < previous['totalMs']
     if improved:
@@ -151,6 +172,12 @@ class ScoreStore:
                 self._ensure_branch()
             for attempt in range(5):
                 state, sha = self._read(key)
+                saved_name = submitted_name(state, key, score)
+                if saved_name:
+                    result = self._board(state, key, saved_name)
+                    result.update(improved=False, rank=result['personal']['rank'] if result['personal'] else None,
+                                  alreadySubmitted=True, submittedName=saved_name, runId=score['runId'])
+                    return result
                 changed, improved = merge(state, score)
                 content = json.dumps(changed, ensure_ascii=False, indent=2) + '\n'
                 if not self.repo:
@@ -170,6 +197,7 @@ class ScoreStore:
                             raise
                         continue
                 result = self._board(changed, key, score['name'])
-                result.update(improved=improved, rank=result['personal']['rank'])
+                result.update(improved=improved, rank=result['personal']['rank'], alreadySubmitted=False,
+                              submittedName=score['name'], runId=score['runId'])
                 return result
         raise RuntimeError('Could not save this time. Try again.')
