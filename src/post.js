@@ -329,15 +329,35 @@ export class DeckSSRPass extends Pass {
     this.valid = false;                                    // the history is another size's: start over
   }
 
+  setReflector(mesh) {
+    this.reflector = mesh;
+    this.maskScene = new THREE.Scene();
+    this.maskScene.matrixWorldAutoUpdate = false;
+    this.maskMesh = new THREE.Mesh(mesh.geometry, this.maskMat);
+    this.maskMesh.matrixAutoUpdate = this.maskMesh.matrixWorldAutoUpdate = false;
+    this.maskMesh.layers.set(this.layer);
+    this.maskScene.add(this.maskMesh);
+  }
+
   render(renderer, writeBuffer, readBuffer) {
-    const cam = this.camera, prevLayers = cam.layers.mask, prevOverride = this.scene.overrideMaterial;
+    // A separate render state keeps this unlit mask from invalidating the main scene's light programs.
+    const scene = this.maskScene || this.scene;
+    if (this.reflector) {
+      const mesh = this.reflector, mask = this.maskMesh;
+      mask.geometry = mesh.geometry;
+      mask.matrixWorld.copy(mesh.matrixWorld);
+      mask.frustumCulled = mesh.frustumCulled;
+      mask.visible = mesh.visible && mesh.material.visible && mesh.layers.isEnabled(this.layer);
+      scene.fog = this.scene.fog;
+    }
+    const cam = this.camera, prevLayers = cam.layers.mask, prevOverride = scene.overrideMaterial;
     cam.layers.set(this.layer);
-    this.scene.overrideMaterial = this.maskMat;
+    scene.overrideMaterial = this.maskMat;
     renderer.setRenderTarget(this.maskRT);
     renderer.setClearColor(0x000000, 0);
     renderer.clear();
-    renderer.render(this.scene, cam);
-    this.scene.overrideMaterial = prevOverride;
+    renderer.render(scene, cam);
+    scene.overrideMaterial = prevOverride;
     cam.layers.mask = prevLayers;
     const u = this.ssr.material.uniforms;
     u.tColor.value = readBuffer.texture;

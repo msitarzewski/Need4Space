@@ -244,6 +244,7 @@ async function boot() {
   const ssr = new DeckSSRPass(scene, camera, gtao);
   if (track) {
     track.parts.deck.layers.enable(5);
+    ssr.setReflector(track.parts.deck);
     composer.addPass(ssr);
   } else ssr.enabled = false;
   // light shafts through the gaps of what stands in front of the sun (a map with air: the forest moon)
