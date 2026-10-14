@@ -136,7 +136,7 @@ export class Menu {
       `<ul class="n-list">${U.notes.map((n) => `<li>${n}</li>`).join('')}</ul></aside>`;
     this.el.innerHTML = `<div class="m-bg"></div><div class="m-fade"></div><div class="m-pulse"></div><div class="m-scan"></div>
       <section class="m-screen" data-s="main">
-        <header><div class="m-kicker">Anti-gravity racing</div><h1 class="m-logo"><span>NEED</span><i>4</i><span>SPACE</span></h1><div class="m-sub">Feather S1 <span class="m-v">v${VERSION}</span></div></header>
+        <header><div class="m-kicker">Anti-gravity racing</div><h1 class="m-logo brand-logo" aria-label="Need4Space"><span class="brand-fallback" aria-hidden="true"><span>NEED</span><i>4</i><span>SPACE</span></span><svg class="brand-mark" viewBox="0 0 2172 440" aria-hidden="true" focusable="false"><use href="#brand-wordmark"/></svg></h1><div class="m-sub">Feather S1 <span class="m-v">v${VERSION}</span></div></header>
         <nav class="m-list">${main.map(item).join('')}</nav>
         <div class="m-desc"></div>
         ${news}
@@ -583,6 +583,11 @@ export class Menu {
   setLevel(id, fx = true, dir = 1) {
     const root = document.documentElement, prev = root.dataset.level;
     root.dataset.level = id;
+    const icon = document.getElementById('game-icon'), iconLevel = IDS.includes(id) ? id : 'normal';
+    if (icon && icon.dataset.level !== iconLevel) {
+      icon.dataset.level = iconLevel;
+      icon.setAttribute('href', `assets/ui/need4space-v1/icon-${iconLevel}.svg`);
+    }
     const name = LEVELS[IDS.indexOf(id)]?.name || id;
     this.el.querySelectorAll('.m-lvl').forEach((e) => (e.textContent = name));
     if (!fx || prev === id) return;

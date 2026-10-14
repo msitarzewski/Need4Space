@@ -6,18 +6,19 @@
 <meta charset="utf-8">
 <meta name="author" content="vengeful180">
 <meta name="copyright" content="(c) 2026 vengeful180. All rights reserved.">
-<meta name="build" content="262cf9b">
+<meta name="build" content="10eee66">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#05070b">
 <title>Need4Space</title>
+<link id="game-icon" rel="icon" type="image/svg+xml" href="assets/ui/need4space-v1/icon-normal.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" href="assets/agx_punchy_lut65.bin" as="fetch" crossorigin>
 <link rel="preload" href="assets/agx_mhc_lut65.bin" as="fetch" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap">
-<link rel="stylesheet" href="src/ui.css?v=20dee00b">
+<link rel="stylesheet" href="src/ui.css?v=2d63ecb5">
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
@@ -56,7 +57,7 @@
   "./src/load-worker.js": "./src/load-worker.js?v=9bbefdba",
   "./src/look.js": "./src/look.js?v=a6cba047",
   "./src/main.js": "./src/main.js?v=51ecd6e4",
-  "./src/menu.js": "./src/menu.js?v=d1093fd8",
+  "./src/menu.js": "./src/menu.js?v=b94e1ce4",
   "./src/music.js": "./src/music.js?v=3c383f64",
   "./src/noise.js": "./src/noise.js?v=342d0df4",
   "./src/overgrowth.js": "./src/overgrowth.js?v=1ba16bf2",
@@ -119,7 +120,7 @@
 <link rel="modulepreload" href="./src/load-math.js?v=e73360f1">
 <link rel="modulepreload" href="./src/look.js?v=a6cba047">
 <link rel="modulepreload" href="./src/main.js?v=51ecd6e4">
-<link rel="modulepreload" href="./src/menu.js?v=d1093fd8">
+<link rel="modulepreload" href="./src/menu.js?v=b94e1ce4">
 <link rel="modulepreload" href="./src/music.js?v=3c383f64">
 <link rel="modulepreload" href="./src/noise.js?v=342d0df4">
 <link rel="modulepreload" href="./src/overgrowth.js?v=1ba16bf2">
@@ -166,6 +167,27 @@
 <!-- preload:end -->
 </head>
 <body data-ui="loading">
+<svg class="brand-defs" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <clipPath id="brand-four"><path d="M960 120H1200L1185 270 1160 320V370L1138 410 1100 450 1090 550H920L950 430H830L870 330 900 300 960 250Z"/></clipPath>
+    <clipPath id="brand-letters"><path clip-rule="evenodd" d="M0 0H2172V724H0Z M960 120H1200L1185 270 1160 320V370L1138 410 1100 450 1090 550H920L950 430H830L870 330 900 300 960 250Z"/></clipPath>
+    <filter id="brand-tint" color-interpolation-filters="sRGB">
+      <feFlood flood-color="var(--accent)" result="paint"/>
+      <feBlend in="SourceGraphic" in2="paint" mode="multiply"/>
+      <feComposite in2="SourceGraphic" operator="in"/>
+    </filter>
+    <filter id="brand-glow" filterUnits="userSpaceOnUse" x="740" y="40" width="570" height="610" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="17" result="blur"/>
+      <feFlood flood-color="var(--accent)" flood-opacity=".52" result="light"/>
+      <feComposite in="light" in2="blur" operator="in" result="halo"/>
+      <feMerge><feMergeNode in="halo"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <symbol id="brand-wordmark" viewBox="0 110 2172 440">
+    <image id="brand-image" href="assets/ui/need4space-v1/wordmark.png" width="2172" height="724" clip-path="url(#brand-letters)"/>
+    <g filter="url(#brand-glow)"><g clip-path="url(#brand-four)"><image href="assets/ui/need4space-v1/wordmark.png" width="2172" height="724" filter="url(#brand-tint)"/></g></g>
+  </symbol>
+</svg>
 <canvas id="view" tabindex="0"></canvas>
 
 <!-- the race HUD (hud.js); hidden behind the title menu and the results -->
@@ -215,11 +237,15 @@
 <div id="results" class="hidden"></div>
 <div id="veil"></div>
 
-<div id="loading"><div><h1>NEED<i>4</i>SPACE</h1><div class="l-bar"><i id="lfill"></i></div><div id="loadtext">Starting</div><div id="loadpct">0 %</div></div></div>
+<div id="loading"><div><h1 class="brand-logo" aria-label="Need4Space"><span class="brand-fallback" aria-hidden="true">NEED<i>4</i>SPACE</span><svg class="brand-mark" viewBox="0 0 2172 440" aria-hidden="true" focusable="false"><use href="#brand-wordmark"/></svg></h1><div class="l-bar"><i id="lfill"></i></div><div id="loadtext">Starting</div><div id="loadpct">0 %</div></div></div>
 <script>
 // The first seconds, before the game's code runs: its files arriving (index.html preloads them all), the bar's first
 // tenth. main.js takes the bar over once it starts (window.__loadTaken).
 (function () {
+  // The title remains readable if the optional image is late or unavailable.
+  var logo = new Image();
+  logo.src = document.getElementById('brand-image').getAttribute('href');
+  logo.decode().then(function () { document.documentElement.classList.add('logo-ready'); }, function () {});
   var want = document.querySelectorAll('link[rel=modulepreload]').length || 40, got = 0, seen = {};
   var fill = document.getElementById('lfill'), txt = document.getElementById('loadtext'), pct = document.getElementById('loadpct');
   function show() {

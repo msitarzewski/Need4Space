@@ -43,6 +43,16 @@ kbd { display: inline-block; min-width: 0.9em; text-align: center; font: 700 0.7
   color: var(--text); background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.2); border-bottom-width: 2px;
   border-radius: 0.2rem; letter-spacing: 0.03em; text-transform: none; white-space: nowrap; }
 
+/* The image title shares one SVG symbol and the existing difficulty accent. */
+.brand-defs { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
+.brand-logo { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; position: relative; }
+.brand-logo > .brand-fallback, .brand-logo > .brand-mark { grid-area: 1 / 1; }
+.brand-mark { display: block; width: 100%; height: auto; overflow: visible; opacity: 0; pointer-events: none; }
+.logo-ready .brand-mark { opacity: 1; }
+.logo-ready .brand-fallback { visibility: hidden; }
+.logo-ready .brand-fallback span { animation: none; }
+#loading h1.brand-logo { width: 10em; max-width: calc(100vw - 3rem); margin-inline: auto; }
+
 /* ---------------------------------------------------------------- loading */
 #loading { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; transition: opacity 0.9s ease;
   background: radial-gradient(ellipse at 50% 58%, #0e141d 0%, #05070a 70%); }
@@ -270,9 +280,10 @@ body.lite .hp { background: linear-gradient(115deg, rgba(9, 13, 19, 0.86), rgba(
 .m-screen[data-s="main"], .m-screen[data-s="pause"] { justify-content: center; }
 .m-logo { margin: 1rem 0 0; font: 900 5.4rem/0.9 var(--display); letter-spacing: 0.08em; color: #fff; white-space: nowrap;
   text-shadow: 0 0.4rem 2rem rgba(0, 0, 0, 0.5); }
+.m-logo.brand-logo { width: 10em; max-width: 100%; }
 .m-logo b { margin-left: 0.32em; font-size: 0.42em; vertical-align: top; color: var(--accent); letter-spacing: 0.05em;
   text-shadow: 0 0 1.4rem color-mix(in srgb, var(--accent) 70%, transparent); }
-.m-logo span { position: relative; display: inline-block; background: linear-gradient(100deg, #fff 40%, #cfe9ff 50%, #fff 60%) 0 0 / 300% 100%;
+.m-logo .brand-fallback > span { position: relative; display: inline-block; background: linear-gradient(100deg, #fff 40%, #cfe9ff 50%, #fff 60%) 0 0 / 300% 100%;
   -webkit-background-clip: text; background-clip: text; color: transparent; animation: shine 7s ease-in-out 0.6s infinite; }
 @keyframes shine { 0%, 70% { background-position: 100% 0; } 100% { background-position: 0 0; } }
 .m-sub { margin-top: 1rem; font: 600 1rem var(--ui); letter-spacing: 0.32em; text-transform: uppercase; color: var(--dim); }
