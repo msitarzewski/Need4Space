@@ -333,7 +333,10 @@ export class Menu {
   items() {
     const s = this.screen;
     if (s !== 'main' && s !== 'pause' && s !== 'results' && s !== 'circuit') return [];
-    return [...this.el.querySelectorAll(`.m-screen[data-s="${s}"] .m-item`)];
+    const list = [...this.el.querySelectorAll(`.m-screen[data-s="${s}"] .m-item`)];
+    // a finished race not yet saved: Save time first in the row, so Enter / A saves (or goes to the name)
+    const save = s === 'results' && this.el.querySelector('#results .sb-save:not(:disabled)');
+    return save ? [save, ...list] : list;
   }
 
   refresh() {
@@ -482,7 +485,7 @@ export class Menu {
 
   ok() {
     const s = this.screen;
-    if (s === 'scoreboard') { this.board.refresh(); return; }
+    if (s === 'scoreboard') { if (!this.board.saveFromMenu()) this.board.refresh(); return; }
     if (s === 'diff') { this.confirmDiff(); return; }
     if (s === 'settings') {
       if (this.h.settings.focusKey === 'ai') { ui('select'); this.go('diff', 'apply'); } else if (this.h.settings.cycle(1, true)) ui('move');
@@ -491,7 +494,8 @@ export class Menu {
     if (s === 'controls') { this.back(); return; }
     if (s === 'support') { this.act('donate'); return; }
     const it = this.items()[this.sel[s] || 0];
-    if (it) this.act(it.dataset.act);
+    if (it?.classList.contains('sb-save')) this.board.saveFromMenu();
+    else if (it) this.act(it.dataset.act);
   }
 
   back(silent) {

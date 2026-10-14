@@ -345,7 +345,9 @@ async function boot() {
     const half = aoRes === 'half' || (aoRes === 'auto' && innerWidth * innerHeight * (pixelRatio * renderScale) ** 2 > 2560 * 1440 * 1.1);
     if (half !== aoHalf) { aoHalf = half; if (gtao.fullSize) gtao.setSize(...gtao.fullSize); }
   };
+  let redraw = 2;                                          // frames still to draw while paused (see frame())
   const resize = () => {
+    redraw = 2;
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
     renderer.setPixelRatio(pixelRatio);                      // the canvas: the screen's own pixels
@@ -413,6 +415,7 @@ async function boot() {
     touch.setPref(v.touch);                           // the on-screen sticks: Auto (a phone or tablet) / On / Off
     audio.lite = !!v.laptop;                          // (fewer rival voices; its buffer is set when the sound starts)
     audio.setLevels(v.music, v.sfx);                 // music and effects volume
+    redraw = 2;                                      // (a paused picture shows the change behind the settings)
   }, integratedGPU(gpuName) || isTouch());             // (a phone or tablet: Laptop mode on a first visit too)
 
   const lap = { started: false, time: 0, last: Infinity, best: Infinity, lap: 1, idx: START, progress: 0, s: 0 };
@@ -518,12 +521,19 @@ async function boot() {
       cam: rig.mode, crashed: ctl.crashed, lap: lap.lap, lapTime: lap.time }) };
 
   let fpsN = 0, fpsT = 0;
+  // A paused game is a still picture: drawn twice after anything changes (pausing, a setting, the window), then left
+  // on the screen - the menus over it no longer cost a whole frame of the world at every refresh. (Drawing only every
+  // other frame behind the title's darker screens made the browser throttle the page to ~1 frame a second: every frame
+  // is drawn while the world moves.)
+  let wasPaused = false;
   function frame(now) {
     // (a frame's time held to 0.1 s at most: with 0.05 a slow GPU's long frames each lost time - a hitch in the motion)
     const raw = (now - last) / 1000, dt = Math.min(0.1, raw);
     last = now;
+    if (menu.paused !== wasPaused) { wasPaused = menu.paused; redraw = 2; }
     tick(menu.paused ? 0 : dt);                          // paused: a frame with no time in it (no physics, nothing moves)
-    render();
+    if (!menu.paused) render();
+    else if (redraw > 0) { redraw--; render(); }
     fpsN++; fpsT += raw;
     if (fpsT > 0.5) { fpsEl.textContent = `${Math.round(fpsN / fpsT)} fps  ${(1000 * fpsT / fpsN).toFixed(1)} ms`; fpsN = fpsT = 0; }
     requestAnimationFrame(frame);

@@ -102,11 +102,23 @@ export class Scoreboard {
     if (this.menu.ctx === 'results' && this.result) { this.map = this.result.map; this.level = this.result.difficulty; }
     this.mark();
     this.renderPending();
-    this.refresh();
+    // just saved: the board came back with the save - show it at once, no second request
+    if (!(this.fresh && this.fresh.key === this.map + ':' + this.level && performance.now() - this.fresh.t < 10000)) this.refresh();
     this.poll = setInterval(() => { if (document.visibilityState === 'visible') this.refresh(true); }, 15000);
   }
 
   choose(map, level) { this.map = map; this.level = level; this.mark(); this.refresh(); }
+
+  // Enter / A on a save form from the menu: save under the name typed (or remembered), or go to the name field.
+  // False when there is nothing to save on this screen.
+  saveFromMenu() {
+    const scope = this.menu.screen === 'results' ? document.getElementById('results') : this.el;
+    const form = [...scope.querySelectorAll('.sb-submit-form')].find((f) => !f.querySelector('.sb-save').disabled);
+    if (!form) return false;
+    const input = form.querySelector('.sb-name');
+    if (cleanName(input.value)) form.requestSubmit(); else input.focus();
+    return true;
+  }
   nav(dir) {
     const values = Math.abs(dir) === 1 ? MAPS : LEVELS, key = Math.abs(dir) === 1 ? 'map' : 'level';
     const i = values.findIndex(([id]) => id === this[key]);
@@ -161,6 +173,14 @@ export class Scoreboard {
     this.el.querySelector('.sb-personal').hidden = !data.personal;
     this.el.querySelector('.sb-personal b').textContent = time(data.personal?.entry.totalMs);
     this.el.querySelector('.sb-personal-rank').textContent = data.personal ? `#${data.personal.rank} of ${data.totalPlayers}` : '';
+    // the race just saved: its row (or, outside the top ten, the personal line) lights up and comes into view
+    if (this.fresh && this.fresh.key === this.map + ':' + this.level && performance.now() - this.fresh.t < 2500) {
+      const mine = body.querySelector('tr.me') || (!this.el.querySelector('.sb-personal').hidden && this.el.querySelector('.sb-personal'));
+      if (mine) {
+        mine.classList.remove('sb-fresh'); void mine.offsetWidth; mine.classList.add('sb-fresh');
+        requestAnimationFrame(() => mine.scrollIntoView({ block: 'nearest' }));
+      }
+    }
   }
 
   captureResult() {
@@ -225,7 +245,10 @@ export class Scoreboard {
       try {
         const data = await this.request(null, { ...score, name });
         this.cache.set(score.map + ':' + score.difficulty, data);
+        this.fresh = { key: score.map + ':' + score.difficulty, t: performance.now() };
         this.rememberSaved(score, data);
+        // saved from the results: straight on to the board, the new time lit up (Esc comes back)
+        if (this.menu.screen === 'results') { this.menu.sel.results = 0; this.menu.go('scoreboard'); }
         if (this.open && this.map === score.map && this.level === score.difficulty) {
           this.render(data);
           this.el.querySelector('.sb-connection').textContent = data.storage === 'local' ? 'Local preview' : 'Global';
