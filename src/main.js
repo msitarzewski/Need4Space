@@ -216,11 +216,25 @@ async function boot() {
   const noAO = () => [...(world.noAO || []), ...ship.fxObjects(), ...fx.pools.map((p) => p.points), fx.streaks.lines, fx.ring, fx.marks.mesh, fx.trails.mesh,
     ...(tp ? [...tp.fields, ...tp.pads, ...tp.lanes, ...tp.gates.filter((m) => m.material.isShaderMaterial), ...(tp.flips || []).filter((m) => m.material.transparent), tp.tunnel[0]].filter(Boolean) : []), ...(race ? race.noAO() : []), ...fx.waves,
     ...(world.dust ? [world.dust] : [])];
-  gtao.render = (...a) => {        // glows, plumes, trails, particles, fields and decals must not occlude anything
+  gtao.render = (renderer, writeBuffer, readBuffer, ...args) => { // glows, plumes, trails, particles, fields and decals must not occlude anything
     const hide = noAO().filter((o) => o.visible);
     hide.forEach((o) => (o.visible = false));
-    gtaoRender(...a);
-    hide.forEach((o) => (o.visible = true));
+    const output = gtao.output, inPlace = output === GTAOPass.OUTPUT.Default && !gtao.renderToScreen;
+    gtao.needsSwap = !inPlace;
+    try {
+      if (inPlace) gtao.output = GTAOPass.OUTPUT.Off;
+      gtaoRender(renderer, writeBuffer, readBuffer, ...args);
+      if (inPlace) {
+        // Multiply AO into the existing HDR colour buffer, saving its full-frame copy.
+        const blend = gtao.blendMaterial;
+        blend.uniforms.intensity.value = gtao.blendIntensity;
+        blend.uniforms.tDiffuse.value = gtao.pdRenderTarget.texture;
+        gtao.renderPass(renderer, blend, readBuffer);
+      }
+    } finally {
+      gtao.output = output;
+      hide.forEach((o) => (o.visible = true));
+    }
   };
   composer.addPass(gtao);
   // reflections on the deck (uses the AO pass's depth and normals: off with AO)
