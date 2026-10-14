@@ -227,6 +227,18 @@ async function boot() {
   };
   const gtaoDispose = gtao.dispose.bind(gtao);
   gtao.dispose = () => { normalMaterials.forEach((m, i) => { if (i) m.dispose(); }); gtaoDispose(); };
+  // Point and line pools are all created before warm-up; only their visibility changes during a race.
+  let aoNonMeshes;
+  const aoHidden = [];
+  gtao.overrideVisibility = () => {
+    if (!aoNonMeshes) {
+      aoNonMeshes = [];
+      scene.traverse((o) => { if (o.isPoints || o.isLine) aoNonMeshes.push(o); });
+    }
+    aoHidden.length = 0;
+    for (const o of aoNonMeshes) if (o.visible) { aoHidden.push(o); o.visible = false; }
+  };
+  gtao.restoreVisibility = () => { for (const o of aoHidden) o.visible = true; aoHidden.length = 0; };
   const gtaoRender = gtao.render.bind(gtao);
   // AO at half resolution when asked (or by itself above 1440p): its own targets at half size, blended back onto the
   // full frame (2.1 ms -> ~0.6 ms at 4K; AO is soft anyway)
