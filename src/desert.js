@@ -185,10 +185,10 @@ export class DesertWorld {
     for (const m of g.near) { m.layers.set(2); if (m.castShadow) m.layers.enable(6); scene.add(m); }
     for (const m of g.far) { m.layers.set(3); scene.add(m); }
     this.groundMeshes = [...g.near, ...g.far];
-    // (drawn after every other opaque thing - the deck, the ships hide much of it and the depth test skips those
-    // pixels; and out of the ambient occlusion's own pass)
+    // Draw after other opaque meshes so their depth can skip hidden terrain pixels.
     for (const m of this.groundMeshes) m.renderOrder = 1;
-    this.noAO.push(...this.groundMeshes);
+    // Block AO from buried scenery, but keep the terrain's baked shading without screen-space self-occlusion.
+    this.aoOccluders = this.groundMeshes;
   }
 
   // Where the city's towers stand (before the dunes: sand piles against them): along the slalom either side, two

@@ -209,6 +209,17 @@ async function boot() {
   gtao.blendIntensity = 1.0;
   gtao.updateGtaoMaterial({ radius: 0.9, distanceExponent: 1.6, thickness: 2.0, scale: 1.15, samples: 16 });
   gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
+  const aoOccluders = world.aoOccluders && new Set(world.aoOccluders);
+  if (aoOccluders?.size) {
+    // Normal-buffer alpha marks baked surfaces that occlude objects behind them without receiving AO.
+    // Skip both AO evaluation and denoising so steep terrain cannot acquire moving self-occlusion patches.
+    const depth = 'float depth = getDepth(vUv.xy);';
+    const mask = 'if (textureLod(tNormal, vUv, 0.0).a < 0.5) { gl_FragColor = vec4(1.0); return; }\n';
+    for (const m of [gtao.gtaoMaterial, gtao.pdMaterial]) {
+      if (!m.fragmentShader.includes(depth)) throw new Error('AO shader changed: occluder mask not applied');
+      m.fragmentShader = m.fragmentShader.replace(depth, mask + depth);
+    }
+  }
   // Keep each mesh layout's normal-program state instead of changing it for every draw.
   const normalMaterials = [gtao.normalMaterial], normalOverride = gtao.renderOverride.bind(gtao);
   gtao.renderOverride = (renderer, material, ...args) => {
@@ -217,8 +228,13 @@ async function boot() {
     renderer.renderBufferDirect = function (camera, scene, geometry, drawMaterial, object, group) {
       if (drawMaterial === material) {
         const key = (object.isInstancedMesh ? 1 : 0) | (object.instanceColor ? 2 : 0) | (object.isSkinnedMesh ? 4 : 0)
-          | (geometry.morphAttributes.position ? 8 : 0) | (geometry.morphAttributes.normal ? 16 : 0);
-        drawMaterial = normalMaterials[key] ||= material.clone();
+          | (geometry.morphAttributes.position ? 8 : 0) | (geometry.morphAttributes.normal ? 16 : 0)
+          | (aoOccluders?.has(object) ? 32 : 0);
+        if (!normalMaterials[key]) {
+          normalMaterials[key] = material.clone();
+          if (key & 32) normalMaterials[key].opacity = 0;
+        }
+        drawMaterial = normalMaterials[key];
       }
       return direct.call(this, camera, scene, geometry, drawMaterial, object, group);
     };
