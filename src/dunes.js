@@ -346,7 +346,6 @@ export class Dunes {
 const TILE_GEN = /* glsl */`
   precision highp float;
   varying vec2 vUv;
-  uniform int mode;
   uniform float texel;
   float h12(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
   float vn(vec2 p, vec2 per) {
@@ -373,12 +372,15 @@ const TILE_GEN = /* glsl */`
   }
   void main() {
     vec4 F = field(vUv);
-    if (mode == 0) { gl_FragColor = vec4(F.xyz, clamp(F.w * 4.0 + 0.2, 0.0, 1.0)); return; }
+    #if BAKE_MODE == 0
+    gl_FragColor = vec4(F.xyz, clamp(F.w * 4.0 + 0.2, 0.0, 1.0));
+    #else
     float e = texel;
     float hx = field(vUv + vec2(e, 0.0)).w - field(vUv - vec2(e, 0.0)).w;
     float hy = field(vUv + vec2(0.0, e)).w - field(vUv - vec2(0.0, e)).w;
     vec2 g = vec2(hx, hy) / (2.0 * e * ${SAND_TILE.toFixed(1)});
     gl_FragColor = vec4(clamp(g * 2.0 + 0.5, 0.0, 1.0), 0.0, 1.0);
+    #endif
   }
 `;
 
@@ -391,7 +393,7 @@ export function sandMaps(renderer) {
     const rt = new THREE.WebGLRenderTarget(S, S, { depthBuffer: false, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter,
       magFilter: THREE.LinearFilter, wrapS: THREE.RepeatWrapping, wrapT: THREE.RepeatWrapping, colorSpace: THREE.NoColorSpace });
     rt.texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-    const quad = new FullScreenQuad(new THREE.ShaderMaterial({ uniforms: { mode: { value: mode }, texel: { value: 1 / S } },
+    const quad = new FullScreenQuad(new THREE.ShaderMaterial({ defines: { BAKE_MODE: mode }, uniforms: { texel: { value: 1 / S } },
       vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`, fragmentShader: TILE_GEN }));
     for (let k = 0; k < 4; k++) {
       bakeLater(k ? [] : [quadJob(quad)], () => {

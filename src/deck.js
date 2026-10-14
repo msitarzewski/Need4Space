@@ -17,7 +17,6 @@ const COMMON = /* glsl */`
   varying vec2 vUv;
   uniform vec2 size;                  // metres the texture covers
   uniform float texel;                // metres a texel
-  uniform int mode;
   float h12(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
   vec2 h22(vec2 p) { vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973)); q += dot(q, q.yzx + 33.33); return fract((q.xx + q.yz) * q.zy); }
   // value noise on a lattice repeating every per cells (p in cells), quintic
@@ -158,19 +157,19 @@ const DETAILS = /* glsl */`
 const FRAG = /* glsl */`
   void main() {
     vec2 m = vUv * size;
-    if (mode == 0) {
+    #if BAKE_MODE == 0
       gl_FragColor = vec4(albedo(m), 1.0);
-    } else if (mode == 1) {
+    #elif BAKE_MODE == 1
       // the normal from the height's slope (mm over metres): one texel either way
       float e = texel;
       float dx = (height(m + vec2(e, 0.0)) - height(m - vec2(e, 0.0))) * 0.001 / (2.0 * e);
       float dy = (height(m + vec2(0.0, e)) - height(m - vec2(0.0, e))) * 0.001 / (2.0 * e);
       vec3 n = normalize(vec3(-dx, -dy, 1.0));
       gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);
-    } else {
+    #else
       float r = rough(m);
       gl_FragColor = vec4(r, r, r, 1.0);
-    }
+    #endif
   }
 `;
 
@@ -181,7 +180,8 @@ function bake(renderer, body, metres, res, mode, srgb) {
   });
   rt.texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
   const quad = new FullScreenQuad(new THREE.ShaderMaterial({
-    uniforms: { size: { value: new THREE.Vector2(...metres) }, texel: { value: metres[0] / res }, mode: { value: mode } },
+    defines: { BAKE_MODE: mode },
+    uniforms: { size: { value: new THREE.Vector2(...metres) }, texel: { value: metres[0] / res } },
     vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
     fragmentShader: COMMON + body + FRAG,
   }));

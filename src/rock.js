@@ -15,7 +15,6 @@ import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 const GEN = /* glsl */`
   precision highp float;
   varying vec2 vUv;
-  uniform int mode;
   float h12(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
   vec2 h22(vec2 p) { vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973)); q += dot(q, q.yzx + 33.33); return fract((q.xx + q.yz) * q.zy); }
   float vn(vec2 p, float per) {
@@ -78,13 +77,12 @@ const GEN = /* glsl */`
   }
   void main() {
     vec2 uv = vUv;
-    if (mode == 1) {                                                  // normal from the relief, height in alpha
+    #if BAKE_MODE == 1                                                // normal from the relief, height in alpha
       float e = 1.0 / 2048.0;
       float dx = (height(uv + vec2(e, 0.0)) - height(uv - vec2(e, 0.0))) / (2.0 * e);
       float dy = (height(uv + vec2(0.0, e)) - height(uv - vec2(0.0, e))) / (2.0 * e);
       gl_FragColor = vec4(normalize(vec3(-dx, -dy, 1.0)) * 0.5 + 0.5, clamp(0.5 + height(uv) * 9.0, 0.0, 1.0));
-      return;
-    }
+    #else
     // albedo VARIATION round 1 (stored halved): gentle, no blotches - weathered vs fresher patches, darker fractures,
     // a few bright young craters, mineral flecks
     float cr = cracks(uv);
@@ -96,6 +94,7 @@ const GEN = /* glsl */`
     vec3 tint = mix(vec3(1.0), vec3(1.05, 0.99, 0.93), smoothstep(0.35, 0.7, fbm(uv * 2.0 + 13.0, 2.0, 4)));
     float rough = 0.86 + 0.08 * cr - 0.06 * fbm(uv * 9.0 + 1.0, 9.0, 3);
     gl_FragColor = vec4(clamp(v * tint * 0.5, 0.0, 1.0), rough);
+    #endif
   }
 `;
 
@@ -112,7 +111,7 @@ export function rockMaps(renderer) {
     const rt = new THREE.WebGLRenderTarget(S, S, { depthBuffer: false, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter,
       magFilter: THREE.LinearFilter, wrapS: THREE.RepeatWrapping, wrapT: THREE.RepeatWrapping, colorSpace: THREE.NoColorSpace });
     rt.texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-    const quad = new FullScreenQuad(new THREE.ShaderMaterial({ uniforms: { mode: { value: mode } },
+    const quad = new FullScreenQuad(new THREE.ShaderMaterial({ defines: { BAKE_MODE: mode },
       vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`, fragmentShader: GEN }));
     // in four strips, each a bake of its own (the colour pass is ~50 ms in one go on a fast GPU; mips after the last)
     for (let k = 0; k < 4; k++) {

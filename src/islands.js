@@ -183,7 +183,6 @@ export function islandShape(I) {
 const GEN = /* glsl */`
   precision highp float;
   varying vec2 vUv;
-  uniform int mode;
   float h12(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
   vec2 h22(vec2 p) { vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973)); q += dot(q, q.yzx + 33.33); return fract((q.xx + q.yz) * q.zy); }
   float vn(vec2 p, float per) {
@@ -221,14 +220,13 @@ const GEN = /* glsl */`
   void main() {
     vec2 uv = vUv;
     float joint, bid;
-    if (mode == 1) {
+    #if BAKE_MODE == 1
       float e = 1.0 / 2048.0, j2, b2;
       float dx = (height(uv + vec2(e, 0.0), j2, b2) - height(uv - vec2(e, 0.0), j2, b2)) / (2.0 * e);
       float dy = (height(uv + vec2(0.0, e), j2, b2) - height(uv - vec2(0.0, e), j2, b2)) / (2.0 * e);
       float h = height(uv, joint, bid);
       gl_FragColor = vec4(normalize(vec3(-dx, -dy, 1.0)) * 0.5 + 0.5, clamp(0.5 + h * 12.0, 0.0, 1.0));
-      return;
-    }
+    #else
     float h = height(uv, joint, bid);
     // albedo variation round 1 (stored halved): block faces each their own shade, darker joints and pits, lichen
     float v = 0.82 + 0.36 * bid;
@@ -239,6 +237,7 @@ const GEN = /* glsl */`
     vec3 c = vec3(v) * mix(vec3(1.0), vec3(1.25, 1.2, 0.95), lichen);
     float rough = 0.82 + 0.1 * joint - 0.06 * lichen;
     gl_FragColor = vec4(clamp(c * 0.5, 0.0, 1.0), rough);
+    #endif
   }
 `;
 const U = { islCol: { value: null }, islNrm: { value: null } };
@@ -250,7 +249,7 @@ export function islandMaps(renderer) {
     const rt = new THREE.WebGLRenderTarget(S, S, { depthBuffer: false, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter,
       magFilter: THREE.LinearFilter, wrapS: THREE.RepeatWrapping, wrapT: THREE.RepeatWrapping, colorSpace: THREE.NoColorSpace });
     rt.texture.anisotropy = 4;                     // (16x on 4-8 taps a pixel, the cliffs seen edge-on: ~0.7 ms)
-    const quad = new FullScreenQuad(new THREE.ShaderMaterial({ uniforms: { mode: { value: mode } },
+    const quad = new FullScreenQuad(new THREE.ShaderMaterial({ defines: { BAKE_MODE: mode },
       vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`, fragmentShader: GEN }));
     for (let k = 0; k < 4; k++) {
       bakeLater(k ? [] : [quadJob(quad)], () => {
