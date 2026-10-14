@@ -79,7 +79,7 @@ async function boot() {
   Q.tier = memoryTier(renderer, gpuName, isTouch(), !!savedSettings().laptop);
   const jobLoad = beginLoadJobs(MAP === 'forest');
   const bakedLoad = preloadBakedTextures(MAP);
-  console.info(`GPU: ${gpuName} - memory tier ${Q.tier}${integratedGPU(gpuName) ? ' (integrated: Laptop mode on a first visit)' : ''}`);
+  console.info(`GPU: ${gpuName} - memory tier ${Q.tier}${integratedGPU(gpuName) ? ' (integrated: Low graphics on a first visit)' : ''}`);
   agxLoad.catch(() => {});
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setSize(innerWidth, innerHeight);
@@ -843,7 +843,7 @@ boot().catch((e) => {
   console.error(e);
   const gl = document.getElementById('view').getContext('webgl2');
   if (gl?.isContextLost?.() || /WebGLShader|WebGLProgram|context/i.test(String(e.message)))
-    status('The graphics ran out of memory loading the game - close other tabs and reload (Settings > Laptop mode helps)');
+    status('The graphics ran out of memory loading the game - close other tabs and reload (Settings > Graphics quality > Low helps)');
   else status(`Failed to start: ${e.message || e}`);
   document.getElementById('loading').classList.add('error');
 });

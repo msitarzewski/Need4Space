@@ -2,6 +2,14 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.2.1', date: '15 Oct 2026', name: 'Graphics presets',
+    notes: [
+      'Graphics quality in Settings: Low (laptop), Balanced and High',
+      'Balanced: about a third lighter on the GPU than High, the look nearly the same',
+      'Low is the old Laptop mode; changing any option by hand shows Custom',
+    ],
+  },
+  {
     version: '1.2', date: '15 Oct 2026', name: 'Global scoreboard',
     notes: [
       'A global top 10 for every circuit and difficulty',

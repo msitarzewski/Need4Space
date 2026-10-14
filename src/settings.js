@@ -7,12 +7,27 @@ export const DEFAULTS = { tonemap: 'aces', ao: true, bloom: true, shadows: 'high
   brakeLights: true, laptop: false, touch: 'auto', map: 'space', shafts: true, lensWater: true, iceSnow: true, iceDust: true, aurora: true,
   iceStorm: true, iceGeysers: true, wreckFx: true, wreckMist: true, drift: false, airPitch: true, sandFx: true, dustDevils: true, heatHaze: true,
   sandstorm: true, caveFx: true, canyonAO: true };
-// Laptop mode's picture (quality.js has what else it cuts); turned off, the rows go back to what they were. The render
-// scale stays at 100 %: with the rest cut, a laptop's integrated GPU holds it (tested on a Core Ultra 5 235U)
-const LAPTOP = { scale: 1, aa: 'smaa1', ao: false, reflections: false, shadows: 'off', streaks: false, blur: false, shafts: false,
-  iceSnow: false, iceDust: false, iceGeysers: false, wreckFx: false, wreckMist: false, sandFx: false, dustDevils: false, heatHaze: false, caveFx: false };
+// Graphics quality presets ("low, which would be laptop, balanced in between, and high the actual default"): each sets
+// the rows below at once; a row changed by hand afterwards shows the preset as Custom. Low is Laptop mode (quality.js:
+// the lite shaders and fewer lights as well - tested on a Core Ultra 5 235U; the render scale stays at 100 %), High
+// the defaults. Balanced keeps every material and light and most of the look, and halves the costly parts: MSAA 2x,
+// AO at half resolution, medium shadows, no deck reflections, the heaviest weather left out.
+const PRESET_KEYS = ['laptop', 'scale', 'aa', 'ao', 'aoRes', 'reflections', 'shadows', 'streaks', 'blur', 'shafts', 'iceSnow', 'iceDust',
+  'iceGeysers', 'wreckFx', 'wreckMist', 'sandFx', 'dustDevils', 'heatHaze', 'caveFx'];
+export const PRESETS = {
+  low: { laptop: true, scale: 1, aa: 'smaa1', ao: false, aoRes: 'auto', reflections: false, shadows: 'off', streaks: false, blur: false,
+    shafts: false, iceSnow: false, iceDust: false, iceGeysers: false, wreckFx: false, wreckMist: false, sandFx: false, dustDevils: false,
+    heatHaze: false, caveFx: false },
+  balanced: { laptop: false, scale: 1, aa: 'fast', ao: true, aoRes: 'half', reflections: false, shadows: 'medium', streaks: true, blur: true,
+    shafts: true, iceSnow: true, iceDust: false, iceGeysers: true, wreckFx: true, wreckMist: false, sandFx: true, dustDevils: false,
+    heatHaze: false, caveFx: true },
+  high: Object.fromEntries(PRESET_KEYS.map((k) => [k, DEFAULTS[k]])),
+};
+// which preset the rows match now (or 'custom')
+export const presetOf = (v) => Object.keys(PRESETS).find((p) => PRESET_KEYS.every((k) => v[k] === PRESETS[p][k])) || 'custom';
 // (AI difficulty: the rivals, race.js AI_LEVELS - Normal a fair fight, Hard close to a flawless lap, Brutal at it)
 const ROWS = [
+  ['quality', 'Graphics quality', [['low', 'Low (laptop)'], ['balanced', 'Balanced'], ['high', 'High'], ['custom', 'Custom']]],
   ['ai', 'AI difficulty', [['easy', 'Easy'], ['normal', 'Normal'], ['hard', 'Hard'], ['brutal', 'Brutal']]],
   ['drift', 'Drift (touch the brake, turn hard)', [[true, 'On'], [false, 'Off']]],
   ['airPitch', 'Nose control in the air', [[true, 'On'], [false, 'Off']]],
@@ -44,14 +59,13 @@ const ROWS = [
   ['wreckMist', 'Derelict: coolant mist, sun beams (space)', [[true, 'On'], [false, 'Off']]],
   ['caveFx', 'Cave: daylight beams, spray, glowworms (forest moon)', [[true, 'On'], [false, 'Off']]],
   ['brakeLights', 'Brake lights', [[true, 'On'], [false, 'Off']]],
-  ['laptop', 'Laptop mode (integrated GPU)', [[false, 'Off'], [true, 'On']]],
   ['shadows', 'Shadows', [['high', 'High'], ['medium', 'Medium'], ['off', 'Off']]],
   ['scale', 'Render scale', [[0.5, '50%'], [0.75, '75%'], [1, '100%'], [1.25, '125%'], [1.5, '150%']]],
   ['fps', 'FPS readout', [[true, 'On'], [false, 'Off']]],
 ];
 
 // the headings the rows fall under (in the menu's Settings screen)
-const GROUPS = { ai: 'Race', music: 'Audio', touch: 'Controls', tonemap: 'Picture', ao: 'Effects', laptop: 'Performance' };
+const GROUPS = { quality: 'Graphics', ai: 'Race', music: 'Audio', touch: 'Controls', tonemap: 'Picture', ao: 'Effects', shadows: 'Performance' };
 
 // the saved settings as they are (main.js reads Laptop mode before the ship loads)
 export function savedSettings() {
@@ -59,13 +73,15 @@ export function savedSettings() {
 }
 
 export class Settings {
-  // integrated: the GPU looks built-in (quality.js) - a first visit starts in Laptop mode
+  // integrated: the GPU looks built-in (quality.js) - a first visit starts on Low (Laptop mode)
   constructor(apply, integrated = false) {
     this.apply = apply;
     this.v = { ...DEFAULTS };
     let saved = null;
     try { saved = localStorage.getItem(KEY); Object.assign(this.v, JSON.parse(saved || '{}')); } catch { /* private window */ }
-    if (!saved && integrated) this.laptop(true);
+    if (!saved && integrated) Object.assign(this.v, PRESETS.low);
+    delete this.v.beforeLaptop;                      // (what the old Laptop switch kept to restore: the presets do that now)
+    this.v.quality = presetOf(this.v);
     // Normal is the default difficulty: a Hard saved before the player ever chose one goes back to it
     if (!this.v.aiPicked) this.v.ai = DEFAULTS.ai;
     // and the music's level High, unless one was chosen
@@ -90,21 +106,10 @@ export class Settings {
     apply(this.v);
   }
 
-  // Laptop mode on: its rows set (what they were kept); off: those rows back
-  laptop(on) {
-    if (on && !this.v.laptop) {
-      this.v.beforeLaptop = Object.fromEntries(Object.keys(LAPTOP).map((k) => [k, this.v[k]]));
-      Object.assign(this.v, LAPTOP);
-    } else if (!on && this.v.laptop) {
-      Object.assign(this.v, this.v.beforeLaptop || Object.fromEntries(Object.keys(LAPTOP).map((k) => [k, DEFAULTS[k]])));
-      delete this.v.beforeLaptop;
-    }
-    this.v.laptop = on;
-  }
-
   set(k, val) {
-    if (k === 'laptop') this.laptop(val);
+    if (k === 'quality') { if (!PRESETS[val]) return; Object.assign(this.v, PRESETS[val]); }   // (Custom is only shown)
     this.v[k] = val;
+    this.v.quality = presetOf(this.v);
     if (k === 'ai') this.v.aiPicked = true;
     if (k === 'music') this.v.musicPicked = true;
     if (k === 'drift') this.v.driftPicked = true;
@@ -128,7 +133,7 @@ export class Settings {
   }
 
   cycle(d, wrap = false) {
-    const [k, , opts] = ROWS[this.focus], n = opts.length;
+    const [k, , all] = ROWS[this.focus], opts = all.filter(([val]) => val !== 'custom'), n = opts.length;
     const i = opts.findIndex(([val]) => val === this.v[k]);
     let j = i + d;
     if (wrap) j = (j + n) % n; else j = Math.max(0, Math.min(n - 1, j));
@@ -139,7 +144,8 @@ export class Settings {
   mark() { this.el.querySelectorAll('.srow').forEach((r) => r.classList.toggle('focus', +r.dataset.r === this.focus)); }
 
   draw() {
-    this.el.innerHTML = ROWS.map(([k, label, opts], r) => (GROUPS[k] ? `<div class="s-group">${GROUPS[k]}</div>` : '') +
+    this.el.innerHTML = ROWS.map(([k, label, all], r) => [k, label, all.filter(([val]) => val !== 'custom' || this.v.quality === 'custom'), r])
+      .map(([k, label, opts, r]) => (GROUPS[k] ? `<div class="s-group">${GROUPS[k]}</div>` : '') +
       `<div class="srow${r === this.focus ? ' focus' : ''}" data-r="${r}"><span>${label}</span><div class="seg">${opts.map(([val, t]) =>
         `<button tabindex="-1" data-k="${k}" data-v='${JSON.stringify(val)}'${k === 'ai' ? ` data-lv="${val}"` : ''} class="${this.v[k] === val ? 'on' : ''}">${t}</button>`)
         .join('')}</div></div>`).join('') +
