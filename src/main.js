@@ -384,6 +384,14 @@ async function boot() {
   {
     const keep = [];
     for (const e of race ? race.entries : [{ ship }]) e.ship.ensureTrails(scene);
+    // Keep shadow program state separate on maps with consistent measured gains.
+    const instanceDepth = [];
+    if (['forest', 'ice', 'desert'].includes(MAP)) scene.traverse((o) => {
+      if (!o.isInstancedMesh || o.customDepthMaterial || Array.isArray(o.material)
+        || o.material.alphaTest > 0 || o.material.displacementMap || o.material.clipShadows) return;
+      const key = o.instanceColor ? 1 : 0;
+      o.customDepthMaterial = instanceDepth[key] ||= new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+    });
     // (the sky's backdrop too: its hidden pieces - the sun's eruption and the like - compiled when they first showed)
     // (lights left as they are: a hidden one - Laptop mode's - would compile every lit program for a light count the
     // race never has)
