@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { bakeLater, quadJob } from './bake.js';
 import { Q } from './quality.js';
+import { cachedBake } from './bakedtextures.js';
 import { sunOnly } from './look.js';
 import { fbm, noise2, ridged, smoothstep } from './noise.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
@@ -83,6 +84,8 @@ export function iceMaps(renderer) {
   if (maps) return maps;
   const S = Q.tier === 'low' ? 1024 : 2048;
   const bake = (mode) => {
+    const cached = cachedBake(renderer, `ice-${mode ? 'normal' : 'mask'}`, S, renderer.capabilities.getMaxAnisotropy());
+    if (cached) return cached;
     const rt = new THREE.WebGLRenderTarget(S, S, { depthBuffer: false, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter,
       magFilter: THREE.LinearFilter, wrapS: THREE.RepeatWrapping, wrapT: THREE.RepeatWrapping, colorSpace: THREE.NoColorSpace });
     rt.texture.anisotropy = renderer.capabilities.getMaxAnisotropy();

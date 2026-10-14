@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { bakeLater, quadJob } from './bake.js';
 import { Q } from './quality.js';
+import { cachedBake } from './bakedtextures.js';
 import { sunOnly } from './look.js';
 import { mulberry32, fbm, smoothstep, clamp } from './noise.js';
 import { TRACK_W } from './track.js';
@@ -246,6 +247,8 @@ export function islandMaps(renderer) {
   if (maps) return maps;
   const bake = (mode) => {
     const S = Q.tier === 'low' ? 1024 : 2048;
+    const cached = cachedBake(renderer, `island-${mode ? 'normal' : 'albedo'}`, S, 4);
+    if (cached) return cached;
     const rt = new THREE.WebGLRenderTarget(S, S, { depthBuffer: false, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter,
       magFilter: THREE.LinearFilter, wrapS: THREE.RepeatWrapping, wrapT: THREE.RepeatWrapping, colorSpace: THREE.NoColorSpace });
     rt.texture.anisotropy = 4;                     // (16x on 4-8 taps a pixel, the cliffs seen edge-on: ~0.7 ms)

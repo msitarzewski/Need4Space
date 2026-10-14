@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 import { bakeLater, quadJob } from './bake.js';
 import { Q } from './quality.js';
+import { cachedBake } from './bakedtextures.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 const GEN = /* glsl */`
@@ -108,6 +109,8 @@ export function rockMaps(renderer) {
   if (maps) return maps;
   const bake = (mode) => {
     const S = Q.tier === 'low' ? 1024 : 2048;                     // (a phone: 1024)
+    const cached = cachedBake(renderer, `rock-${mode ? 'normal' : 'albedo'}`, S, renderer.capabilities.getMaxAnisotropy());
+    if (cached) return cached;
     const rt = new THREE.WebGLRenderTarget(S, S, { depthBuffer: false, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter,
       magFilter: THREE.LinearFilter, wrapS: THREE.RepeatWrapping, wrapT: THREE.RepeatWrapping, colorSpace: THREE.NoColorSpace });
     rt.texture.anisotropy = renderer.capabilities.getMaxAnisotropy();

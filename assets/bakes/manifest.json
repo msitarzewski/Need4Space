@@ -1,0 +1,95 @@
+{
+  "sourceCommit": "fb626e663787f89613a2a01f9ab1230fc59710d1",
+  "textures": {
+    "high-rock-normal": {
+      "width": 2048,
+      "height": 2048,
+      "colorSpace": "",
+      "rawSHA256": "e8640b6b4efdf830a55a8a53a4f98ba49b70cc74cf57c9224c07167d087e1974",
+      "file": "high-rock-normal-a8091e8906a6.png",
+      "bytes": 9149374,
+      "pngSHA256": "a8091e8906a662bc3c0d11568f5056709e1d902a51e442ef815740a65e5e976f"
+    },
+    "high-island-normal": {
+      "width": 2048,
+      "height": 2048,
+      "colorSpace": "",
+      "rawSHA256": "d2dc52060187d4d3ed2253c0f2f23748b334dabce734325f3fde3114c116d779",
+      "file": "high-island-normal-ecb4c28e94e8.png",
+      "bytes": 7754517,
+      "pngSHA256": "ecb4c28e94e802662d2678e08f1b0815ac6fb5d583e08b4528aff879dad028c0"
+    },
+    "high-ice-mask": {
+      "width": 2048,
+      "height": 2048,
+      "colorSpace": "",
+      "rawSHA256": "d95d81297c72b9e44590853d1a7c7d8cba89d89182daf54578bc0106953d6949",
+      "file": "high-ice-mask-9dbad53073f0.png",
+      "bytes": 4179286,
+      "pngSHA256": "9dbad53073f0fa6ef80e262623f6cbc3f24162f16f990edd5d96f4be40e05b6e"
+    },
+    "high-ice-normal": {
+      "width": 2048,
+      "height": 2048,
+      "colorSpace": "",
+      "rawSHA256": "f5549f276a557a5c2560a2a356db14e5e4c9d7412debb8147bf090d6f5947eb6",
+      "file": "high-ice-normal-eb887a2094ea.png",
+      "bytes": 3559939,
+      "pngSHA256": "eb887a2094ea08624a94f655ff833f432f42c3e4d29c9034eb6484a0576b5a74"
+    },
+    "high-sand-normal": {
+      "width": 2048,
+      "height": 2048,
+      "colorSpace": "",
+      "rawSHA256": "274487fc2e17d335db5877a192514c2a81ab4f509ae3214013eb60f3878fa898",
+      "file": "high-sand-normal-53b022fbdf1c.png",
+      "bytes": 1796736,
+      "pngSHA256": "53b022fbdf1c943b7822f0ebbab4d57aa040af2d35dbb3c58caceda28b023d30"
+    },
+    "low-rock-normal": {
+      "width": 1024,
+      "height": 1024,
+      "colorSpace": "",
+      "rawSHA256": "c9797166e085aa5b6a89da29e120deacd53fc7b459d9eb269147a51cd80950c7",
+      "file": "low-rock-normal-4c89085bb515.png",
+      "bytes": 2767987,
+      "pngSHA256": "4c89085bb515b1fc050032229a2577d788bc46c68b3acb6dc47e4797dce5d650"
+    },
+    "low-island-normal": {
+      "width": 1024,
+      "height": 1024,
+      "colorSpace": "",
+      "rawSHA256": "d3f7d43e0c4a964156741b570537fa8e15f8608c4a7fa97d4d832f08ee92bed9",
+      "file": "low-island-normal-7bda37c8ba45.png",
+      "bytes": 2491194,
+      "pngSHA256": "7bda37c8ba4511bbe5787f615753239b16e95551dee88405379b547a9cae3694"
+    },
+    "low-ice-mask": {
+      "width": 1024,
+      "height": 1024,
+      "colorSpace": "",
+      "rawSHA256": "5f8be78c8dda7320a0354de9028e222204744776e4d9c6131ee2e5d8e030b731",
+      "file": "low-ice-mask-8ac9a26a36a3.png",
+      "bytes": 1437541,
+      "pngSHA256": "8ac9a26a36a38b6e4a0a4f2e93109b8a305c1abb8da15397e14d30ad0c08c981"
+    },
+    "low-ice-normal": {
+      "width": 1024,
+      "height": 1024,
+      "colorSpace": "",
+      "rawSHA256": "b614218f103caa5ebda9034269c852b9faf51fc60be79376f3192e19208ed276",
+      "file": "low-ice-normal-f2120b0ffe54.png",
+      "bytes": 1095874,
+      "pngSHA256": "f2120b0ffe54400bdcf4d75175087405a733e63c8db40469e05353a30848bbe2"
+    },
+    "low-sand-normal": {
+      "width": 1024,
+      "height": 1024,
+      "colorSpace": "",
+      "rawSHA256": "3099a9fa5fbbbbebd1aa02e38ad8eec9a7c97d4108ed7efc403a81350b34008f",
+      "file": "low-sand-normal-2aa35dc06037.png",
+      "bytes": 643995,
+      "pngSHA256": "2aa35dc06037e5fdfcf2509c758b650a79750ed12aeeb30c7252a9125c068b5b"
+    }
+  }
+}
