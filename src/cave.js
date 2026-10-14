@@ -13,6 +13,7 @@ import { islandShape, islandMaterial, fbm3, n3 } from './islands.js';
 import { TRACK_W } from './track.js';
 import { sheet, NOISE } from './water.js';
 import { barkTube } from './flora.js';
+import { loadJob, loadWorkerCount } from './load-jobs.js';
 
 const TAU = Math.PI * 2;
 const UP = new THREE.Vector3(0, 1, 0);
@@ -872,31 +873,21 @@ export function caveDressing(scene, H, track, mats, dens = 1) {
       for (const y of [q.floor + 10, (q.floor + q.roof) / 2, q.roof, q.roof + 30]) src.push([q.axis.clone().setY(y), [1.0, 0.92, 0.75], q.r * 2.6, 0.3]);
     }
     for (const fl of falls) for (let t = 0; t <= 1; t += 0.2) src.push([fl.lip.clone().lerp(fl.hit, t), [0.7, 0.85, 0.85], 70, 0.12]);
-    const cell = 90, hash = new Map(), key = (x, y, z) => `${x},${y},${z}`;
-    for (const q of src) { const k = key(Math.floor(q[0].x / cell), Math.floor(q[0].y / cell), Math.floor(q[0].z / cell)); if (!hash.has(k)) hash.set(k, []); hash.get(k).push(q); }
-    const v = new THREE.Vector3(), tints = rows.map((rw) => [0, 1, 2].map((k) => CHAMBERS.reduce((a, c) => a + TINT[c.name][k] * rw.sec.w[c.name], 0)));
-    const bake = (g, k0 = 1) => {
-      const p = g.attributes.position, out3 = new Float32Array(p.count * 3), r0 = g.userData.row0;
-      for (let i = 0; i < p.count; i++) {
-        v.fromBufferAttribute(p, i);
-        // (the chamber's own faint light, uneven: more of it in some reaches than others)
-        const kb = k0 * (0.35 + 1.3 * n3(v.x * 0.012, v.y * 0.02, v.z * 0.012)), base = r0 == null ? TINT.roots : tints[Math.min(rows.length - 1, r0 + Math.floor(i / NJ))];
-        let r = base[0] * kb, gg = base[1] * kb, b = base[2] * kb;
-        const cx = Math.floor(v.x / cell), cy = Math.floor(v.y / cell), cz = Math.floor(v.z / cell);
-        for (let a = -1; a <= 1; a++) for (let bb = -1; bb <= 1; bb++) for (let c2 = -1; c2 <= 1; c2++) {
-          for (const [sp, col, R, I] of hash.get(key(cx + a, cy + bb, cz + c2)) || []) {
-            const d2 = v.distanceToSquared(sp) / (R * R);
-            if (d2 > 6) continue;
-            const w = I * Math.exp(-d2);
-            r += col[0] * w; gg += col[1] * w; b += col[2] * w;
-          }
-        }
-        out3.set([r, gg, b], i * 3);
-      }
-      g.setAttribute('camb', new THREE.BufferAttribute(out3, 3));
-    };
-    H.chunks.forEach((g) => bake(g));
-    H.shaftGeo.forEach((g) => bake(g, 0.5));
+    const tints = rows.map((rw) => [0, 1, 2].map((k) => CHAMBERS.reduce((a, c) => a + TINT[c.name][k] * rw.sec.w[c.name], 0)));
+    const sources = src.map(([p, col, radius, intensity]) => [p.toArray(), col, radius, intensity]);
+    const groups = Array.from({ length: Math.max(1, loadWorkerCount()) }, () => ({ size: 0, entries: [] }));
+    const entries = [...H.chunks.map(g => ({ g, strength: 1 })), ...H.shaftGeo.map(g => ({ g, strength: 0.5 }))];
+    // Balance independent chunks without changing the vertex order or the order in which each light contributes.
+    for (const entry of entries.sort((a, b) => b.g.attributes.position.count - a.g.attributes.position.count)) {
+      const group = groups.reduce((a, b) => a.size <= b.size ? a : b);
+      group.entries.push(entry); group.size += entry.g.attributes.position.count;
+    }
+    for (const { entries: list } of groups) if (list.length) {
+      const geometries = list.map(({ g, strength }) => ({ position: g.attributes.position.array, row0: g.userData.row0, strength }));
+      loadJob('caveLight', { geometries, sources, tints, rootTint: TINT.roots, nj: NJ }, result => {
+        list.forEach(({ g }, i) => g.setAttribute('camb', new THREE.BufferAttribute(result[i], 3)));
+      });
+    }
   }
   for (const m of out) scene.add(m);
   console.info(`cave dressing: ${threads.length} threads, ${dots.length} lights, ${caps.length} fungi clusters, ${shrooms.length} giant fungi, ${crystals.length} crystals, ${drips.length} drips`);

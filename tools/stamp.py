@@ -33,7 +33,7 @@ NESTED = {
     'postprocessing/GTAOPass.js': ['shaders/GTAOShader.js', 'shaders/PoissonDenoiseShader.js', 'math/SimplexNoise.js', 'shaders/CopyShader.js', 'postprocessing/Pass.js'],
     'loaders/GLTFLoader.js': ['utils/BufferGeometryUtils.js'],
 }
-DEV_ONLY = {'profile.js'}
+DEV_ONLY = {'profile.js', 'load-worker.js'}
 
 
 def h(p):

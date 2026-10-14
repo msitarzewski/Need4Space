@@ -9,31 +9,11 @@ import { bakeLater, quadJob } from './bake.js';
 import { Q } from './quality.js';
 import { cachedBake } from './bakedtextures.js';
 import { sunOnly } from './look.js';
-import { mulberry32, fbm, smoothstep, clamp } from './noise.js';
+import { mulberry32, fbm, smoothstep, clamp, n3, fbm3 } from './noise.js';
+export { n3, fbm3 } from './noise.js';
 import { TRACK_W } from './track.js';
 
 const TAU = Math.PI * 2;
-
-// ---------------------------------------------------------------- 3-D value noise (displacement)
-function h3(x, y, z) {
-  let h = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(z | 0, 2147483647)) | 0;
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  h ^= h >>> 16;
-  return (h >>> 0) / 4294967296;
-}
-export function n3(x, y, z) {
-  const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
-  let fx = x - ix, fy = y - iy, fz = z - iz;
-  fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy); fz = fz * fz * (3 - 2 * fz);
-  const l = (a, b, t) => a + (b - a) * t;
-  return l(l(l(h3(ix, iy, iz), h3(ix + 1, iy, iz), fx), l(h3(ix, iy + 1, iz), h3(ix + 1, iy + 1, iz), fx), fy),
-    l(l(h3(ix, iy, iz + 1), h3(ix + 1, iy, iz + 1), fx), l(h3(ix, iy + 1, iz + 1), h3(ix + 1, iy + 1, iz + 1), fx), fy), fz);
-}
-export function fbm3(x, y, z, oct = 4) {
-  let s = 0, a = 0.5, n = 0;
-  for (let i = 0; i < oct; i++) { s += a * n3(x, y, z); n += a; x = x * 2.03 + 1.7; y = y * 2.03 + 9.2; z = z * 2.03 + 3.1; a *= 0.5; }
-  return s / n;
-}
 
 // ---------------------------------------------------------------- the shape
 // I: { x, z, top, rx, rz, rot, cliff, depth, seed, hill = 8, crag = 1, taper = 1.2, lobes = 3, res = 160 }; a shape

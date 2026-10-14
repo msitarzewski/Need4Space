@@ -31,6 +31,7 @@ import { Menu } from './menu.js';
 import { compileAll, deferBakes, runBakes, gpuIdle, postJobs } from './bake.js';
 import { Q, setLite, integratedGPU, liteFiltering, memoryTier } from './quality.js';
 import { preloadBakedTextures } from './bakedtextures.js';
+import { beginLoadJobs, finishLoadJobs, stopLoadJobs } from './load-jobs.js';
 
 // the map: the circuit chosen in the menu (saved), or ?map=space / forest / ice / desert / meadow (the meadow: the old test range)
 const MAP = { meadow: 'meadow', forest: 'forest', space: 'space', ice: 'ice', desert: 'desert' }[new URLSearchParams(location.search).get('map') || savedSettings().map] || 'space';
@@ -76,6 +77,7 @@ async function boot() {
   })();
   // what the device can hold: the ship's maps and the bakes' sizes (quality.js)
   Q.tier = memoryTier(renderer, gpuName, isTouch(), !!savedSettings().laptop);
+  const jobLoad = beginLoadJobs(MAP === 'forest');
   const bakedLoad = preloadBakedTextures(MAP);
   console.info(`GPU: ${gpuName} - memory tier ${Q.tier}${integratedGPU(gpuName) ? ' (integrated: Laptop mode on a first visit)' : ''}`);
   agxLoad.catch(() => {});
@@ -102,11 +104,12 @@ async function boot() {
   shipLoad.catch(() => {});
   status(MAP === 'meadow' ? 'Raising the hills' : 'Building the circuit');
   progress('circuit');
-  await Promise.all([nextFrame(), bakedLoad]);
+  await Promise.all([nextFrame(), bakedLoad, jobLoad]);
   deferBakes(true);
   const world = MAP === 'space' ? new SpaceWorld(scene, renderer, camera) : MAP === 'forest' ? new ForestWorld(scene, renderer, camera)
     : MAP === 'ice' ? new IceWorld(scene, renderer, camera) : MAP === 'desert' ? new DesertWorld(scene, renderer, camera) : new MeadowWorld(scene, renderer);
   deferBakes(false);
+  await finishLoadJobs();
   progress('circuit', 1);
   await runBakes(renderer, (what, k, n) => { status(`${what}  ${k} / ${n}`); progress(/Painting/.test(what) ? 'paint' : 'bakes', k / n); });
   baking = false;
@@ -758,6 +761,7 @@ async function boot() {
 }
 
 boot().catch((e) => {
+  stopLoadJobs();
   console.error(e);
   const gl = document.getElementById('view').getContext('webgl2');
   if (gl?.isContextLost?.() || /WebGLShader|WebGLProgram|context/i.test(String(e.message)))
