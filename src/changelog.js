@@ -2,6 +2,17 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.2', date: '15 Oct 2026', name: 'Global scoreboard',
+    notes: [
+      'A global top 10 for every circuit and difficulty',
+      'Save your time right from the results and see your rank at once',
+      'Save with Enter or the gamepad too',
+      'A new logo, tinted by the difficulty',
+      'Smoother menus: a paused game no longer redraws the world',
+      'Canyon walls on the ice and desert planets shade cleanly, no moving squares',
+    ],
+  },
+  {
     version: '1.1', date: '13 Oct 2026', name: 'Four worlds',
     notes: [
       'Three new circuits: the forest moon, the ice planet and the desert planet',
