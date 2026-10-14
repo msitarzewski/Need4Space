@@ -209,6 +209,24 @@ async function boot() {
   gtao.blendIntensity = 1.0;
   gtao.updateGtaoMaterial({ radius: 0.9, distanceExponent: 1.6, thickness: 2.0, scale: 1.15, samples: 16 });
   gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
+  // Keep each mesh layout's normal-program state instead of changing it for every draw.
+  const normalMaterials = [gtao.normalMaterial], normalOverride = gtao.renderOverride.bind(gtao);
+  gtao.renderOverride = (renderer, material, ...args) => {
+    if (material !== gtao.normalMaterial) return normalOverride(renderer, material, ...args);
+    const direct = renderer.renderBufferDirect;
+    renderer.renderBufferDirect = function (camera, scene, geometry, drawMaterial, object, group) {
+      if (drawMaterial === material) {
+        const key = (object.isInstancedMesh ? 1 : 0) | (object.instanceColor ? 2 : 0) | (object.isSkinnedMesh ? 4 : 0)
+          | (geometry.morphAttributes.position ? 8 : 0) | (geometry.morphAttributes.normal ? 16 : 0);
+        drawMaterial = normalMaterials[key] ||= material.clone();
+      }
+      return direct.call(this, camera, scene, geometry, drawMaterial, object, group);
+    };
+    try { return normalOverride(renderer, material, ...args); }
+    finally { renderer.renderBufferDirect = direct; }
+  };
+  const gtaoDispose = gtao.dispose.bind(gtao);
+  gtao.dispose = () => { normalMaterials.forEach((m, i) => { if (i) m.dispose(); }); gtaoDispose(); };
   const gtaoRender = gtao.render.bind(gtao);
   // AO at half resolution when asked (or by itself above 1440p): its own targets at half size, blended back onto the
   // full frame (2.1 ms -> ~0.6 ms at 4K; AO is soft anyway)
