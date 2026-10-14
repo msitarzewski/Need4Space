@@ -210,14 +210,17 @@ async function boot() {
   gtao.updateGtaoMaterial({ radius: 0.9, distanceExponent: 1.6, thickness: 2.0, scale: 1.15, samples: 16 });
   gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
   const aoOccluders = world.aoOccluders && new Set(world.aoOccluders);
+  const canyonAO = { value: 1 };
   if (aoOccluders?.size) {
-    // Normal-buffer alpha marks baked surfaces that occlude objects behind them without receiving AO.
-    // Skip both AO evaluation and denoising so steep terrain cannot acquire moving self-occlusion patches.
+    // Alpha below 0.5 carries a wall's baked ambient visibility, scaled by 1/4.
+    // Its depth still blocks buried objects; its shading remains fixed to the terrain.
     const depth = 'float depth = getDepth(vUv.xy);';
-    const mask = 'if (textureLod(tNormal, vUv, 0.0).a < 0.5) { gl_FragColor = vec4(1.0); return; }\n';
+    const mask = 'float wallAO = textureLod(tNormal, vUv, 0.0).a;\n'
+      + 'if (wallAO < 0.5) { gl_FragColor = vec4(vec3(mix(1.0, wallAO * 4.0, canyonAO)), 1.0); return; }\n';
     for (const m of [gtao.gtaoMaterial, gtao.pdMaterial]) {
       if (!m.fragmentShader.includes(depth)) throw new Error('AO shader changed: occluder mask not applied');
-      m.fragmentShader = m.fragmentShader.replace(depth, mask + depth);
+      m.fragmentShader = 'uniform float canyonAO;\n' + m.fragmentShader.replace(depth, mask + depth);
+      m.uniforms.canyonAO = canyonAO;
     }
   }
   // Keep each mesh layout's normal-program state instead of changing it for every draw.
@@ -232,7 +235,16 @@ async function boot() {
           | (aoOccluders?.has(object) ? 32 : 0);
         if (!normalMaterials[key]) {
           normalMaterials[key] = material.clone();
-          if (key & 32) normalMaterials[key].opacity = 0;
+          if (key & 32) {
+            normalMaterials[key].onBeforeCompile = (sh) => {
+              sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float canyonAO; varying float vCanyonAO;')
+                .replace('#include <begin_vertex>', '#include <begin_vertex>\nvCanyonAO = canyonAO;');
+              const alpha = 'gl_FragColor.a = 1.0;';
+              if (!sh.fragmentShader.includes(alpha)) throw new Error('Normal shader changed: wall AO not applied');
+              sh.fragmentShader = 'varying float vCanyonAO;\n' + sh.fragmentShader.replace(/}\s*$/, 'gl_FragColor.a = vCanyonAO * 0.25;\n}');
+            };
+            normalMaterials[key].customProgramCacheKey = () => 'canyon-ao-normal';
+          }
         }
         drawMaterial = normalMaterials[key];
       }
@@ -353,6 +365,7 @@ async function boot() {
     agx.uniforms.exposure.value = Math.pow(2, v.exposure) * (world.exposure ?? 1);       // (a map can set its own)
     renderer.toneMappingExposure = 0.95 * Math.pow(2, v.exposure) * (world.exposure ?? 1);
     gtao.enabled = v.ao;
+    canyonAO.value = v.canyonAO ? 1 : 0;
     smaa.enabled = v.aa !== 'msaa';
     const samples = v.aa === 'high' ? 8 : v.aa === 'fast' ? 2 : v.aa === 'smaa1' ? 0 : 4;   // the scene's MSAA (a new target when it changes)
     if (scenePass.msaa.samples !== samples) { scenePass.msaa.samples = samples; scenePass.msaa.dispose(); }

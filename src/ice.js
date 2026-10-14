@@ -389,7 +389,8 @@ export class IceWorld {
     // ---- the ice shelf (shelf.js): its faces and top, the bridges over its crevasse, falls down its cliffs, its bergs
     {
       const sh = this.shelf, fallMat = glacierMaterial({ key: 'falls', glow: 2.0, snow: 0.3 });
-      add(new THREE.Mesh(sh.geometry(), (this.shelfMat = glacierMaterial({ key: 'shelf', glow: 2.2, walls: true }))), 'ice-shelf');
+      const shelf = add(new THREE.Mesh(sh.geometry(), (this.shelfMat = glacierMaterial({ key: 'shelf', glow: 2.2, walls: true }))), 'ice-shelf');
+      this.aoOccluders = [shelf];
       const br = sh.bridges(grid), fl = sh.falls();
       if (br.length) add(new THREE.Mesh(mergeGeometries(br), ice), 'ice-bridges');
       if (fl.length) add(new THREE.Mesh(mergeGeometries(fl), fallMat), 'shelf-falls');

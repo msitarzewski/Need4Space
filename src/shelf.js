@@ -148,22 +148,31 @@ export class IceShelf {
 
   // the surface: both halves, faces and tops
   geometry() {
-    const pos = [], glow = [], idx = [];
+    const pos = [], glow = [], ao = [], idx = [];
     for (const poly of this.pieces) {
       const n = poly.length, C = LEVELS + 3, o = pos.length / 3, ring = [];
       for (const p of poly) {
         const tp = this.topAt(p.x, p.z);
+        // The opposite rim blocks ambient light even when it is behind the camera.
+        const rim = p.wk > 0 ? this.wallPoint(p.s, -p.sd, tp - 5).p : null;
+        const ambient = (x, y, z) => {
+          if (!rim) return 255;
+          const h = Math.max(0, tp - y), d = Math.hypot(rim.x - x, rim.z - z);
+          return Math.round(255 * (1 - 0.32 * p.wk * h / Math.max(1, Math.hypot(h, d))));
+        };
         let d = 0;
         for (let k = 0; k < LEVELS; k++) {
           const h = BOT + ((tp - 3 - BOT) * k) / (LEVELS - 1);
           d = this.out(p, h, tp);
           pos.push(p.x + p.nx * d, h, p.z + p.nz * d);
           glow.push(this.glowAt(p, h, tp));
+          ao.push(ambient(p.x + p.nx * d, h, p.z + p.nz * d));
         }
         // the lip: rounded over onto the top
         for (const [dd, dh, g] of [[-3, 0.6, 0.3], [-9, 1.4, 0.2], [-17, 1.0, 0.15]]) {
           pos.push(p.x + p.nx * (d + dd), tp + dh, p.z + p.nz * (d + dd));
           glow.push(g);
+          ao.push(255);
         }
         ring.push(new THREE.Vector2(p.x + p.nx * (d - 17), p.z + p.nz * (d - 17)));
       }
@@ -183,6 +192,7 @@ export class IceShelf {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('glow', new THREE.Float32BufferAttribute(glow, 1));
+    g.setAttribute('canyonAO', new THREE.Uint8BufferAttribute(ao, 1, true));
     g.setIndex(idx);
     g.computeVertexNormals();
     this.tris = idx.length / 3;

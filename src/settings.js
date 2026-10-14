@@ -6,7 +6,7 @@ export const DEFAULTS = { tonemap: 'aces', ao: true, bloom: true, shadows: 'high
   blur: true, reflections: true, streaks: true, ai: 'easy', music: 'high', sfx: 'high', aa: 'smaa', aoRes: 'auto',
   brakeLights: true, laptop: false, touch: 'auto', map: 'space', shafts: true, lensWater: true, iceSnow: true, iceDust: true, aurora: true,
   iceStorm: true, iceGeysers: true, wreckFx: true, wreckMist: true, drift: false, airPitch: true, sandFx: true, dustDevils: true, heatHaze: true,
-  sandstorm: true, caveFx: true };
+  sandstorm: true, caveFx: true, canyonAO: true };
 // Laptop mode's picture (quality.js has what else it cuts); turned off, the rows go back to what they were. The render
 // scale stays at 100 %: with the rest cut, a laptop's integrated GPU holds it (tested on a Core Ultra 5 235U)
 const LAPTOP = { scale: 1, aa: 'smaa1', ao: false, reflections: false, shadows: 'off', streaks: false, blur: false, shafts: false,
@@ -24,6 +24,7 @@ const ROWS = [
   ['aa', 'Anti-aliasing', [['smaa1', 'SMAA'], ['msaa', 'MSAA 4x'], ['fast', 'MSAA 2x + SMAA'], ['smaa', 'MSAA 4x + SMAA'], ['high', 'MSAA 8x + SMAA']]],
   ['ao', 'Ambient occlusion', [[true, 'On'], [false, 'Off']]],
   ['aoRes', 'AO resolution', [['auto', 'Auto'], ['full', 'Full'], ['half', 'Half']]],
+  ['canyonAO', 'Canyon shading (ice, desert; needs AO)', [[true, 'On'], [false, 'Off']]],
   ['bloom', 'Bloom', [[true, 'On'], [false, 'Off']]],
   ['reflections', 'Deck reflections (needs AO)', [[true, 'On'], [false, 'Off']]],
   ['streaks', 'Light streaks', [[true, 'On'], [false, 'Off']]],

@@ -187,7 +187,7 @@ export class DesertWorld {
     this.groundMeshes = [...g.near, ...g.far];
     // Draw after other opaque meshes so their depth can skip hidden terrain pixels.
     for (const m of this.groundMeshes) m.renderOrder = 1;
-    // Block AO from buried scenery, but keep the terrain's baked shading without screen-space self-occlusion.
+    // Block buried scenery and use the terrain's baked ambient horizon on its walls.
     this.aoOccluders = this.groundMeshes;
   }
 

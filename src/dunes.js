@@ -210,6 +210,20 @@ export class Dunes {
       }
       return 1 - smoothstep(-0.012, 0.012, worst);
     };
+    // Bake the rock walls' ambient horizon once; its boundary follows the terrain, not the view.
+    const ambientDirs = Array.from({ length: 12 }, (_, i) => [Math.cos(i * Math.PI / 6), Math.sin(i * Math.PI / 6)]);
+    const ambient = (x, y, z, normal, rock) => {
+      if (rock < 0.01 || normal.y > 0.85) return 255;
+      let sum = 0, weight = 0;
+      for (const [dx, dz] of ambientDirs) {
+        const w = Math.max(0, normal.x * dx + normal.z * dz);
+        if (w < 0.001) continue;
+        let horizon = 0;
+        for (let d = 12; d < 320; d *= 1.35) horizon = Math.max(horizon, (rH(x + dx * d, z + dz * d) - y - 0.7) / d);
+        sum += w * horizon / Math.hypot(1, horizon); weight += w;
+      }
+      return Math.round(255 * (1 - 0.32 * rock * (1 - smoothstep(0.5, 0.85, normal.y)) * sum / Math.max(weight, 0.001)));
+    };
     // the tiles
     const TS = 192, nT = Math.ceil(rIn / TS), tiles = [];
     for (let tz = -nT; tz < nT; tz++) for (let tx = -nT; tx < nT; tx++) {
@@ -235,7 +249,7 @@ export class Dunes {
     const meshes = [];
     let nv = 0, ntri = 0;
     for (const [key, list] of blocks) {
-      const pos = [], nrm = [], att = [], idx = [];
+      const pos = [], nrm = [], att = [], ao = [], idx = [];
       for (const t of list) {
         const m = TS / t.res, n1 = m + 1, base = pos.length / 3;
         const hs = new Float32Array((n1 + 2) * (n1 + 2)), ks = new Float32Array(n1 * n1);
@@ -260,6 +274,7 @@ export class Dunes {
           v.set(-(hs[k + 1] - hs[k - 1]) / (2 * t.res), 1, -(hs[k + n1 + 2] - hs[k - n1 - 2]) / (2 * t.res)).normalize();
           pos.push(x, y, z); nrm.push(v.x, v.y, v.z);
           att.push(ks[j * n1 + i], shade(x, y, z));
+          ao.push(ambient(x, y, z, v, ks[j * n1 + i]));
         }
         for (let j = 0; j < m; j++) for (let i = 0; i < m; i++) {
           const a = base + j * n1 + i, b = a + 1, c = a + n1, d = c + 1;
@@ -272,6 +287,7 @@ export class Dunes {
             pos.push(pos[(base + q) * 3], pos[(base + q) * 3 + 1] - 14, pos[(base + q) * 3 + 2]);
             nrm.push(nrm[(base + q) * 3], nrm[(base + q) * 3 + 1], nrm[(base + q) * 3 + 2]);
             att.push(att[(base + q) * 2], att[(base + q) * 2 + 1]);
+            ao.push(ao[base + q]);
           }
           for (let k = 0; k < list2.length - 1; k++) {
             const a = base + list2[k], b = base + list2[k + 1], c = s0 + k, d = s0 + k + 1;
@@ -285,6 +301,7 @@ export class Dunes {
       g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
       g.setAttribute('dune', new THREE.Float32BufferAttribute(att, 2));
+      g.setAttribute('canyonAO', new THREE.Uint8BufferAttribute(ao, 1, true));
       g.setIndex(pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
       g.computeBoundingSphere(); g.computeBoundingBox();
       const mesh = new THREE.Mesh(g, mat);
@@ -312,6 +329,7 @@ export class Dunes {
     const fg = new THREE.BufferGeometry();
     fg.setAttribute('position', new THREE.BufferAttribute(fpos, 3));
     fg.setAttribute('dune', new THREE.BufferAttribute(fatt, 2));
+    fg.setAttribute('canyonAO', new THREE.Uint8BufferAttribute(new Uint8Array(nR * nA).fill(255), 1, true));
     const fidx = [];
     for (let i = 0; i < nR - 1; i++) for (let j = 0; j < nA; j++) {
       const a = i * nA + j, b = i * nA + ((j + 1) % nA), c = a + nA, d = b + nA;
@@ -326,7 +344,7 @@ export class Dunes {
         si.push(a, b, c, b, d, c);
       }
       const sg = new THREE.BufferGeometry();
-      for (const k of ['position', 'normal', 'dune']) sg.setAttribute(k, fg.attributes[k]);
+      for (const k of ['position', 'normal', 'dune', 'canyonAO']) sg.setAttribute(k, fg.attributes[k]);
       sg.setIndex(si);
       sg.computeBoundingSphere(); sg.computeBoundingBox();
       const m = new THREE.Mesh(sg, mat);
