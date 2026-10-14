@@ -196,6 +196,11 @@ export class Menu {
   // ---------------------------------------------------------------- screens
   show(screen) {
     this.screen = screen;
+    // A title-camera cut must not cover the race's pause or results screens.
+    if (this.ctx !== 'title') {
+      this.fadeEl.style.opacity = '0';
+      this.fadeV = 0;
+    }
     this.el.classList.toggle('on', !!screen);
     document.body.dataset.ui = screen ? this.ctx : 'game';
     this.h.settings.el.classList.toggle('hidden', screen !== 'settings');
