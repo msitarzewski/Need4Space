@@ -1360,6 +1360,7 @@ export class Wreck {
     }
     this.chunks.clear();
     this.instMeshes = [];
+    const instanceMaterials = [];
     for (const [key, { name, list, H, inside }] of this.placed) {
       const { g, reach, cast } = this.mods.get(name);
       const m = new THREE.InstancedMesh(g, this.mat, list.length), sky = new Float32Array(list.length);
@@ -1369,6 +1370,16 @@ export class Wreck {
         if (e.tint) m.setColorAt(i, _c.setRGB(...e.tint));
       });
       if (m.instanceColor) list.forEach((e, i) => { if (!e.tint) m.setColorAt(i, _c.setRGB(1, 1, 1)); });
+      // Separate program state for each instance layout; lamp and animation uniforms stay shared.
+      const materialKey = m.instanceColor ? 1 : 0;
+      if (!instanceMaterials[materialKey]) {
+        const material = this.mat.clone();
+        material.onBeforeCompile = this.mat.onBeforeCompile;
+        material.customProgramCacheKey = this.mat.customProgramCacheKey;
+        material.userData = this.mat.userData;
+        instanceMaterials[materialKey] = material;
+      }
+      m.material = instanceMaterials[materialKey];
       // (the module's attributes shared - uploaded once - and the group's own sky light)
       const geo = new THREE.BufferGeometry();
       for (const [k, a] of Object.entries(g.attributes)) geo.setAttribute(k, a);
