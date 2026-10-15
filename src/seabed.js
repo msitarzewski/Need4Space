@@ -13,6 +13,7 @@ import { mulberry32, fbm } from './noise.js';
 import { TRACK_W } from './track.js';
 import { SEA_Y, SEA_GLSL } from './sea.js';
 import { LIFE_U, fishGeometry } from './sealife.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const TAU = Math.PI * 2, V = (x, y, z) => new THREE.Vector3(x, y, z);
 
@@ -53,6 +54,35 @@ function tuftGeometry() {
   g.computeVertexNormals();
   return g;
 }
+// A crab (1 = ~1 m across its shell): a broad low shell, eyes on stalks, four legs a side (thigh up and out, shin
+// down to the ground) and two claws held forward; 'leg' 0 the body, 1..8 the legs, 9 / 10 the claws (they step and
+// work: the shader). Its x across it (it walks that way, sideways), y up, z forward (its face)
+function crabGeometry() {
+  const parts = [];
+  const add = (g, leg) => { g.deleteAttribute('uv'); g.setAttribute('leg', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count).fill(leg), 1)); parts.push(g); };
+  add(new THREE.SphereGeometry(1, 16, 8).scale(0.5, 0.2, 0.38).translate(0, 0.32, 0), 0);
+  for (const sd of [-1, 1]) add(new THREE.CylinderGeometry(0.025, 0.03, 0.14, 5).translate(sd * 0.12, 0.5, 0.3), 0);
+  for (const sd of [-1, 1]) add(new THREE.SphereGeometry(0.05, 6, 4).translate(sd * 0.12, 0.58, 0.3), 0);
+  const seg = (a, b, r) => {
+    const d = new THREE.Vector3().subVectors(b, a), g = new THREE.CylinderGeometry(r * 0.8, r, d.length(), 5);
+    g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.clone().normalize()));
+    return g.translate((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+  };
+  let n = 1;
+  for (const sd of [-1, 1]) for (let k = 0; k < 4; k++, n++) {
+    const z = 0.18 - k * 0.14, root = new THREE.Vector3(sd * 0.42, 0.3, z), knee = new THREE.Vector3(sd * 0.82, 0.5, z - 0.05), foot = new THREE.Vector3(sd * 1.05, 0.0, z - 0.1);
+    add(seg(root, knee, 0.045), n);
+    add(seg(knee, foot, 0.035), n);
+  }
+  for (const sd of [-1, 1]) {
+    const leg = sd < 0 ? 9 : 10, a = new THREE.Vector3(sd * 0.28, 0.3, 0.3), b = new THREE.Vector3(sd * 0.42, 0.34, 0.62);
+    add(seg(a, b, 0.06), leg);
+    add(new THREE.SphereGeometry(1, 8, 6).scale(0.11, 0.08, 0.17).translate(sd * 0.44, 0.35, 0.78), leg);
+    add(new THREE.BoxGeometry(0.05, 0.05, 0.18).translate(sd * 0.48, 0.32, 0.92), leg);
+  }
+  return mergeGeometries(parts);
+}
+
 const inst = (base, attrs, count) => {
   const g = new THREE.InstancedBufferGeometry().copy(base);
   for (const [k, a] of Object.entries(attrs)) g.setAttribute(k, new THREE.InstancedBufferAttribute(a, a.length / count));
@@ -65,16 +95,19 @@ const inst = (base, attrs, count) => {
 // flashing silver now and then as it turns. Never drawn thinner than a pixel or shorter than a pixel and a half: dimmed
 // in proportion instead, so a far school shimmers and never sparkles. The schools circle as the shoals' meshes do (the
 // same numbers: A x y z radius, B phase speed height length). d0..d1 its fade in, f0..f1 its fade out (m)
-function fishPoints(A, B, n, { d0 = 0, d1 = 1, f0 = 650, f1 = 760 } = {}) {
+function fishPoints(A, B, n, { d0 = 0, d1 = 1, f0 = 650, f1 = 760 } = {}, Cc = null, Dg = null) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
   g.setAttribute('iA', new THREE.BufferAttribute(A, 4));
   g.setAttribute('iB', new THREE.BufferAttribute(B, 4));
+  // (each school's colour and its own glow: lanternfish schools shine from far off)
+  g.setAttribute('iC', new THREE.BufferAttribute(Cc || new Float32Array(n * 4).fill(0.5), 4));
+  g.setAttribute('iD', new THREE.BufferAttribute(Dg || new Float32Array(n * 4), 4));
   const m = new THREE.ShaderMaterial({
     uniforms: { lTime: LIFE_U.lTime, lvl: { value: 0 }, pr: { value: 1 }, fade: { value: new THREE.Vector4(d0, d1, f0, f1) } },
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     vertexShader: /* glsl */`
-      uniform float lTime, lvl, pr; uniform vec4 fade; attribute vec4 iA, iB; varying vec3 vC; varying vec2 vDir; varying vec3 vE;
+      uniform float lTime, lvl, pr; uniform vec4 fade; attribute vec4 iA, iB, iC, iD; varying vec3 vC; varying vec2 vDir; varying vec3 vE;
       ${SEA_GLSL}
       void main() {
         float a = iB.x + lTime * iB.y, r = iA.w + sin(iB.x * 7.0 + lTime * 0.5) * 2.0;
@@ -91,7 +124,8 @@ function fishPoints(A, B, n, { d0 = 0, d1 = 1, f0 = 650, f1 = 760 } = {}) {
         float cover = min(1.0, lp / 1.5) * min(1.0, wp);
         float de = length(mv.xyz);                   // (as the meshes' cut: the distance, not the depth)
         float vis = smoothstep(fade.x, fade.y, de) * (1.0 - smoothstep(fade.z, fade.w, de)) * step(cameraPosition.y, lvl) * step(P.y, lvl - 1.0);
-        vC = (vec3(0.05, 0.22, 0.3) + vec3(0.35, 0.5, 0.55) * flash) * cover * vis * seTrans(cameraPosition, P, lvl);
+        vec3 glow = iD.rgb * (0.7 + 0.3 * sin(lTime * 1.7 + iB.x * 5.0));
+        vC = (iC.rgb * 0.22 + vec3(0.03, 0.12, 0.16) + vec3(0.35, 0.5, 0.55) * flash + glow) * cover * vis * seTrans(cameraPosition, P, lvl);
         gl_Position = projectionMatrix * mv;
         gl_PointSize = vis > 0.0 ? S : 0.0;
       }`,
@@ -111,7 +145,7 @@ function fishPoints(A, B, n, { d0 = 0, d1 = 1, f0 = 650, f1 = 760 } = {}) {
 }
 
 // a lit material whose vertices the shader places in the world (as sealife.js does)
-function placedMaterial({ key, pars, place, color, emissive = '', side = THREE.DoubleSide, roughness = 0.7, metalness = 0 }) {
+function placedMaterial({ key, pars, place, color, emissive = '', fpars = '', side = THREE.DoubleSide, roughness = 0.7, metalness = 0 }) {
   const m = new THREE.MeshStandardMaterial({ roughness, metalness, side });
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, LIFE_U, m.userData.uniforms || {});
@@ -126,7 +160,8 @@ vec3 transformed = vec3(position);
 ${place}`)
       .replace('#include <begin_vertex>', '');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
-uniform float lTime; varying float vAl; varying vec3 vSeed;`)
+uniform float lTime; varying float vAl; varying vec3 vSeed;
+${fpars}`)
       .replace('#include <color_fragment>', `#include <color_fragment>
   ${color}`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
@@ -240,6 +275,24 @@ export class Seabed {
         near.push([x, g, z]);
       }
     }
+    // the road itself overgrown under the sea: short weed along the foot of both walls, grass in tufts thick along them
+    // and thinning out across the deck (its own random: the rest of the deep keeps its places)
+    const rnd2 = mulberry32(9191), deckTufts = [];
+    for (const s of under) {
+      tr.frame(s, f);
+      if (f.P.y > SEA_Y - 10) continue;
+      for (const sd of [-1, 1]) {
+        if (rnd2() < 0.5) {
+          const p = f.P.clone().addScaledVector(f.R, sd * (TRACK_W / 2 - 0.5 - rnd2() * 1.2)).addScaledVector(f.U, -0.2);
+          frond(p.x, p.y, p.z, 1.2 + rnd2() * 3.5, 0.4 + rnd2() * 0.6);
+        }
+        for (let k = 0; k < 10; k++) {
+          const lat = sd * (TRACK_W / 2 - 0.3 - Math.pow(rnd2(), 2.4) * (TRACK_W / 2 - 1)), edge = (TRACK_W / 2 - Math.abs(lat)) / (TRACK_W / 2);
+          const p = f.P.clone().addScaledVector(f.T, (rnd2() - 0.5) * 6).addScaledVector(f.R, lat).addScaledVector(f.U, -0.05);
+          deckTufts.push([p.x, p.y, p.z, (0.45 + rnd2() * 1.6) * (1 - 0.6 * edge)]);
+        }
+      }
+    }
     // weed hanging off the track's own edges under the sea, trailing
     for (const s of under) {
       if (rnd() > 0.55) continue;
@@ -281,8 +334,9 @@ export class Seabed {
     }
     // ---- sea grass: tufts in meadows round the spots found
     {
-      const per = Math.round(26 * D), n = near.length * per, A = new Float32Array(n * 4), B = new Float32Array(n * 4);
+      const per = Math.round(26 * D), n = near.length * per + deckTufts.length, A = new Float32Array(n * 4), B = new Float32Array(n * 4);
       let i = 0;
+      for (const [x, y, z, h] of deckTufts) { A.set([x, y, z, h], i * 4); B.set([rnd() * TAU, rnd() * TAU, rnd(), 0], i * 4); i++; }
       for (const [x, y, z, T, a0, f0] of near) for (let k = 0; k < per; k++, i++) {
         // (each tuft on the ground under it: on a spire's top by its crown, on the floor by the floor's height)
         let p;
@@ -395,7 +449,7 @@ export class Seabed {
       let lastS = -1e9;
       const g2 = {};
       for (const s of under) {
-        if (s - lastS < 70 + rnd() * 50) continue;
+        if (s - lastS < 45 + rnd() * 35) continue;
         lastS = s;
         tr.frame(s, f);
         // (some over the deck itself, high enough to part round the ships - and clear of the highest of the deck under
@@ -414,22 +468,39 @@ export class Seabed {
         }
         spots.push([f.P.x + f.R.x * lat, y, f.P.z + f.R.z * lat, r]);
       }
-      const per = Math.round(150 * D), n = spots.length * per, A = new Float32Array(n * 4), B = new Float32Array(n * 4);
-      let i = 0;
+      // the kinds: [back colour, glow, body depth, length range (m), how many in a school, speed, weight]
+      const KINDS = [
+        [[0.35, 0.45, 0.55], [0, 0, 0], 0.8, [0.4, 0.8], 260, 0.3, 5],          // sardines: silver, slim, many
+        [[0.12, 0.35, 0.3], [0, 0, 0], 0.85, [0.6, 1.1], 170, 0.26, 3],          // mackerel: green-blue backs
+        [[0.75, 0.16, 0.1], [0, 0, 0], 1.3, [0.8, 1.6], 70, 0.18, 2],            // snappers: red, deep-bodied
+        [[0.95, 0.75, 0.08], [0, 0, 0], 1.8, [0.35, 0.7], 110, 0.22, 2],         // yellow, round
+        [[0.1, 0.22, 0.7], [0, 0, 0], 1.2, [0.6, 1.0], 120, 0.24, 2],            // blue
+        [[0.08, 0.12, 0.22], [0, 0, 0], 1.0, [2.0, 3.6], 26, 0.12, 1],           // tuna: big, few, slow
+        [[0.05, 0.08, 0.12], [0.05, 0.6, 0.8], 0.9, [0.35, 0.7], 160, 0.28, 2],   // lanternfish: cyan glow
+        [[0.06, 0.05, 0.1], [0.6, 0.15, 0.7], 0.9, [0.35, 0.7], 120, 0.28, 1],   // lanternfish: violet glow
+      ];
+      const kw = KINDS.reduce((a, k) => a + k[6], 0);
+      const kind = () => { let u = rnd() * kw; for (const k of KINDS) { u -= k[6]; if (u <= 0) return k; } return KINDS[0]; };
+      const Ar = [], Br = [], Cr = [], Dr = [];
       for (const [x, y, z, r] of spots) {
-        const dir = rnd() < 0.5 ? 1 : -1, sp = (0.22 + rnd() * 0.15) * dir, hue = rnd();
-        for (let k = 0; k < per; k++, i++) {
-          A.set([x, y, z, r * (0.75 + rnd() * 0.5)], i * 4);
-          B.set([rnd() * TAU, sp * (0.9 + rnd() * 0.2), (rnd() - 0.5) * r * 0.5, 0.8 + rnd() * 0.9 + hue * 0.001], i * 4);
+        const K = kind(), dir = rnd() < 0.5 ? 1 : -1, sp = (K[5] + rnd() * 0.1) * dir, per = Math.max(8, Math.round(K[4] * D));
+        const tint = 0.85 + rnd() * 0.3;
+        for (let k = 0; k < per; k++) {
+          Ar.push(x, y, z, r * (0.75 + rnd() * 0.5));
+          Br.push(rnd() * TAU, sp * (0.9 + rnd() * 0.2), (rnd() - 0.5) * r * 0.5, K[3][0] + rnd() * (K[3][1] - K[3][0]));
+          Cr.push(K[0][0] * tint, K[0][1] * tint, K[0][2] * tint, K[2]);
+          Dr.push(K[1][0], K[1][1], K[1][2], 0);
         }
       }
-      const g = inst(fishGeometry(6, 5, false), { iA: A, iB: B }, n);
+      const n = Ar.length / 4, A = new Float32Array(Ar), B = new Float32Array(Br), C = new Float32Array(Cr), Dg = new Float32Array(Dr);
+      const g = inst(fishGeometry(6, 5, false), { iA: A, iB: B, iC: C, iD: Dg }, n);
       this.shipU = { shipP: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, -1e5, 0, 0)) } };
       const mat = placedMaterial({
         key: 'shoals', side: THREE.FrontSide, metalness: 0.65, roughness: 0.3,
-        pars: 'attribute float along; attribute vec4 iA, iB; uniform vec4 shipP[4];',
+        pars: 'attribute float along; attribute vec4 iA, iB, iC, iD; uniform vec4 shipP[4]; varying float vFY; varying vec3 vGlow;',
+        fpars: 'varying float vFY; varying vec3 vGlow;',
         place: /* glsl */`
-  vAl = along; vSeed = vec3(fract(iB.w * 1000.0), 0.0, 0.0);
+  vAl = along; vSeed = iC.rgb; vFY = position.y / 0.13; vGlow = iD.rgb;
   float a = iB.x + lTime * iB.y, r = iA.w + sin(iB.x * 7.0 + lTime * 0.5) * 2.0;
   vec3 P = iA.xyz + vec3(cos(a) * r, iB.z + sin(a * 2.0 + iB.x) * 1.5, sin(a) * r);
   vec3 F = vec3(-sin(a), cos(a * 2.0 + iB.x) * 0.15, cos(a)) * sign(iB.y);
@@ -444,15 +515,17 @@ export class Seabed {
   }
   mat3 B = lfBasis(F, 0.0);
   vec3 q = position;
+  q.y *= iC.w;                                         // (its kind's build: slim, or deep-bodied)
   q.x += sin(along * 5.0 - lTime * 18.0 + iB.x * 5.0) * 0.08 * along;
   transformed = P + B * (q * iB.w);
   objectNormal = B * normal;
   // (past ~200 m a glint each instead - fishPoints - fading in as the shape goes)
   if (distance(P, cameraPosition) > 235.0) transformed = vec3(0.0, -1e5, 0.0);`,
-        color: `diffuseColor.rgb = mix(vec3(0.6, 0.66, 0.7), vec3(0.2, 0.32, 0.38), vSeed.x) * (0.85 + 0.3 * vAl);`,
-        // (a glow of their own, lanternfish-like, and a glint: a school reads as a shimmering cloud from a few hundred
-        // metres - as dim as the water round them, they were seen only once the headlights caught them, in the face)
-        emissive: `totalEmissiveRadiance += vec3(0.05, 0.2, 0.26) + vec3(0.55, 0.8, 0.85) * 0.5 * pow(abs(dot(normal, normalize(vViewPosition))), 6.0);`,
+        // (its kind's colour on its back, pale under the belly)
+        color: `diffuseColor.rgb = mix(vec3(0.72, 0.75, 0.78), vSeed, smoothstep(-0.35, 0.45, vFY)) * (0.85 + 0.3 * vAl);`,
+        // (a glow of their own and a glint: a school reads as a shimmering cloud from a few hundred metres - as dim as the
+        // water round them, they were seen only once the headlights caught them, in the face; lanternfish their own light)
+        emissive: `totalEmissiveRadiance += vSeed * 0.18 + vec3(0.03, 0.12, 0.16) + vGlow * (0.75 + 0.25 * sin(lTime * 2.0 + vAl * 7.0)) * 1.6 + vec3(0.55, 0.8, 0.85) * 0.5 * pow(abs(dot(normal, normalize(vViewPosition))), 6.0);`,
       });
       mat.userData.uniforms = this.shipU;
       mat.onBeforeCompile = ((ob) => (sh) => {
@@ -469,12 +542,12 @@ mat3 lfBasis(vec3 f, float roll) {
       this.shoals.frustumCulled = false;
       this.shoals.name = 'shoals-way';
       scene.add(this.shoals);
-      this.shoalsFar = fishPoints(A, B, n, { d0: 175, d1: 235, f0: 620, f1: 760 });
+      this.shoalsFar = fishPoints(A, B, n, { d0: 175, d1: 235, f0: 620, f1: 760 }, C, Dg);
       this.shoalsFar.name = 'shoals-way-far';
       scene.add(this.shoalsFar);
       // the schools out over the abyss and the city, off the way (160 - 520 m out): seen only from afar, as glints
       const far = [];
-      for (let k = 0; k < 400 && far.length < Math.round(48 * D); k++) {
+      for (let k = 0; k < 800 && far.length < Math.round(100 * D); k++) {
         const s = under[Math.floor(rnd() * under.length)];
         tr.frame(s, f);
         const R = f.R.clone().setY(0).normalize(), lat = (rnd() < 0.5 ? -1 : 1) * (160 + rnd() * 360), x = f.P.x + R.x * lat, z = f.P.z + R.z * lat;
@@ -483,28 +556,76 @@ mat3 lfBasis(vec3 f, float roll) {
         if (tr.P[tr.nearestIndex(new THREE.Vector3(x, y, z))].distanceTo(new THREE.Vector3(x, y, z)) < 130 + r) continue;
         far.push([x, y, z, r]);
       }
-      const per2 = 340, n2 = far.length * per2, A2 = new Float32Array(n2 * 4), B2 = new Float32Array(n2 * 4);
-      i = 0;
+      const per2 = 340, n2 = far.length * per2, A2 = new Float32Array(n2 * 4), B2 = new Float32Array(n2 * 4), C2 = new Float32Array(n2 * 4), D2 = new Float32Array(n2 * 4);
+      let i = 0;
       for (const [x, y, z, r] of far) {
-        const dir = rnd() < 0.5 ? 1 : -1, sp = (0.12 + rnd() * 0.1) * dir;
+        const dir = rnd() < 0.5 ? 1 : -1, sp = (0.12 + rnd() * 0.1) * dir, K = rnd() < 0.4 ? KINDS[6 + Math.floor(rnd() * 2)] : kind();
         for (let k = 0; k < per2; k++, i++) {
+          C2.set([K[0][0], K[0][1], K[0][2], K[2]], i * 4);
+          D2.set([K[1][0] * 1.6, K[1][1] * 1.6, K[1][2] * 1.6, 0], i * 4);
           A2.set([x, y, z, r * (0.55 + rnd() * 0.6)], i * 4);
           B2.set([rnd() * TAU, sp * (0.9 + rnd() * 0.2), (rnd() - 0.5) * r * 0.7, 0.7 + rnd() * 1.1], i * 4);
         }
       }
-      this.schools = fishPoints(A2, B2, n2, { d0: 0, d1: 1, f0: 700, f1: 820 });
+      this.schools = fishPoints(A2, B2, n2, { d0: 0, d1: 1, f0: 700, f1: 820 }, C2, D2);
       this.schools.name = 'schools-far';
       scene.add(this.schools);
       console.info(`seabed: ${rocks.length} pinnacles, ${kelp.length} fronds, ${this.grass.geometry.instanceCount} tufts, ${n} fish in ${spots.length} shoals, ${n2} in ${far.length} schools far off`);
     }
-    this.meshes = [this.rocks, this.kelp, this.grass, this.anemones, this.vents, this.shoals, this.shoalsFar, this.schools].filter(Boolean);
+    // ---- crabs: along the foot of both walls on the road under the sea, walking sideways to and fro, their legs stepping
+    // and their claws working; red to orange, the odd big one
+    {
+      const rnd3 = mulberry32(4242), list = [];
+      let next = 0;
+      for (const s of under) {
+        if (s < next) continue;
+        next = s + 14 + rnd3() * 26;
+        tr.frame(s, f);
+        if (f.P.y > SEA_Y - 10) continue;
+        const sd = rnd3() < 0.5 ? -1 : 1, size = rnd3() < 0.12 ? 1.4 + rnd3() * 0.6 : 0.55 + rnd3() * 0.5;
+        const p = f.P.clone().addScaledVector(f.R, sd * (TRACK_W / 2 - 1.1 - size * 0.6));
+        list.push([p.x, p.y, p.z, size, f.T.x, f.T.z, rnd3() * TAU, 1.5 + rnd3() * 4, f.U.x, f.U.y, f.U.z, sd * (0.2 + rnd3() * 0.8)]);
+      }
+      const nc = list.length, A = new Float32Array(nc * 4), B = new Float32Array(nc * 4), Uu = new Float32Array(nc * 4);
+      list.forEach((q, k) => { A.set(q.slice(0, 4), k * 4); B.set(q.slice(4, 8), k * 4); Uu.set(q.slice(8, 12), k * 4); });
+      const g = inst(crabGeometry(), { iA: A, iB: B, iU: Uu }, Math.max(1, nc));
+      const mat = placedMaterial({
+        key: 'crabs', side: THREE.FrontSide, roughness: 0.45, metalness: 0.1,
+        pars: 'attribute float leg; attribute vec4 iA, iB, iU;',
+        place: /* glsl */`
+  vAl = leg; vSeed = vec3(abs(iU.w), position.y, 0.0);
+  vec3 up = normalize(iU.xyz), along = normalize(vec3(iB.x, 0.0, iB.y));
+  along = normalize(along - up * dot(along, up));
+  vec3 face = cross(along, up) * sign(iU.w);
+  // sideways along the wall and back, slowly, a pause at each end
+  float w = sin(lTime * 0.22 + iB.z);
+  vec3 P = iA.xyz + along * iB.w * w * (1.5 - 0.5 * abs(w));
+  vec3 q = position;
+  float stepK = abs(cos(lTime * 0.22 + iB.z));
+  if (leg > 0.5 && leg < 8.5) q.y += max(0.0, sin(lTime * 7.0 + leg * 1.9 + iB.z)) * 0.09 * abs(q.x) * stepK;
+  if (leg > 8.5) q.y += sin(lTime * 1.3 + leg * 2.0 + iB.z) * 0.05 * max(0.0, q.z - 0.3);
+  mat3 B = mat3(along, up, face);
+  transformed = P + B * (q * iA.w);
+  objectNormal = B * normal;`,
+        // (a shell red to orange, darker low down - the legs, the claws' undersides; the eyes' faint glint)
+        color: `diffuseColor.rgb = mix(vec3(0.7, 0.24, 0.08), vec3(0.85, 0.45, 0.14), vSeed.x) * (0.55 + 0.6 * smoothstep(0.1, 0.45, vSeed.y));`,
+        emissive: `totalEmissiveRadiance += vec3(0.06, 0.016, 0.006) + vec3(0.4, 0.9, 0.7) * step(0.54, vSeed.y) * step(vAl, 0.5) * 0.6;`,
+      });
+      this.crabs = new THREE.Mesh(g, mat);
+      this.crabs.frustumCulled = false;
+      this.crabs.name = 'crabs';
+      this.crabs.visible = nc > 0;
+      scene.add(this.crabs);
+      console.info(`seabed: ${deckTufts.length} tufts on the road, ${nc} crabs`);
+    }
+    this.meshes = [this.rocks, this.kelp, this.grass, this.anemones, this.vents, this.shoals, this.shoalsFar, this.schools, this.crabs].filter(Boolean);
   }
 
   // every frame: the sea's level at the camera, the ships near it (the fish scatter from them)
   update(t, lvl, ships, pr = 1, cam = null) {
     this.ventMat.uniforms.lvl.value = lvl; this.ventMat.uniforms.pr.value = pr;
     // (above the sea none of it is seen through the surface: not drawn)
-    if (cam && this.on !== false) { const under = cam.y < lvl + 2; for (const m of [this.grass, this.kelp, this.shoals, this.shoalsFar, this.schools, this.vents, this.anemones]) m.visible = under; }
+    if (cam && this.on !== false) { const under = cam.y < lvl + 2; for (const m of [this.grass, this.kelp, this.shoals, this.shoalsFar, this.schools, this.vents, this.anemones, this.crabs]) m.visible = under; }
     for (const m of [this.shoalsFar, this.schools]) { m.material.uniforms.lvl.value = lvl; m.material.uniforms.pr.value = pr; }
     const sp = this.shipU.shipP.value;
     for (let k = 0; k < 4; k++) {

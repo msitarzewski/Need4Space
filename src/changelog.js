@@ -2,6 +2,15 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.5.5', date: '16 Oct 2026', name: 'Life on the road',
+    notes: [
+      'Under the sea the road is overgrown: grass in tufts and weed along the walls, thinning out across the deck',
+      'Crabs walk sideways along the foot of the walls, the odd big one among them',
+      'Many more fish and of many kinds: silver sardines, mackerel, red snappers, round yellow fish, blue fish, a few big tuna - in every size',
+      'Twice as many schools far out over the abyss, and lanternfish that glow cyan and violet, seen from far off',
+    ],
+  },
+  {
     version: '1.5.4', date: '16 Oct 2026', name: 'Nothing afloat',
     notes: [
       'The leviathans’ fins and tail grow out of their bodies (they floated beside them)',
