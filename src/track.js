@@ -1205,7 +1205,9 @@ float snN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
         uniform float time, prefilter; varying vec2 vUv;
         ${SEG}
         void main() {
-          float x = (vUv.x - 0.5) * 0.36, d = capsule(x, vUv.y), aa = fwidth(d) * 1.3 + 1e-4;
+          // (fwidth(d) leaps where the period wraps - d jumps 4 m there - and lit a flickering dashed bar across the
+          // housing 0.7 m before each light; elsewhere it never exceeds the coordinates' own fwidth)
+          float x = (vUv.x - 0.5) * 0.36, d = capsule(x, vUv.y), aa = min(fwidth(d), fwidth(x) + fwidth(vUv.y)) * 1.3 + 1e-4;
           float lens = 1.0 - smoothstep(0.055 - aa, 0.055 + aa, d);
           float core = 1.0 - smoothstep(0.016 - aa, 0.016 + aa, d);
           float halo = exp(-d * d / 0.004) * 0.5;
