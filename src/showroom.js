@@ -201,7 +201,7 @@ export class Showroom {
   async show(id) {
     if (this.id === id) return;
     this.id = id;
-    for (const k in this.ships) this.ships[k].root.visible = k === id;
+    for (const k in this.ships) this.hideBut(k, id);
     const s = await this.ensure(id);
     if (this.id !== id) { s.root.visible = false; return; }
     s.root.visible = true;
@@ -210,8 +210,18 @@ export class Showroom {
     this.startAt = this.t + 1.2;
   }
 
-  // the glows, plumes and trails of the ship on show: kept out of the AO, as on the circuit
-  fxObjects() { const s = this.ships[this.id]; return s ? s.fxObjects() : []; }
+  // a ship off the stand: hidden with its trails (they hang in the studio itself, not on the ship: left showing, the
+  // last ship's trails, frozen, were drawn by the AO's pass as a plain quad - a black block under the ship on show)
+  hideBut(k, id) {
+    const s = this.ships[k], on = k === id;
+    s.root.visible = on;
+    if (on) return;
+    s.clearTrails();
+    for (const t of [...(s.trails || []), ...(s.engineTrails || []), ...(s.exhaust ? [s.exhaust] : [])]) t.mesh.visible = false;
+  }
+
+  // the glows, plumes and trails of every ship in the studio: kept out of the AO, as on the circuit
+  fxObjects() { return Object.values(this.ships).flatMap((s) => s.fxObjects()); }
 
   // one frame: the stand turning (held still a moment after a drag), the ship's own motion, the camera
   update() {
