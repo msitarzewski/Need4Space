@@ -6,6 +6,7 @@ export const UPDATES = [
     notes: [
       'The reflection in the sea is drawn anti-aliased: thin lights in it no longer crawl as you move',
       'Ripples finer than the screen can show no longer glitter: the moon’s glade softens with distance instead',
+      'The barrel roll over the sea is raised high over the swell: you no longer dip in and out of the water rolling through it',
     ],
   },
   {

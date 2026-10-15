@@ -56,11 +56,12 @@ pt(280, -650, -560, 0, 'hallIn'); pt(40, -645, -590, 0, 'hallOut');
 pt(-170, -632, -680, -14, 'aqueduct'); pt(-420, -620, -820, -26); pt(-560, -600, -1060, -32); pt(-480, -582, -1320, -30); pt(-230, -560, -1440, -18); pt(60, -540, -1430, -6);
 // the long climb up out of the abyss, bursting out of the sea and off the kicker
 pt(380, -485, -1330); pt(750, -385, -1210); pt(1120, -265, -1120); pt(1460, -150, -1065); pt(1760, -60, -1035, 0, 'surge');
-pt(1990, -12, -1022); pt(2190, 10, -1012, 0, 'crest2'); pt(2410, 8, -1010);
-// a barrel roll over the swell
-pt(2590, 12, -1015, 0, 'rollIn'); pt(2750, 12, -1025, 120); pt(2910, 12, -1035, 240); pt(3070, 12, -1045, 0, 'rollOut');
+pt(1990, -12, -1022); pt(2190, 10, -1012, 0, 'crest2'); pt(2410, 16, -1010);
+// a barrel roll high over the swell (the road 56 m wide: rolled at 12 m its low edge went 16 m under the sea, and the
+// ship and the camera with it - in and out of the water through the roll)
+pt(2590, 48, -1015, 0, 'rollIn'); pt(2750, 48, -1025, 120); pt(2910, 48, -1035, 240); pt(3070, 48, -1045, 0, 'rollOut');
 // the long sweep south past the lighthouse
-pt(3250, 16, -940, 14); pt(3350, 20, -760, 24); pt(3390, 24, -480, 12, 'light'); pt(3390, 26, -150); pt(3350, 22, 200, -6);
+pt(3250, 30, -940, 14); pt(3350, 20, -760, 24); pt(3390, 24, -480, 12, 'light'); pt(3390, 26, -150); pt(3350, 22, 200, -6);
 pt(3270, 18, 560, -14); pt(3150, 16, 900, -18); pt(2900, 14, 1180, -24); pt(2550, 12, 1340, -14);
 pt(2100, 10, 1420, 0);
 // west along the south, the loop
