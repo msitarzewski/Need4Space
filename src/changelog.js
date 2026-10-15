@@ -2,6 +2,13 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.4.3', date: '16 Oct 2026', name: 'Still water',
+    notes: [
+      'No more white specks and dashes jumping about on the sea as you move',
+      'Reflections in the sea are soft and steady, without stripes, and the lamps’ reflections are smooth streaks',
+    ],
+  },
+  {
     version: '1.4.2', date: '16 Oct 2026', name: 'Calm water',
     notes: [
       'Reflections on the sea hold still as you drive: far off they no longer break into bands that reshuffle every moment',
