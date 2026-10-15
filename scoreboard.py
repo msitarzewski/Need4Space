@@ -11,7 +11,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-MAPS = ('space', 'forest', 'ice', 'desert')
+MAPS = ('space', 'forest', 'ice', 'desert', 'ocean')
 LEVELS = ('easy', 'normal', 'hard', 'brutal')
 LIMIT = 10
 

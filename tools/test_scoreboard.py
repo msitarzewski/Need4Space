@@ -123,11 +123,11 @@ class ScoreboardChecks(unittest.TestCase):
         self.assertEqual(replay['totalPlayers'], 1)
 
     def test_boards_are_separate_and_persist_after_restart(self):
-        for map_id in ('space', 'forest', 'ice', 'desert'):
+        for map_id in ('space', 'forest', 'ice', 'desert', 'ocean'):
             for level in ('easy', 'normal', 'hard', 'brutal'):
                 self.store.submit(result(0, map_id=map_id, difficulty=level))
         fresh = ScoreStore(self.path)
-        self.assertEqual(len(json.loads(self.path.read_text())['boards']), 16)
+        self.assertEqual(len(json.loads(self.path.read_text())['boards']), 20)
         self.assertEqual(fresh.read('desert', 'brutal')['entries'][0]['name'], 'Pilot 0')
 
     def test_parallel_saves_do_not_lose_players(self):
