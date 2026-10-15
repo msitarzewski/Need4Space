@@ -209,6 +209,12 @@ async function boot() {
   const headlight = new THREE.SpotLight(0xe4ecff, 0, 300, 0.45, 0.6, 1.5);
   headlight.position.set(0, 0.9, -6.5);
   headlight.target.position.set(0, -4, -70);
+  // (a map lit by the ships all the way round aims it lower and wider: its pool starts at the nose, not 30 m ahead)
+  if (world.headlight) {
+    const h = world.headlight;
+    headlight.position.set(...h.pos); headlight.target.position.set(...h.at);
+    Object.assign(headlight, { angle: h.angle, penumbra: h.penumbra, distance: h.distance });
+  }
   ship.root.add(headlight, headlight.target);
   const rivalLights = [0, 1, 2].map(() => { const l = new THREE.PointLight(0xffffff, 0, 70, 1.6); l.userData.rivalLight = true; scene.add(l); return l; });
   const RIVAL_LIGHT = { y: 0.3, z: 9.5, cd: 320 };

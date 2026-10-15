@@ -271,6 +271,7 @@ export class OceanWorld {
     this.startIndex = this.track.start;
     this.level = SEA_Y;
     this.nightLights = true;                         // (main.js: the ships' own lights on all the way round)
+    this.headlight = { pos: [0, 0.55, -6.6], at: [0, -7.5, -36], angle: 0.62, penumbra: 0.8, distance: 170 };
     // four real lights following the city's nearest big lamps: they light the ships and the deck going past
     this.cityLights = [0, 1, 2, 3].map(() => { const l = new THREE.PointLight(0xffffff, 0, 100, 2); scene.add(l); return l; });
     this.bigLamps = this.city.lamps.filter((L) => L.I >= 1300);
@@ -519,6 +520,51 @@ export class OceanWorld {
     }
   }
 
+  // Every ship's headlight seen: a lens glowing at its nose, and its beam - a soft cone ahead and down along the
+  // light's aim, faint in the night air, plain to see in the water (the light coming from the ship, not out of nowhere)
+  shipBeams(cp) {
+    if (!this.race) return;
+    if (!this.beams) {
+      const h = this.headlight, from = new THREE.Vector3(...h.pos), to = new THREE.Vector3(...h.at), len = 46;
+      const dir = to.clone().sub(from).normalize();
+      const cone = new THREE.ConeGeometry(Math.tan(h.angle * 0.62) * len, len, 24, 1, true).translate(0, -len / 2, 0)
+        .applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir)).translate(from.x, from.y, from.z);
+      const lens = new THREE.PlaneGeometry(1, 1);
+      this.beams = this.race.entries.map((e) => {
+        const mat = new THREE.ShaderMaterial({
+          transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+          uniforms: { k: { value: 0 }, from: { value: from }, len: { value: len } },
+          vertexShader: /* glsl */`uniform vec3 from; uniform float len; varying vec3 vN; varying vec3 vW; varying float vU;
+            void main() { vU = min(distance(position, from) / len, 1.0); vN = normalize(mat3(modelMatrix) * normal); vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+          fragmentShader: /* glsl */`uniform float k; varying vec3 vN; varying vec3 vW; varying float vU;
+            void main() {
+              float core = pow(abs(dot(normalize(vN), normalize(cameraPosition - vW))), 2.5);
+              gl_FragColor = vec4(vec3(0.75, 0.85, 1.0) * k * core * pow(max(1.0 - vU, 0.0), 1.8) * smoothstep(0.0, 0.08, vU), 1.0);
+            }`,
+        });
+        const beam = new THREE.Mesh(cone, mat);
+        beam.frustumCulled = false;
+        const glow = new THREE.Mesh(lens, new THREE.ShaderMaterial({
+          transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+          uniforms: { k: mat.uniforms.k },
+          vertexShader: /* glsl */`varying vec2 vQ;
+            void main() { vQ = position.xy * 2.0; vec4 c = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0); c.xy += position.xy * 1.6; gl_Position = projectionMatrix * c; }`,
+          fragmentShader: /* glsl */`uniform float k; varying vec2 vQ;
+            void main() { float r2 = dot(vQ, vQ); if (r2 > 1.0) discard; gl_FragColor = vec4(vec3(0.85, 0.92, 1.0) * (exp(-r2 * 9.0) * 6.0 + exp(-r2 * 2.5) * 0.6) * min(1.0, k * 20.0 + 0.4), 1.0); }`,
+        }));
+        glow.position.copy(from);
+        glow.frustumCulled = false;
+        e.ship.root.add(beam, glow);
+        this.noAO.push(beam, glow);
+        return { e, mat };
+      });
+    }
+    for (const b of this.beams) {
+      const p = b.e.ship.root.position, under = p.y < this.level;
+      b.mat.uniforms.k.value = (b.e.ship.power ?? 1) * (under ? 0.05 : 0.012);
+    }
+  }
+
   // the camera coming up out of the sea: water on the lens (main.js)
   wetCheck(p) {
     const under = p.y < this.level, hit = this.camUnder === true && !under;
@@ -588,6 +634,7 @@ export class OceanWorld {
       }
     }
     this.reflectLights(cp);
+    this.shipBeams(cp);
     // the ships, for the life (splashes where they go into the sea or out of it, bubbles under it)
     const ws = this.shipsWet;
     if (this.race) this.race.entries.forEach((e, k) => {
