@@ -648,7 +648,7 @@ float hullAperture = 1e4;
 		float nl = saturate( dot( n, l.direction ) );
 		// (a flake disc is 1/8 of its cell: the glints average out to the sheen)
 		float glint = min( ( D_GGX( 0.07, saturate( dot( hullFlakeN, h ) ) ) * hullFlakeW
-			+ D_GGX( 0.07, saturate( dot( hullFlakeN2, h ) ) ) * hullFlakeW2 ) * 0.4, 12.0 );
+			+ D_GGX( 0.07, saturate( dot( hullFlakeN2, h ) ) ) * hullFlakeW2 ) * 0.2, 6.0 );
 		float sheen = D_GGX( 0.34, saturate( dot( n, h ) ) ) * hullFlakeS * 0.05;
 		rl.directSpecular += l.color * nl * hullFlakeC * ( glint + sheen ) * hullFlakeK;
 	}
@@ -773,7 +773,9 @@ function finishPatch(sh, U) {
 		hullFlakeW = w0 * ( 1.0 - lf );
 		hullFlakeW2 = w1 * lf;
 		hullFlakeS = 1.0 - mix( 1.0 - smoothstep( 0.35, 0.7, cpp / exp2( l0 ) ), 1.0 - smoothstep( 0.35, 0.7, cpp / exp2( l0 + 1.0 ) ), lf );
-		hullFlakeC = mix( diffuseColor.rgb, vec3( 1.0 ), 0.35 );
+		// (the flakes the paint's own colour: mixed toward white they glinted as white sparks along the dark ink paint up
+		// close - at the start, in the showroom - "white sparkles")
+		hullFlakeC = diffuseColor.rgb * 1.15;
 		hullFlakeK = hullPaintK * hullPaint;
 	}
 #endif`)
