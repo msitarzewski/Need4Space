@@ -92,7 +92,7 @@ export class Showroom {
           gl_FragColor = vec4(c, 1.0);
         }`,
     })));
-    // the floor: dark, fading into the dome's colour toward the horizon (no edge where it ends); it takes the shadow
+    // the floor: dark, fading into the dome's colour toward the horizon (no edge where it ends)
     const fm = new THREE.MeshStandardMaterial({ color: 0x060709, roughness: 0.6, metalness: 0.0 });
     fm.onBeforeCompile = (sh) => {
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vFloorW;')
@@ -104,7 +104,6 @@ export class Showroom {
     fm.customProgramCacheKey = () => 'showroom-floor';
     const floor = new THREE.Mesh(new THREE.CircleGeometry(120, 96), fm);
     floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
     S.add(floor);
     // the turning stand: a brushed-metal drum, its top black glass reflecting the ship, a lit ring round its edge
     this.stand = new THREE.Group();
@@ -124,15 +123,12 @@ export class Showroom {
     ring.rotation.x = Math.PI / 2;
     ring.position.y = STAND.h;
     this.stand.add(ring);
-    // lights: a warm key over the front quarter (the ship's own shadows), strong cool and warm rims cutting its
-    // outline out of the dark, a little light straight down on its back
+    // lights: a warm key over the front quarter, strong cool and warm rims cutting its outline out of the dark, a little
+    // light straight down on its back. No shadow map: up close its texels crawled as stair-steps and blocks over the
+    // recesses and curved hulls on the lit side while the stand turned (the AO shades the contacts; the glass under
+    // the ship grounds it)
     const key = new THREE.DirectionalLight(0xfff0e0, 2.0);
     key.position.set(9, 15, 12);
-    key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
-    Object.assign(key.shadow.camera, { left: -11, right: 11, top: 11, bottom: -11, near: 1, far: 60 });
-    key.shadow.bias = -0.0004;
-    key.shadow.normalBias = 0.02;
     const rimC = new THREE.DirectionalLight(0x9fc4ff, 3.4);
     rimC.position.set(-12, 7, -12);
     const rimW = new THREE.DirectionalLight(0xffc896, 2.4);
@@ -170,7 +166,6 @@ export class Showroom {
           if (!this.sources[id]) src.upgradeMaterials?.(this.renderer.capabilities.getMaxAnisotropy(), this.renderer);
           const ship = new Ship(null, { cloneOf: src, lights: false });
           ship.root.position.y = STAND.h + HOVER + LOWEST;
-          ship.root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
           this.stand.add(ship.root);
           const maps = new Set();
           ship.root.traverse((o) => {
