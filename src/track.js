@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { mergeVertices, mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { clamp, damp, smoothstep, mulberry32, noise2, fbm } from './noise.js';
 import { bakeDeckMaps } from './deck.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { rockMaterial } from './rock.js';
 import { hullMaterial, hullBox, HULL_SIDE, HULL_UNDER, HULL_GIRDER } from './hull.js';
 import { wreckRoute, GRAVEYARD } from './wreckplan.js';
@@ -472,6 +473,34 @@ export class Track {
     this.deckDetail.map.value = m.detailAlbedo;
     this.deckDetail.normal.value = m.detailNormal;
     mat.needsUpdate = true;
+  }
+
+  // the deck's mean colour (linear), as its material makes it: the plates' map averaged over its whole tile, times the
+  // detail layer's mean gain and the circuit's own tint (the desert's sand-washed concrete) - for the light it throws
+  // up onto the ships (ship.js setDeckLight). Measured once on the GPU (64 x 64 samples at a coarse mip).
+  deckAlbedo(renderer) {
+    const map = this.deckMat.map, det = this.deckDetail.map.value, out = new THREE.Color(0.25, 0.25, 0.25);
+    if (!map) return out;
+    const rt = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false });
+    const q = new FullScreenQuad(new THREE.ShaderMaterial({ uniforms: { map: { value: map }, det: { value: det } },
+      vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
+      fragmentShader: /* glsl */`uniform sampler2D map, det;
+        void main() {
+          vec3 s = vec3(0.0); float d = 0.0;
+          for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+            vec2 uv = (vec2(x, y) + 0.5) / 64.0;
+            s += textureLod(map, uv, 4.0).rgb;
+            ${det ? 'd += textureLod(det, uv, 4.0).r;' : 'd += 0.5;'}
+          }
+          gl_FragColor = vec4(s / 4096.0, (0.72 + 0.56 * d / 4096.0) / 1.5);
+        }` }));
+    const px = new Uint8Array(4), prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(rt); q.render(renderer); renderer.readRenderTargetPixels(rt, 0, 0, 1, 1, px); renderer.setRenderTarget(prev);
+    q.material.dispose(); q.dispose(); rt.dispose();
+    const g = px[3] / 255 * 1.5;
+    out.setRGB(px[0] / 255 * g, px[1] / 255 * g, px[2] / 255 * g);
+    if (TH.sand) out.multiply(new THREE.Color(2.3, 1.9, 1.4));         // (as the deck's shader tints it)
+    return out;
   }
 
   // the fastest a ship can take each metre: the yaw rate it can turn at over the curvature there, then a braking

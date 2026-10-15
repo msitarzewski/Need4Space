@@ -520,6 +520,7 @@ function partsMaterial(n, U) {
   m.name = 'Parts';
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
+    deckPatch(sh, U);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float partId;\nattribute vec2 ringP;\nvarying float vPartId;\nvarying vec2 vRingP;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vPartId = partId;\n  vRingP = ringP;');
@@ -552,11 +553,74 @@ function partsGeometry(G, index) {
   return g;
 }
 
+// The deck's light on the hull. Each map's reflections are its sky alone, so a hull lit by the sun from one side was
+// black on the other and underneath (the ice planet's night, space), and its paint, metal and glass had nothing to
+// mirror below the horizon - where Cycles had its floor and studio. The deck under a ship is a big lit plane filling the
+// lower half of what the hull sees: its light (the deck's colour x the sun, sky, lamps and engines lighting it round
+// the ship - setDeckLight, every frame) takes the sky's place below the deck's horizon in the image-based light: in the
+// diffuse by the share of the hemisphere round the normal the deck fills, in the reflections where the reflected ray
+// meets the deck (the horizon softer the rougher the finish). deckK 0: as before.
+const DECK_PARS = /* glsl */`
+uniform vec3 deckUp;
+uniform vec3 deckAlbedo;
+uniform vec3 deckDirect;
+uniform float deckSky;
+uniform float deckK;
+float deckShare( const in vec3 nW ) { return deckK * ( 0.5 - 0.5 * dot( nW, deckUp ) ); }
+float deckSeen( const in vec3 rW, const in float roughness ) {
+	float s = 0.02 + 0.6 * roughness * roughness;
+	return deckK * ( 1.0 - smoothstep( - s, s, dot( rW, deckUp ) ) );
+}
+`;
+const DECK_FNS = /* glsl */`
+#if defined( USE_ENVMAP ) && defined( ENVMAP_TYPE_CUBE_UV )
+	vec3 deckRadiance() {
+		vec3 sky = PI * textureCubeUV( envMap, envMapRotation * deckUp, 1.0 ).rgb * envMapIntensity;
+		return deckAlbedo * RECIPROCAL_PI * ( deckDirect + sky * deckSky );
+	}
+	vec3 deckReflect( const in vec3 viewDir, const in vec3 normal, const in float roughness ) {
+		vec3 r = normalize( mix( reflect( - viewDir, normal ), normal, roughness * roughness ) );
+		return inverseTransformDirection( r, viewMatrix );
+	}
+#endif
+`;
+// (after the cave's dark, which the deck's own light already carries: a deck lit only by the engines in the meteorite)
+const DECK_ADD = /* glsl */`
+#if defined( USE_ENVMAP ) && defined( ENVMAP_TYPE_CUBE_UV )
+	if ( deckK > 0.0 ) {
+		vec3 deckL = deckRadiance();
+		iblIrradiance += PI * deckL * deckShare( inverseTransformDirection( geometryNormal, viewMatrix ) );
+		#if defined( RE_IndirectSpecular )
+			radiance += deckL * deckSeen( deckReflect( geometryViewDir, geometryNormal, material.roughness ), material.roughness );
+			#ifdef USE_CLEARCOAT
+				clearcoatRadiance += deckL * deckSeen( deckReflect( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), material.clearcoatRoughness );
+			#endif
+		#endif
+	}
+#endif
+`;
+const ENV_IRR = 'return PI * envMapColor.rgb * envMapIntensity;', ENV_RAD = 'return envMapColor.rgb * envMapIntensity;';
+const IND_DIFF = '#if defined( RE_IndirectDiffuse )';
+function deckPatch(sh, U) {
+  const C = THREE.ShaderChunk, pars = C.envmap_physical_pars_fragment;
+  if (!pars.includes(ENV_IRR) || !pars.includes(ENV_RAD) || !C.lights_fragment_end.includes(IND_DIFF)) {
+    if (!deckPatch.warned) console.warn('light chunks changed: the deck light on the ships not applied');
+    deckPatch.warned = true;
+    return;
+  }
+  Object.assign(sh.uniforms, U);
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <envmap_physical_pars_fragment>', DECK_PARS + pars
+      .replace(ENV_IRR, 'return PI * envMapColor.rgb * envMapIntensity * ( 1.0 - deckShare( worldNormal ) );')
+      .replace(ENV_RAD, 'return envMapColor.rgb * envMapIntensity * ( 1.0 - deckSeen( reflectVec, roughness ) );') + DECK_FNS)
+    .replace('#include <lights_fragment_end>', C.lights_fragment_end.replace(IND_DIFF, DECK_ADD + IND_DIFF));
+}
+
 // Glass that reads as glass. three.js scales a transparent surface's reflection by its opacity as well, so the canopy
 // and the bay windows were a flat grey film ("the glass on the engine looks so bad"). Here the reflection goes on at
 // full strength (premultiplied blending: the glass adds its reflection and dims what is behind by its opacity), and
 // grazing angles reflect more and let less through (fresnel).
-function glassify(m, tint, opacity) {
+function glassify(m, tint, opacity, deckU) {
   m.color.set(tint);
   m.opacity = opacity;
   m.transparent = true;
@@ -570,6 +634,7 @@ function glassify(m, tint, opacity) {
   m.blendSrcAlpha = THREE.OneFactor;
   m.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
   m.onBeforeCompile = (sh) => {
+    if (deckU) deckPatch(sh, deckU);
     sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>', `
       float glassF = 0.04 + 0.96 * pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 5.0);
       gl_FragColor = vec4(totalDiffuse * diffuseColor.a + totalSpecular + totalEmissiveRadiance,
@@ -670,6 +735,9 @@ export class Ship {
     this.root = new THREE.Group();     // the flight transform (physics)
     this.visual = new THREE.Group();   // hover bob and shake, never fed back to the physics
     this.root.add(this.visual);
+    // the deck's light on this ship's materials (setDeckLight)
+    this.deckU = { deckUp: { value: new THREE.Vector3(0, 1, 0) }, deckAlbedo: { value: new THREE.Color(0.25, 0.25, 0.25) },
+      deckDirect: { value: new THREE.Color(0, 0, 0) }, deckSky: { value: 1 }, deckK: { value: 0 } };
     const base = opts.cloneOf;
     this.model = base ? base.model.clone(true) : gltf.scene;
     if (base) {                        // each rival owns its materials: its glows follow its own engines
@@ -702,8 +770,8 @@ export class Ship {
       }
     });
     // the canopy: smoked; the bay windows: clear enough to see the electronics behind them
-    if (this.mats.Glass) glassify(this.mats.Glass, 0x1c2433, 0.5);
-    if (this.mats.BayGlass) glassify(this.mats.BayGlass, 0x223038, 0.12);
+    if (this.mats.Glass) glassify(this.mats.Glass, 0x1c2433, 0.5, this.deckU);
+    if (this.mats.BayGlass) glassify(this.mats.BayGlass, 0x223038, 0.12, this.deckU);
     // the bays' own light: in Cycles the bay lamps lit the electronics; here nothing reached them in the nacelle's
     // shade and the windows showed a black box. A fill in each part's own colour, on with the avionics.
     for (const n of BAY_FILL) {
@@ -816,6 +884,25 @@ export class Ship {
       .concat(this.partMeshes.map((pm) => ({ mesh: pm.mesh, levels: pm.levels, parts: true }))) : [];
     this.lodErr = base ? base.lodErr : null;
     this.buildDetails();
+    // the rest of the lit materials (rotors, the canopy's frame) take the deck's light too
+    this.model.traverse((o) => {
+      for (const m of o.isMesh ? [].concat(o.material) : []) {
+        if (!m.isMeshStandardMaterial || m.onBeforeCompile !== THREE.Material.prototype.onBeforeCompile) continue;
+        m.onBeforeCompile = (sh) => deckPatch(sh, this.deckU);
+        m.customProgramCacheKey = () => 'feather-deck';
+      }
+    });
+  }
+
+  // the deck's light this frame (main.js): up its normal under the ship (world), direct the irradiance the sun, lamps
+  // and engines put on it round the ship, sky the share of the sky's light reaching it, k 0 (off) .. 1
+  setDeckLight(up, albedo, direct, sky, k) {
+    const U = this.deckU;
+    U.deckUp.value.copy(up);
+    U.deckAlbedo.value.copy(albedo);
+    U.deckDirect.value.copy(direct);
+    U.deckSky.value = sky;
+    U.deckK.value = k;
   }
 
   // Parts thinner than a fraction of a pixel on screen are left out of every pass (the frame, both depth slices, the AO
@@ -977,7 +1064,7 @@ export class Ship {
       else this.partE.push({ o: p.id * 4, kind: p.kind, base: p.base, e, brake: !!p.brake });
     }
     this.partU = { partA: { value: S.A }, partB: { value: B }, partR: { value: S.R },
-      ringEng: { value: this.engineColor.clone() }, ringHot: { value: this.engineColor.clone().lerp(white, 0.8) } };
+      ringEng: { value: this.engineColor.clone() }, ringHot: { value: this.engineColor.clone().lerp(white, 0.8) }, ...this.deckU };
     this.partMat = partsMaterial(S.n, this.partU);
     S.groups.forEach((G, gi) => {
       const levels = G.levels.map((idx) => partsGeometry(G, idx));
@@ -1102,6 +1189,7 @@ export class Ship {
       m.userData.clearcoat = 0.25;                     // (Laptop mode drops it: quality.js setLite)
       const rg = !!nm?.userData.rg;
       m.onBeforeCompile = (sh) => {
+        deckPatch(sh, this.deckU);
         sh.fragmentShader = sh.fragmentShader.replace('#include <lights_physical_fragment>',
           '#include <lights_physical_fragment>\n#ifdef USE_CLEARCOAT\n  material.clearcoat *= clamp(1.0 - metalnessFactor, 0.0, 1.0);\n#endif');
         if (rg) sh.fragmentShader = rgNormalChunk(sh.fragmentShader);
@@ -1123,6 +1211,7 @@ export class Ship {
     const m = this.mats.RacerBaked;
     const A = new THREE.Color(...team.livery), B = new THREE.Color(...team.body);
     m.onBeforeCompile = (sh) => {
+      deckPatch(sh, this.deckU);
       sh.uniforms.teamA = { value: A };
       sh.uniforms.teamB = { value: B };
       sh.fragmentShader = sh.fragmentShader
