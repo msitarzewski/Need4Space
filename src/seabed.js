@@ -13,7 +13,7 @@ import { mulberry32, fbm } from './noise.js';
 import { TRACK_W } from './track.js';
 import { SEA_Y, SEA_GLSL } from './sea.js';
 import { LIFE_U, fishGeometry } from './sealife.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const TAU = Math.PI * 2, V = (x, y, z) => new THREE.Vector3(x, y, z);
 
@@ -126,7 +126,7 @@ export function crabGeometry() {
     // (the moving finger: lowest point of the hand, opening down - the shader works it by its height there)
     add(new THREE.ConeGeometry(0.045, 0.22, 7).rotateX(Math.PI / 2 + 0.25).translate(sd * 0.43, 0.35, 1.15), leg + 10, 4);
   }
-  return mergeGeometries(parts);
+  return mergeVertices(mergeGeometries(parts));
 }
 
 const inst = (base, attrs, count) => {
@@ -135,6 +135,50 @@ const inst = (base, attrs, count) => {
   g.instanceCount = count;
   return g;
 };
+
+// Instances drawn only within reach of the camera: sorted once into cells of space (each cell's instances together in the
+// arrays), and each time the camera has moved a step the cells within reach are copied to the front of what is drawn -
+// the rest not drawn at all (their shaders shrink them away before the reach: nothing is seen to go). at(i): where
+// instance i stands. All of them drawn until the first update (the warm-up draws everything)
+class NearPack {
+  constructor(geo, at, { cell = 60, reach = 400, step = 40 } = {}) {
+    this.geo = geo; this.reach = reach; this.step = step; this.last = null;
+    const n = geo.instanceCount, byCell = new Map();
+    for (let i = 0; i < n; i++) {
+      const [x, y, z] = at(i), k = `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`;
+      if (!byCell.has(k)) byCell.set(k, []);
+      byCell.get(k).push([i, x, y, z]);
+    }
+    this.attrs = Object.values(geo.attributes).filter((a) => a.isInstancedBufferAttribute).map((attr) => ({ attr, k: attr.itemSize, master: new Float32Array(attr.array.length) }));
+    this.cells = [];
+    let o = 0;
+    for (const list of byCell.values()) {
+      let cx = 0, cy = 0, cz = 0, r = 0;
+      for (const [, x, y, z] of list) { cx += x / list.length; cy += y / list.length; cz += z / list.length; }
+      for (const [i, x, y, z] of list) {
+        r = Math.max(r, Math.hypot(x - cx, y - cy, z - cz));
+        for (const a of this.attrs) a.master.set(a.attr.array.subarray(i * a.k, (i + 1) * a.k), o * a.k);
+        o++;
+      }
+      this.cells.push({ start: o - list.length, n: list.length, x: cx, y: cy, z: cz, r });
+    }
+    for (const a of this.attrs) a.attr.array.set(a.master);
+  }
+
+  update(cam) {
+    if (this.last && this.last.distanceToSquared(cam) < this.step * this.step) return;
+    (this.last ||= new THREE.Vector3()).copy(cam);
+    const lim = this.reach + this.step;
+    let o = 0;
+    for (const c of this.cells) {
+      if (Math.hypot(c.x - cam.x, c.y - cam.y, c.z - cam.z) - c.r > lim) continue;
+      for (const a of this.attrs) a.attr.array.set(a.master.subarray(c.start * a.k, (c.start + c.n) * a.k), o * a.k);
+      o += c.n;
+    }
+    for (const a of this.attrs) { a.attr.clearUpdateRanges(); a.attr.addUpdateRange(0, Math.max(1, o) * a.k); a.attr.needsUpdate = true; }
+    this.geo.instanceCount = o;
+  }
+}
 
 // Fish too far off for their shape (or a whole school out over the abyss): each a glint as long as it is on the screen,
 // along the way it swims there, faintly lit of itself (lanternfish: a school reads as a shimmer of blue far off) and
@@ -368,6 +412,7 @@ export class Seabed {
   float k = along * along;
   q.x += (sin(t * 0.7 + ph + along * 2.4) * 0.12 + sin(t * 1.9 + ph * 2.0 + along * 5.0) * 0.04) * h * k;
   q.z += (cos(t * 0.6 + ph * 1.3 + along * 2.1) * 0.1) * h * k;
+  q *= 1.0 - smoothstep(420.0, 480.0, distance(iA.xyz, cameraPosition));
   transformed = iA.xyz + q;
   objectNormal = vec3(normal.x * c - normal.z * s, normal.y, normal.x * s + normal.z * c);`,
         color: `diffuseColor.rgb = mix(vec3(0.05, 0.09, 0.03), vec3(0.18, 0.24, 0.06), vAl) * (0.75 + 0.5 * fract(vSeed.x * 3.7));`,
@@ -378,6 +423,7 @@ export class Seabed {
       this.kelp = new THREE.Mesh(g, mat);
       this.kelp.frustumCulled = false;
       this.kelp.name = 'kelp';
+      this.kelpPack = new NearPack(g, (i) => A.subarray(i * 4, i * 4 + 3), { reach: 480 });
       scene.add(this.kelp);
     }
     // ---- sea grass: tufts in meadows round the spots found
@@ -404,6 +450,7 @@ export class Seabed {
   q = vec3(q.x * c - q.z * s, q.y, q.x * s + q.z * c);
   q.x += sin(lTime * 1.1 + iB.x + iA.x * 0.05) * 0.18 * h * along * along;
   q.z += cos(lTime * 0.9 + iB.x * 1.7 + iA.z * 0.05) * 0.14 * h * along * along;
+  q *= 1.0 - smoothstep(340.0, 400.0, distance(iA.xyz, cameraPosition));
   transformed = iA.xyz + q;
   objectNormal = vec3(normal.x * c - normal.z * s, normal.y, normal.x * s + normal.z * c);`,
         color: `diffuseColor.rgb = mix(vec3(0.04, 0.07, 0.03), vec3(0.14, 0.2, 0.07), vAl) * (0.8 + 0.4 * vSeed.y);`,
@@ -412,6 +459,7 @@ export class Seabed {
       this.grass = new THREE.Mesh(g, mat);
       this.grass.frustumCulled = false;
       this.grass.name = 'sea-grass';
+      this.grassPack = new NearPack(g, (i) => A.subarray(i * 4, i * 4 + 3), { reach: 400 });
       scene.add(this.grass);
     }
     // ---- anemones: glowing on the pinnacles' tops, pulsing slowly (cyan, violet, green)
@@ -589,8 +637,10 @@ mat3 lfBasis(vec3 f, float roll) {
       this.shoals = new THREE.Mesh(g, mat);
       this.shoals.frustumCulled = false;
       this.shoals.name = 'shoals-way';
+      this.shoalPack = new NearPack(g, (i) => A.subarray(i * 4, i * 4 + 3), { reach: 235 + 45 });
       scene.add(this.shoals);
-      this.shoalsFar = fishPoints(A, B, n, { d0: 175, d1: 235, f0: 1000, f1: 1200 }, C, Dg);
+      // (its own copies: the shapes' arrays are packed near the camera as it goes)
+      this.shoalsFar = fishPoints(A.slice(), B.slice(), n, { d0: 175, d1: 235, f0: 1000, f1: 1200 }, C.slice(), Dg.slice());
       this.shoalsFar.name = 'shoals-way-far';
       scene.add(this.shoalsFar);
       // the schools all round the way, off it: big clouds 60 - 300 m out at every depth, and further ones out over the
@@ -663,7 +713,7 @@ mat3 lfBasis(vec3 f, float roll) {
   // (the moving fingers open and shut)
   if (leg > 18.5) q.y -= (0.5 + 0.5 * sin(lTime * 2.3 + leg + iB.z)) * 0.12 * max(0.0, q.z - 1.04);
   mat3 B = mat3(along, up, face);
-  transformed = P + B * (q * iA.w);
+  transformed = P + B * (q * iA.w * (1.0 - smoothstep(340.0, 400.0, distance(iA.xyz, cameraPosition))));
   objectNormal = B * normal;`,
         // (the shell deep red on top to orange at its rim, speckled; the belly cream; the legs orange-red banded paler at
         // the joints; the claws red with dark tips; the eyes black and glossy. A faint warm glow of their own: they read in
@@ -681,18 +731,25 @@ mat3 lfBasis(vec3 f, float roll) {
       this.crabs = new THREE.Mesh(g, mat);
       this.crabs.frustumCulled = false;
       this.crabs.name = 'crabs';
+      this.crabPack = new NearPack(g, (i) => A.subarray(i * 4, i * 4 + 3), { reach: 400 + 9 });
       this.crabs.visible = nc > 0;
       scene.add(this.crabs);
       console.info(`seabed: ${deckTufts.length} tufts on the road, ${nc} crabs`);
     }
     this.meshes = [this.rocks, this.kelp, this.grass, this.anemones, this.vents, this.shoals, this.shoalsFar, this.schools, this.crabs].filter(Boolean);
+    this.packs = [this.kelpPack, this.grassPack, this.shoalPack, this.crabPack].filter(Boolean);
+    for (const m of [this.kelp, this.grass, this.shoals, this.crabs]) if (m) m.layers.set(4);
   }
 
   // every frame: the sea's level at the camera, the ships near it (the fish scatter from them)
   update(t, lvl, ships, pr = 1, cam = null) {
     this.ventMat.uniforms.lvl.value = lvl; this.ventMat.uniforms.pr.value = pr;
     // (above the sea none of it is seen through the surface: not drawn)
-    if (cam && this.on !== false) { const under = cam.y < lvl + 2; for (const m of [this.grass, this.kelp, this.shoals, this.shoalsFar, this.schools, this.vents, this.anemones, this.crabs]) m.visible = under; }
+    if (cam && this.on !== false) {
+      const under = cam.y < lvl + 2;
+      for (const m of [this.grass, this.kelp, this.shoals, this.shoalsFar, this.schools, this.vents, this.anemones, this.crabs]) m.visible = under;
+      if (under) for (const k of this.packs) k.update(cam);
+    }
     for (const m of [this.shoalsFar, this.schools]) { m.material.uniforms.lvl.value = lvl; m.material.uniforms.pr.value = pr; }
     const sp = this.shipU.shipP.value;
     for (let k = 0; k < 4; k++) {

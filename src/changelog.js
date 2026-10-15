@@ -2,6 +2,14 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.5.8', date: '16 Oct 2026', name: 'Smoother seas',
+    notes: [
+      'The ocean planet runs faster, most of all under the sea (the slowest stretch a quarter quicker), with nothing changed in how it looks',
+      'Crabs, fish, sea grass and kelp are drawn only within reach of the camera; the crabs themselves are lighter',
+      'The drowned city is no longer drawn while you are above the sea, and what stands above the sea is not drawn deep under it',
+    ],
+  },
+  {
     version: '1.5.7', date: '16 Oct 2026', name: 'Teeming',
     notes: [
       'Twice the fish along the road under the sea, in more and bigger shoals',

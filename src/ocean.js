@@ -860,6 +860,16 @@ export class OceanWorld {
     this.ocean.reflect(renderer, this.scene, this.cam, this.sky, this.skyCam, this.fog, under);
   }
 
+  // the things wholly above the sea and wholly under it (update: each not drawn from the other side) - none holding a
+  // light: a light hidden would change every lit shader's light count
+  sides() {
+    const named = (re) => { const l = []; this.scene.traverse((o) => { if ((o.isMesh || o.isPoints) && re.test(o.name)) l.push(o); }); return l; };
+    const cm = this.cityMeshes;
+    this.highOnly = named(/^(castles|stacks|lighthouse|lighthouse-rock)$/);
+    this.deepOnly = [...named(/^(abyss|keeper-pedestal|keeper-braziers)$/), cm.street, cm.halo, cm.glow].filter(Boolean);
+    for (const o of [...this.highOnly, ...this.deepOnly]) o.traverse((c) => { if (c.isLight) throw new Error(`a light under ${o.name}: not hidden by side`); });
+  }
+
   // the camera coming up out of the sea: water on the lens (main.js)
   wetCheck(p) {
     const under = p.y < this.level, hit = this.camUnder === true && !under;
@@ -954,9 +964,10 @@ export class OceanWorld {
         l.position.copy(L.p); l.color.setRGB(...L.col); l.distance = L.reach * 1.2; l.intensity = L.I * 2.2 * (1 - smoothstep(150, 245, d));
       });
     }
-    // the city's chunks: drawn only as far as the water lets them be seen (from above the sea: what shows through it)
+    // the city's chunks: drawn only as far as the water lets them be seen - from above the sea, not at all (the sea is
+    // all but opaque from above, with hundreds of metres of water under it: nothing of the city shows through)
     {
-      const reach = cp.y < this.level ? 1700 : 1100;
+      const reach = cp.y < this.level + 1 ? 1700 : -1e9;
       for (const m of this.city.parts) {
         const sp = m.geometry.boundingSphere;
         m.visible = sp.center.distanceTo(cp) - sp.radius < reach;
@@ -984,7 +995,15 @@ export class OceanWorld {
     const pr = renderer ? renderer.getPixelRatio() * (this.renderScale || 1) : 1;
     this.life.update(t, dt, camera, s, this.level, ws, pr);
     this.seabed.update(t, this.level, ws.slice().sort((a, b) => a.pos.distanceToSquared(cp) - b.pos.distanceToSquared(cp)), pr, cp);
-    this.squid?.update(dt, camera.position);
+    // what stands wholly above the sea is not drawn from deep in it, nor what lies wholly under it from above it:
+    // nothing of either shows through the water and the surface between (frame for frame the same, from 165 m down)
+    {
+      if (!this.highOnly) this.sides();
+      const deep = cp.y < this.level - 150, under = cp.y < this.level + 1;
+      for (const o of this.highOnly) o.visible = !deep;
+      for (const o of this.deepOnly) o.visible = under;
+      this.squid?.update(dt, camera.position, deep);
+    }
     const tr = this.track, gi = tr.gantryIdx, sIdx = Math.floor(s / tr.step);
     gi.map((i) => ({ i, d: Math.min((i - sIdx + tr.n) % tr.n, (sIdx - i + tr.n) % tr.n) }))
       .sort((p, q) => p.d - q.d).slice(0, 3).forEach(({ i }, k) => {

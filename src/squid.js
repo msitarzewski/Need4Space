@@ -419,18 +419,22 @@ vec3 sqArmUp(float u, int k, vec3 root, mat3 Bs, out vec3 T, out vec3 Nin) {
       this.mantle.name = 'squid-mantle';
     }
     this.meshes = [this.arms, this.mantle];
+    // (placed by the shaders: their bounds set by hand - round the rock and all the arms can reach - so they are not
+    // drawn when out of view)
     for (const m of this.meshes) {
-      m.frustumCulled = false;
+      m.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(x, 100, z), 190);
       m.receiveShadow = true;
       m.layers.set(2);
       scene.add(m);
     }
   }
 
-  setOn(on) { for (const m of this.meshes) m.visible = on; }
+  setOn(on) { this.on = on; for (const m of this.meshes) m.visible = on; }
 
-  // every frame: its head turns to watch the camera go by (within ~0.7 rad of where it looks out, when within ~900 m)
-  update(dt, cam) {
+  // every frame: its head turns to watch the camera go by (within ~0.7 rad of where it looks out, when within ~900 m);
+  // not drawn from deep in the sea (deep: nothing above the sea shows down there)
+  update(dt, cam, deep = false) {
+    for (const m of this.meshes) m.visible = this.on !== false && !deep;
     const P = this.U.sqP.value, C = this.U.sqC.value, t = LIFE_U.lTime.value;
     const look = P.x + P.y * Math.sin(P.z * t);
     let d = Math.atan2(cam.z - C.z, cam.x - C.x) - look;
