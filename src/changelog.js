@@ -2,6 +2,12 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.5.1', date: '16 Oct 2026', name: 'Steady walls',
+    notes: [
+      'Under the sea the walls of the abyss, the rock spires and the Keeper’s pedestal no longer show dark squares that slide as you move: their shading is baked in, as on the desert’s canyons',
+    ],
+  },
+  {
     version: '1.5.0', date: '16 Oct 2026', name: 'Dark water',
     notes: [
       'The sea is dark water from above: the road under it, the rocks and the ships diving are no longer seen through it',

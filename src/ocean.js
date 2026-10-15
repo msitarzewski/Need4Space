@@ -325,6 +325,20 @@ export class OceanWorld {
     // the picture under the sea (main.js adds a map's own pass)
     this.heat = new UnderPass();
     lap('lights');
+    // The sea's floor and walls, the pinnacles, the Keeper's pedestal, the stacks: steep rock, kept out of the AO's own
+    // shading as the desert's canyons are (main.js aoOccluders: their depth hides what lies behind them, a canyonAO of 1
+    // leaves them unshaded) - under the sea the AO's false self-occlusion on steep ground drew dark squares on the walls
+    // either side of the way that slid as the camera moved. One attribute shared by the floor's chunks
+    {
+      const ground = [...cm.floor, this.keeper.mesh, this.stacks, this.lighthouseRock, this.seabed.rocks].filter(Boolean), open = new Map();
+      for (const m of ground) {
+        if (m.geometry.attributes.canyonAO) continue;                 // (baked: the floor, the pinnacles, the pedestal)
+        const pa = m.geometry.attributes.position;
+        if (!open.has(pa)) open.set(pa, new THREE.BufferAttribute(new Float32Array(pa.count).fill(1), 1));
+        m.geometry.setAttribute('canyonAO', open.get(pa));
+      }
+      this.aoOccluders.push(...ground);
+    }
     console.info(`ocean built (ms): ${times.join(', ')}`);
   }
 
@@ -354,7 +368,12 @@ export class OceanWorld {
     // the pedestal: a column of basalt, flared where it stands on the floor, a lip under the statue's hem (<= 250 m)
     const prof = [[0, yF], [268, yF], [262, yF + 30], [250, yF + 64], [238, yF + 130], [232, (yF + yT) / 2], [234, yT - 70],
       [244, yT - 36], [249, yT - 16], [246, yT - 8], [245, yT], [0, yT]].map(([r, y]) => new THREE.Vector2(r, y));
-    const ped = new THREE.Mesh(mergeGeometries([new THREE.LatheGeometry(prof, 96).translate(K.x, 0, K.z), ...bowls].map((g) => g.deleteAttribute('uv'))), pedMat);
+    const pg = mergeGeometries([new THREE.LatheGeometry(prof, 96).translate(K.x, 0, K.z), ...bowls].map((g) => g.deleteAttribute('uv')));
+    // (its ambient baked, darker down where it stands on the floor: kept out of the AO's own, as the floor is)
+    const pao = new Uint8Array(pg.attributes.position.count);
+    for (let v = 0; v < pao.length; v++) pao[v] = Math.round(255 * (0.55 + 0.45 * smoothstep(yF, yF + 90, pg.attributes.position.getY(v))));
+    pg.setAttribute('canyonAO', new THREE.Uint8BufferAttribute(pao, 1, true));
+    const ped = new THREE.Mesh(pg, pedMat);
     ped.name = 'keeper-pedestal';
     ped.layers.set(2); ped.receiveShadow = true;
     scene.add(ped);
@@ -462,6 +481,7 @@ export class OceanWorld {
     for (const g of geos) { if (g.attributes.talus) g.deleteAttribute('talus'); if (g.attributes.uv) g.deleteAttribute('uv'); }
     const m = new THREE.Mesh(mergeGeometries(geos), (this.rockMat = basaltMaterial()));
     m.name = 'stacks';
+    this.stacks = m;
     m.layers.set(2); m.layers.enable(6);
     m.castShadow = m.receiveShadow = true;
     scene.add(m);
@@ -504,6 +524,7 @@ export class OceanWorld {
     const rock = stackGeometry({ x, z, r: 24, h: top + 4, seed: 77 });
     const rm = new THREE.Mesh(rock, this.rockMat);
     rm.name = 'lighthouse-rock';
+    this.lighthouseRock = rm;
     rm.layers.set(2); rm.castShadow = rm.receiveShadow = true;
     const L = lighthouseGeometry(x, top + 2, z, 0.4);
     this.lightLamp = L.lamp;

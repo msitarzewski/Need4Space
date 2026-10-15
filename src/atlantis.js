@@ -450,9 +450,25 @@ function floorGeometry(basin) {
     const a = i * (nx + 1) + j, b = a + 1, c = a + nx + 1, d = c + 1;
     idx.push(a, c, b, b, c, d);
   }
+  // its ambient horizon, baked (as the desert's canyons): how high the floor and the walls round each point rise over it,
+  // eight ways out to ~360 m - the AO's own on these walls drew dark squares that slid with the camera (main.js: an
+  // occluder, this in its place)
+  const ao = new Uint8Array((nx + 1) * (nz + 1)), H = (i, j) => pos[(Math.min(nz, Math.max(0, i)) * (nx + 1) + Math.min(nx, Math.max(0, j))) * 3 + 1];
+  const dirs = Array.from({ length: 8 }, (_, k) => [Math.cos(k * Math.PI / 4), Math.sin(k * Math.PI / 4)]), reach = [1, 2, 3, 5, 8, 12, 18, 27, 40];
+  for (let i = 0; i <= nz; i++) for (let j = 0; j <= nx; j++) {
+    const y = H(i, j);
+    let occ = 0;
+    for (const [di, dj] of dirs) {
+      let h = 0;
+      for (const d of reach) h = Math.max(h, (H(Math.round(i + di * d), Math.round(j + dj * d)) - y - 0.7) / (d * step));
+      occ += h / Math.hypot(1, h);
+    }
+    ao[i * (nx + 1) + j] = Math.round(255 * Math.max(0.35, 1 - 0.6 * occ / dirs.length));
+  }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   g.setAttribute('fac', new THREE.BufferAttribute(fac, 3));
+  g.setAttribute('canyonAO', new THREE.Uint8BufferAttribute(ao, 1, true));
   g.setIndex(idx);
   g.computeVertexNormals();
   return g;

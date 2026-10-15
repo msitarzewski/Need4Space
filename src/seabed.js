@@ -159,8 +159,12 @@ function pinnacleGeometry({ x, z, y0, y1, r, seed }) {
   const ci = pos.length / 3, last = (rows.length - 1) * NU;
   pos.push(x, y1 - h * 0.02, z);
   for (let j = 0; j < NU; j++) idx.push(last + j, ci, last + (j + 1) % NU);
+  // its ambient, baked: darker down where it stands in the floor (the AO's own on its steep sides drew squares)
+  const ao = new Uint8Array(pos.length / 3);
+  for (let v = 0; v < ao.length; v++) { const t = Math.min(1, Math.max(0, (pos[v * 3 + 1] - y0) / 60)); ao[v] = Math.round(255 * (0.5 + 0.5 * t * t * (3 - 2 * t))); }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('canyonAO', new THREE.Uint8BufferAttribute(ao, 1, true));
   g.setIndex(idx);
   g.computeVertexNormals();
   return { g, topR: r * 0.75 };
@@ -488,16 +492,18 @@ mat3 lfBasis(vec3 f, float roll) {
 function mergeAll(gs) {
   let n = 0, ni = 0;
   for (const g of gs) { n += g.attributes.position.count; ni += g.index.count; }
-  const pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3), idx = new Uint32Array(ni);
+  const pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3), idx = new Uint32Array(ni), ao = new Uint8Array(n).fill(255);
   let o = 0, oi = 0;
   for (const g of gs) {
     pos.set(g.attributes.position.array, o * 3); nrm.set(g.attributes.normal.array, o * 3);
+    if (g.attributes.canyonAO) ao.set(g.attributes.canyonAO.array, o);
     for (let i = 0; i < g.index.count; i++) idx[oi + i] = g.index.array[i] + o;
     o += g.attributes.position.count; oi += g.index.count;
   }
   const out = new THREE.BufferGeometry();
   out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   out.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  out.setAttribute('canyonAO', new THREE.Uint8BufferAttribute(ao, 1, true));
   out.setIndex(new THREE.BufferAttribute(idx, 1));
   return out;
 }
