@@ -382,7 +382,7 @@ export function floorHeight(x, z, C, R) {
 }
 
 function floorGeometry(C, R) {
-  const W = R.x * 2.6, D = R.z * 2.6, step = 6, nx = Math.ceil(W / step), nz = Math.ceil(D / step);
+  const W = R.x * 2.6, D = R.z * 2.6, step = 8, nx = Math.ceil(W / step), nz = Math.ceil(D / step);
   const pos = new Float32Array((nx + 1) * (nz + 1) * 3), fac = new Float32Array((nx + 1) * (nz + 1) * 3), idx = [];
   for (let i = 0; i <= nz; i++) for (let j = 0; j <= nx; j++) {
     const x = C.x - W / 2 + j * step, z = C.z - D / 2 + i * step, k = (i * (nx + 1) + j) * 3;
@@ -428,6 +428,29 @@ float slN(vec2 x) { vec2 i = floor(x), u = fract(x); u = u * u * (3.0 - 2.0 * u)
   return mat;
 }
 
+// one geometry cut into chunks on a grid (cell m): each its own triangles over the shared vertices, its own bounds - drawn
+// only where the camera can see it (frustum, and the distance the water lets it see)
+export function chunks(g, cell) {
+  const I = g.index.array, P = g.attributes.position.array, cells = new Map();
+  for (let t = 0; t < I.length; t += 3) {
+    const a = I[t] * 3, b = I[t + 1] * 3, c = I[t + 2] * 3;
+    const k = `${Math.floor((P[a] + P[b] + P[c]) / 3 / cell)},${Math.floor((P[a + 2] + P[b + 2] + P[c + 2]) / 3 / cell)}`;
+    (cells.get(k) || cells.set(k, []).get(k)).push(I[t], I[t + 1], I[t + 2]);
+  }
+  const out = [], box = new THREE.Box3(), v = new THREE.Vector3();
+  for (const idx of cells.values()) {
+    const q = new THREE.BufferGeometry();
+    for (const [k, a] of Object.entries(g.attributes)) q.setAttribute(k, a);
+    q.setIndex(idx.length > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint32BufferAttribute(idx, 1));
+    box.makeEmpty();
+    for (const i of idx) box.expandByPoint(v.fromArray(P, i * 3));
+    q.boundingBox = box.clone();
+    q.boundingSphere = box.getBoundingSphere(new THREE.Sphere());
+    out.push(q);
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- the lamps' light, baked into every vertex
 function bakeLamps(g, lamps) {
   const CELL = 60, grid = new Map();
@@ -454,6 +477,24 @@ function bakeLamps(g, lamps) {
     out[i * 3] = r; out[i * 3 + 1] = gg; out[i * 3 + 2] = b;
   }
   g.setAttribute('lit', new THREE.BufferAttribute(out, 3));
+}
+
+// ---------------------------------------------------------------- the lighthouse
+// the old lighthouse on its rock out at sea: a stepped plinth, a tapering shaft in three stages ringed with cornices and
+// lit slit windows, a gallery of columns round the lantern, a cone of green tiles over it. y0: the rock's top
+export function lighthouseGeometry(x, y0, z, rot = 0) {
+  const B = new Builder(), lamps = [], M = at(x, y0, z, rot);
+  B.place(M, (q) => {
+    q.lathe([[17, -2, TRIM], [17, 3, TRIM], [14, 3, TRIM], [14, 6, TRIM], [11, 6, ASHLAR]], 32);
+    q.lathe([[11, 6, ASHLAR], [10, 28, WINDOW], [11.6, 29, TRIM], [11.6, 31, TRIM], [9.6, 31, ASHLAR], [8.8, 52, WINDOW], [10.4, 53, TRIM], [10.4, 55, TRIM],
+      [8.6, 55, ASHLAR], [8, 66, ASHLAR], [8.4, 66.5, GLOW], [8.4, 67.2, GLOW], [8, 67.2, ASHLAR], [8, 69, ASHLAR], [11.5, 70.5, TRIM], [11.5, 72, TRIM], [0, 72, TRIM]], 32);
+    for (let k = 0; k < 10; k++) { const a = (k / 10) * TAU; q.place(at(Math.cos(a) * 7.6, 72, Math.sin(a) * 7.6), (c) => column(c, 11, 0.55)); }
+    q.place(at(0, 83, 0), (c) => c.lathe([[10, 0, TRIM], [10, 1.6, TRIM], [8, 3.5, ROOF], [1.4, 12, ROOF], [0.7, 15, TRIM], [0, 15.5, TRIM]], 32));
+  });
+  lamps.push({ p: V(0, 78, 0).applyMatrix4(M), col: [1.0, 0.86, 0.62], I: 40000, reach: 150, size: 3, kind: 'beacon' });
+  const g = B.geometry();
+  bakeLamps(g, lamps);
+  return { geometry: g, lamp: lamps[0] };
 }
 
 // ---------------------------------------------------------------- the city
@@ -650,12 +691,12 @@ export class City {
     console.info(`city: ${nh} houses, ${lamps.length} lamps, ${(this.stone.index.count / 3 / 1000).toFixed(0)}k tris (stone), floor ${(this.floor.index.count / 3 / 1000).toFixed(0)}k`);
   }
 
-  // the meshes: the stone, the floor, the lamps' glowing bodies (an orb each, sized by kind)
+  // the meshes: the stone and the floor in chunks, the lamps' glowing bodies (an orb each, sized by kind), their halos
   meshes() {
-    const stone = new THREE.Mesh(this.stone, stoneMaterial());
-    stone.name = 'city';
-    const floor = new THREE.Mesh(this.floor, siltMaterial());
-    floor.name = 'city-floor';
+    const sm = stoneMaterial(), fm = siltMaterial();
+    const stone = chunks(this.stone, 260).map((g) => { const m = new THREE.Mesh(g, sm); m.name = 'city'; return m; });
+    const floor = chunks(this.floor, 400).map((g) => { const m = new THREE.Mesh(g, fm); m.name = 'city-floor'; return m; });
+    this.parts = [...stone, ...floor];
     const orb = new THREE.IcosahedronGeometry(1, 2);
     const glow = new THREE.InstancedMesh(orb, new THREE.MeshBasicMaterial({ color: 0xffffff }), this.lamps.length);
     const M = new THREE.Matrix4(), c = new THREE.Color();

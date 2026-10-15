@@ -13,7 +13,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SUN_DIR, SUN_E, SUN_COL, SEA_Y, seaSkyDome, seaLight, Ocean, waveHeight } from './sea.js';
 import { mesaGeometry, archGeometry } from './sandstone.js';
 import { sunOnly, setCave } from './look.js';
-import { City } from './atlantis.js';
+import { City, lighthouseGeometry, stoneMaterial } from './atlantis.js';
 import { SeaLife } from './sealife.js';
 import { TrackGrid } from './spires.js';
 import { moonMesh } from './celestial.js';
@@ -241,7 +241,7 @@ export class OceanWorld {
     // the drowned city
     this.city = new City(this.track, this.grid, { dens: this.dens });
     const cm = this.city.meshes();
-    for (const m of [cm.stone, cm.floor]) { m.layers.set(2); m.receiveShadow = true; scene.add(m); }
+    for (const m of [...cm.stone, ...cm.floor]) { m.layers.set(2); m.receiveShadow = true; scene.add(m); }
     scene.add(cm.glow, cm.halo);
     this.noAO.push(cm.halo);
     this.cityMeshes = cm;
@@ -250,6 +250,7 @@ export class OceanWorld {
     lap('stacks');
     this.buildPylons(scene);
     lap('pylons');
+    this.buildLighthouse(scene);
     // its life: leapers, leviathans, birds, the deep's shoals and jellyfish, spray
     this.life = new SeaLife(scene, this.track, { city: this.city, dens: this.dens });
     this.ocean.U.seRings.value = this.life.rings;
@@ -315,6 +316,45 @@ export class OceanWorld {
     m.castShadow = m.receiveShadow = true;
     scene.add(m);
     console.info(`stacks: ${geos.length - 1}`);
+  }
+
+  // The old lighthouse out on its rock beside the far turn: its lantern's light swept round by a beam over the sea and
+  // across the track every ~10 s
+  buildLighthouse(scene) {
+    const tr = this.track, f = tr.frame(tr.at('light', 30), {});
+    const sd = tr.kh[Math.round(tr.at('light', 30) / tr.step) % tr.n] > 0 ? -1 : 1;           // (outside the turn)
+    const R = f.R.clone().setY(0).normalize(), x = f.P.x + R.x * sd * 120, z = f.P.z + R.z * sd * 120, top = SEA_Y + 9;
+    const rock = stackGeometry({ x, z, r: 24, h: top + 4, seed: 77 });
+    const rm = new THREE.Mesh(rock, this.rockMat);
+    rm.name = 'lighthouse-rock';
+    rm.layers.set(2); rm.castShadow = rm.receiveShadow = true;
+    const L = lighthouseGeometry(x, top + 2, z, 0.4);
+    const tm = new THREE.Mesh(L.geometry, stoneMaterial({ key: 'lighthouse' }));
+    tm.name = 'lighthouse';
+    tm.layers.set(2); tm.castShadow = tm.receiveShadow = true;
+    scene.add(rm, tm);
+    // the lantern and its beam: two cones back to back, brightest along their middle, fading out along their length
+    const lamp = new THREE.Mesh(new THREE.IcosahedronGeometry(2.6, 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(14, 11, 7) }));
+    lamp.position.copy(L.lamp.p);
+    const cone = new THREE.ConeGeometry(24, 900, 32, 1, true).rotateZ(Math.PI / 2).translate(-450, 0, 0);
+    const beamMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      vertexShader: /* glsl */`varying vec3 vN; varying vec3 vW; varying float vU;
+        void main() { vU = -position.x / 900.0; vN = normalize(mat3(modelMatrix) * normal); vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+      fragmentShader: /* glsl */`varying vec3 vN; varying vec3 vW; varying float vU;
+        void main() {
+          vec3 v = normalize(cameraPosition - vW);
+          float core = pow(abs(dot(normalize(vN), v)), 4.0);
+          float along = pow(1.0 - vU, 2.6) * smoothstep(0.0, 0.015, vU);
+          gl_FragColor = vec4(vec3(1.0, 0.86, 0.62) * 0.09 * core * along * smoothstep(2.0, 40.0, distance(cameraPosition, vW)), 1.0);
+        }`,
+    });
+    const beam = new THREE.Group();
+    beam.position.copy(L.lamp.p);
+    for (const a of [0, Math.PI]) { const m = new THREE.Mesh(cone, beamMat); m.rotation.y = a; m.rotation.z = -0.035; m.frustumCulled = false; beam.add(m); }
+    scene.add(lamp, beam);
+    this.beam = beam;
+    this.noAO.push(lamp, ...beam.children);
   }
 
   // Pylons under the causeways and the viaduct: a tapered column out of the deep to a crosshead under the deck's
@@ -476,6 +516,15 @@ export class OceanWorld {
     this.dome.material.uniforms.under.value = Math.max(0, this.level - cp.y);
     this.city.haloMat && (this.cityMeshes.halo.material.uniforms.lvl.value = this.level);
     this.ocean.update(t, camera);
+    if (this.beam) this.beam.rotation.y = -t * (Math.PI * 2 / 10);
+    // the city's chunks: drawn only as far as the water lets them be seen (from above the sea: what shows through it)
+    {
+      const reach = cp.y < this.level ? 520 : 700;
+      for (const m of this.city.parts) {
+        const sp = m.geometry.boundingSphere;
+        m.visible = sp.center.distanceTo(cp) - sp.radius < reach;
+      }
+    }
     // the ships, for the life (splashes where they go into the sea or out of it, bubbles under it)
     const ws = this.shipsWet;
     if (this.race) this.race.entries.forEach((e, k) => {
