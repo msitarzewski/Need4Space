@@ -2,6 +2,15 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.3.0', date: '16 Oct 2026', name: 'One rocket',
+    notes: [
+      'A second ship: the Comet R1, one big rocket in the back of a titanium manta riding two hover sponsons (title menu, Ship)',
+      'It handles exactly like the Feather S1: the same span, the same ride height',
+      'Its bell drives the flame, the glowing throat, the gas trail and the heat shimmer; brake lights glow red in its trailing edge',
+      'The rivals still fly Feathers',
+    ],
+  },
+  {
     version: '1.2.5', date: '16 Oct 2026', name: 'The broken giant',
     notes: [
       'A colossal warship broken in two hangs over the ringed planet in space, wreckage drifting from the break',

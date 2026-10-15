@@ -8,6 +8,7 @@ import { AI_LEVELS, LAPS, TEAMS } from './race.js';
 import { controlsHTML, GAMEPAD, fmt } from './hud.js';
 import { UPDATES, VERSION } from './changelog.js';
 import { Scoreboard } from './scoreboard.js';
+import { SHIPS, shipName } from './ships.js';
 
 const ui = (name) => window.__feather?.audio?.ui?.(name);
 const wake = () => window.__feather?.audio?.start?.();          // audio needs a user gesture: any menu key or click
@@ -37,7 +38,7 @@ const stats = (L) => [
 ];
 
 // ("remove the free flight option": the race on the track is the game)
-const MAIN = [['race', 'Race'], ['circuit', 'Circuit'], ['scoreboard', 'Global scoreboard'], ['settings', 'Settings'], ['controls', 'Controls'], ['support', 'Support']];
+const MAIN = [['race', 'Race'], ['circuit', 'Circuit'], ['ship', 'Ship'], ['scoreboard', 'Global scoreboard'], ['settings', 'Settings'], ['controls', 'Controls'], ['support', 'Support']];
 // the circuits (main.js loads the one chosen: the page reloads into it)
 export const CIRCUITS = [['space', 'Space', 'The orbital circuit over the ringed gas giant: a colossal broken derelict to thread, upside down through its hold, a meteorite to fly through, a glass tunnel, a loop'],
   ['forest', 'Forest moon', 'High over a jungle moon: floating islands, a river arching over the track, a colossal tree, two kilometres of caverns, a giant\'s skull, home upside down'],
@@ -64,6 +65,7 @@ const HINTS = {
   controls: K(['Esc'], 'Back', 'back'),
   support: K(['Enter'], 'Donate on Revolut', 'ok') + K(['Esc'], 'Back', 'back'),
   circuit: K(['↑', '↓'], 'Select', UD) + K(['Enter'], 'Fly it', 'ok') + K(['Esc'], 'Back', 'back'),
+  ship: K(['↑', '↓'], 'Select', UD) + K(['Enter'], 'Fly it', 'ok') + K(['Esc'], 'Back', 'back'),
   scoreboard: K(['↑', '↓'], 'Circuit', UD) + K(['←', '→'], 'Difficulty', LR) + K(['R'], 'Refresh', 'refresh') + K(['Esc'], 'Back', 'back'),
   results: K(['←', '→'], 'Select', LR) + K(['Enter'], 'Confirm', 'ok') + K(['R'], 'Race again', 'again') + K(['Esc'], 'Main menu', 'back'),
 };
@@ -113,9 +115,11 @@ export class Menu {
   build() {
     const h = this.h;
     const map = h.map || 'space', mapName = CIRCUITS.find(([id]) => id === map)?.[1] || '';
+    const shipId = h.shipId || 'feather';
     const item = ([act, name], i) => `<button class="m-item" data-act="${act}" tabindex="-1"><span class="m-num">${pad2(i)}</span>` +
       `<span class="m-name">${name}</span>${act === 'race' || act === 'difficulty' ? '<span class="m-meta m-lvl"></span>'
-        : act === 'circuit' ? `<span class="m-meta">${mapName}</span>` : act.startsWith('map:') && act === 'map:' + map ? '<span class="m-meta">Now</span>' : ''}</button>`;
+        : act === 'circuit' ? `<span class="m-meta">${mapName}</span>` : act === 'ship' ? `<span class="m-meta">${shipName(shipId)}</span>`
+          : act === 'map:' + map || act === 'ship:' + shipId ? '<span class="m-meta">Now</span>' : ''}</button>`;
     const main = MAIN.filter(([a]) => a !== 'race' || h.race);
     const pause = PAUSE.filter(([a]) => a !== 'difficulty' || h.race);
     const cards = LEVELS.map((L, i) => `<div class="d-slot" data-i="${i}" data-id="${L.id}" style="--c: var(--c-${L.id})">
@@ -136,7 +140,7 @@ export class Menu {
       `<ul class="n-list">${U.notes.map((n) => `<li>${n}</li>`).join('')}</ul></aside>`;
     this.el.innerHTML = `<div class="m-bg"></div><div class="m-fade"></div><div class="m-pulse"></div><div class="m-scan"></div>
       <section class="m-screen" data-s="main">
-        <header><div class="m-kicker">Anti-gravity racing</div><h1 class="m-logo brand-logo" aria-label="Need4Space"><span class="brand-fallback" aria-hidden="true"><span>NEED</span><i>4</i><span>SPACE</span></span><svg class="brand-mark" viewBox="0 0 2172 440" aria-hidden="true" focusable="false"><use href="#brand-wordmark"/></svg></h1><div class="m-sub">Feather S1 <span class="m-v">v${VERSION}</span></div></header>
+        <header><div class="m-kicker">Anti-gravity racing</div><h1 class="m-logo brand-logo" aria-label="Need4Space"><span class="brand-fallback" aria-hidden="true"><span>NEED</span><i>4</i><span>SPACE</span></span><svg class="brand-mark" viewBox="0 0 2172 440" aria-hidden="true" focusable="false"><use href="#brand-wordmark"/></svg></h1><div class="m-sub">${shipName(shipId)} <span class="m-v">v${VERSION}</span></div></header>
         <nav class="m-list">${main.map(item).join('')}</nav>
         <div class="m-desc"></div>
         ${news}
@@ -150,6 +154,11 @@ export class Menu {
       <section class="m-screen" data-s="circuit">
         <header><div class="m-kicker">Where to race</div><h2 class="m-h2">Circuit</h2></header>
         <nav class="m-list">${CIRCUITS.map(([id, name]) => ['map:' + id, name]).map(item).join('')}</nav>
+        <div class="m-desc"></div>
+      </section>
+      <section class="m-screen" data-s="ship">
+        <header><div class="m-kicker">What to fly</div><h2 class="m-h2">Ship</h2></header>
+        <nav class="m-list">${SHIPS.map(([id, name]) => ['ship:' + id, name]).map(item).join('')}</nav>
         <div class="m-desc"></div>
       </section>
       <section class="m-screen" data-s="settings">
@@ -332,7 +341,7 @@ export class Menu {
   // ---------------------------------------------------------------- lists
   items() {
     const s = this.screen;
-    if (s !== 'main' && s !== 'pause' && s !== 'results' && s !== 'circuit') return [];
+    if (s !== 'main' && s !== 'pause' && s !== 'results' && s !== 'circuit' && s !== 'ship') return [];
     const list = [...this.el.querySelectorAll(`.m-screen[data-s="${s}"] .m-item`)];
     // a finished race not yet saved: Save time first in the row, so Enter / A saves (or goes to the name)
     const save = s === 'results' && this.el.querySelector('#results .sb-save:not(:disabled)');
@@ -360,8 +369,10 @@ export class Menu {
       controls: 'Keyboard, mouse and gamepad',
       support: 'Donate to keep Need4Space flying',
       circuit: 'Space, the forest moon, the ice planet or the desert planet',
+      ship: 'The Feather S1 or the Comet R1 - the same handling, a different machine',
       scoreboard: 'The global top 10 for each circuit and difficulty',
       ...Object.fromEntries(CIRCUITS.map(([id, , d]) => ['map:' + id, d])),
+      ...Object.fromEntries(SHIPS.map(([id, , d]) => ['ship:' + id, d])),
       resume: free ? 'Back to free flight' : 'Back to the race',
       restart: free ? 'Back over the start line' : 'Back to the grid and the lights',
       difficulty: 'The rivals’ pace and racecraft, changed at once',
@@ -523,7 +534,7 @@ export class Menu {
     const h = this.h;
     switch (a) {
       case 'race': ui('select'); this.go('diff', 'start'); break;
-      case 'settings': case 'controls': case 'support': case 'circuit': case 'scoreboard': ui('select'); this.go(a); break;
+      case 'settings': case 'controls': case 'support': case 'circuit': case 'ship': case 'scoreboard': ui('select'); this.go(a); break;
       case 'donate': ui('select'); donate(); break;
       case 'difficulty': ui('select'); this.go('diff', this.ctx === 'results' ? 'restart' : 'apply'); break;
       case 'confirm': this.confirmDiff(); break;
@@ -542,6 +553,16 @@ export class Menu {
           document.getElementById('veil').classList.add('on');
           const u = new URL(location.href);
           u.searchParams.delete('map');
+          setTimeout(() => location.replace(u.href), 300);
+        } else if (a.startsWith('ship:')) {         // another ship: saved, and the page reloads into it
+          const id = a.slice(5);
+          ui('select');
+          if (id === (h.shipId || 'feather')) { this.back(true); break; }
+          h.settings.set('ship', id);
+          this.busy = true;
+          document.getElementById('veil').classList.add('on');
+          const u = new URL(location.href);
+          u.searchParams.delete('ship');
           setTimeout(() => location.replace(u.href), 300);
         }
     }
@@ -667,7 +688,7 @@ export class Menu {
     cam.up.copy(this.up);
     cam.lookAt(v.look);
     // the subject right of centre, clear of the menu on the left (the difficulty cards sit in the middle)
-    const side = this.screen === 'main' || this.screen === 'settings' || this.screen === 'controls' || this.screen === 'support' || this.screen === 'circuit' ? 1 : 0;
+    const side = this.screen === 'main' || this.screen === 'settings' || this.screen === 'controls' || this.screen === 'support' || this.screen === 'circuit' || this.screen === 'ship' ? 1 : 0;
     this.offK = (this.offK ?? side) + (side - (this.offK ?? side)) * (1 - Math.exp(-3 * dt));
     cam.rotateY(THREE.MathUtils.degToRad(v.fov * cam.aspect * 0.16 * this.offK));
     cam.fov = v.fov;

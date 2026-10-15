@@ -155,7 +155,7 @@ class Plume {
       u.len.value = L / this.r;
       m.visible = power > 0.01;
     }
-    const h = this.r * (2.2 + 1.6 * thrust + 1.2 * boost);
+    const h = this.r * (this.haloK ?? 1) * (2.2 + 1.6 * thrust + 1.2 * boost);
     this.halo.scale.set(h, h, 1);
     this.halo.material.opacity = Math.min(0.7, power * (0.2 + 0.35 * thrust + 0.3 * boost));
     this.halo.visible = power > 0.01;
@@ -504,8 +504,9 @@ const BAY_FILL = ['Chip', 'PCB', 'Cable', 'CableOrange', 'Copper', 'Gold'];
 // the brake lights: the engine glow's long bars under the wings turn this red with the brake (linear; any green and
 // ACES burns the core orange)
 const BRAKE_RED = new THREE.Color(1, 0, 0.014), BRAKE_I = 1.15, _brakeC = new THREE.Color();
-// the engine glow rings: [centre-line radius, width] (m), in each ring's own space (its own xy plane)
-const RINGS = { InletGlow: [0.51, 0.03], ExhaustGlow: [0.54, 0.035], TailGlow: [0.15, 0.016] };
+// the engine glow rings: [centre-line radius, width] (m), in each ring's own space (its own xy plane) - ThroatGlow:
+// the rocket's throat insert, a band down the bell's wall whose glow fades from the throat toward the exit
+const RINGS = { InletGlow: [0.51, 0.03], ExhaustGlow: [0.54, 0.035], TailGlow: [0.15, 0.016], ThroatGlow: [0.33, 0.05] };
 const MAPS = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap', 'bumpMap', 'lightMap', 'displacementMap'];
 const IDENTITY = new THREE.Matrix4();
 
@@ -760,7 +761,19 @@ export class Ship {
       return this.nozzles[name];
     };
     this.plumes = [];
-    for (const [name, scale] of [['ExhaustGlow_R', 1], ['ExhaustGlow_L', 1], ['TailGlow', 1.4]]) {
+    // a model that marks its nozzles - empties named Plume_*, extras.plume = { r, halo } at the exit plane - has its
+    // flames started there (the rocket's bell: a core jet inside the dark bell, its halo kept small so the bell's wall
+    // and throat ring still read); the Feather's come from its glow rings below
+    const marks = [];
+    this.model.updateMatrixWorld(true);
+    this.model.traverse((o) => { if (/^Plume_/.test(o.name) && o.userData.plume) marks.push(o); });
+    for (const o of marks) {
+      const m = typeof o.userData.plume === 'string' ? JSON.parse(o.userData.plume) : o.userData.plume;
+      const p = new Plume(this.visual, new THREE.Vector3().setFromMatrixPosition(o.matrixWorld), m.r, 1, this.engineColor);
+      p.haloK = m.halo ?? 1;
+      this.plumes.push(p);
+    }
+    for (const [name, scale] of marks.length ? [] : [['ExhaustGlow_R', 1], ['ExhaustGlow_L', 1], ['TailGlow', 1.4]]) {
       const b = nozzle(name);
       if (!b) { console.warn('no exhaust', name); continue; }
       const c = b.getCenter(new THREE.Vector3()), s = b.getSize(new THREE.Vector3());
@@ -848,7 +861,8 @@ export class Ship {
     this.model.updateMatrixWorld(true);
     const inv = this.model.matrixWorld.clone().invert();
     this.model.traverse((o) => {
-      if (!o.isMesh || rings.has(o.material) || o.children.length) return;
+      // (named brake lights keep their names: buildParts finds them by it)
+      if (!o.isMesh || rings.has(o.material) || o.children.length || /^BrakeLight/.test(o.name)) return;
       for (let p = o; p && p !== this.model; p = p.parent) if (moving.has(p)) return;
       if (!groups.has(o.material)) groups.set(o.material, []);
       groups.get(o.material).push(o);
@@ -914,6 +928,8 @@ export class Ship {
       eg.w = pieceWidth(bars[1], IDENTITY);
       eg.cull = eg.w < 0.6;
     }
+    // a model may name its brake lights (BrakeLight_*: the rocket's bars in its trailing edge) - red with the brake too
+    for (const p of list) if (/^BrakeLight/.test(p.name)) p.brake = true;
     const groups = [], key = (p) => (p.cull ? p.w / p.thr : Infinity);
     for (const [name, cast] of [['Parts_cast', true], ['Parts_glow', false]]) {
       const parts = list.filter((p) => p.cast === cast).sort((a, b) => (key(a) === key(b) ? 0 : key(b) - key(a)));

@@ -2,7 +2,7 @@
 
 © 2026 vengeful180. All rights reserved. This is proprietary software: see [LICENSE](LICENSE).
 
-An anti-gravity racer in space, built in the browser with [three.js](https://threejs.org/). You race the **Feather S1**, a hover-racer modelled and texture-baked in Blender, against eight AI rivals over three laps on one of four circuits (pick one under Circuit in the menu):
+An anti-gravity racer in space, built in the browser with [three.js](https://threejs.org/). You race the **Feather S1** or the **Comet R1** (pick one under Ship in the menu), hover-racers modelled and texture-baked in Blender, against eight AI rivals over three laps on one of four circuits (pick one under Circuit in the menu):
 
 - **Space** (26.6 km): past a ringed gas giant, through 12 km of a colossal derelict broken in three and a graveyard of wrecks, a meteorite you fly through, jump gaps, a vertical loop, barrel rolls and a glass tunnel.
 - **Forest moon** (13.8 km): floating islands over a jungle, a river arching over the track, a colossal tree, two kilometres of caverns, a giant's skull to fly through.

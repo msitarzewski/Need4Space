@@ -351,7 +351,9 @@ class Driver {
 export { Driver };
 
 export class Race {
-  constructor(scene, track, player, playerRacer) {
+  // opts.rivals: the ship the rivals are cloned from (the Feather when the player flies another ship); opts.name: the
+  // player's ship's name in the standings
+  constructor(scene, track, player, playerRacer, opts = {}) {
     this.scene = scene;
     this.track = track;
     this.lim = TRACK_W / 2 - player.halfSpan * 0.92;      // the furthest a hull's centre gets from the middle
@@ -363,10 +365,10 @@ export class Race {
     let team = 1;
     for (let slot = 0; slot < TEAMS.length; slot++) {
       let e;
-      if (slot === PLAYER_SLOT) e = { ship: player, racer: playerRacer, team: TEAMS[0], player: true };
+      if (slot === PLAYER_SLOT) e = { ship: player, racer: playerRacer, team: opts.name ? { ...TEAMS[0], name: opts.name } : TEAMS[0], player: true };
       else {
         const t = TEAMS[team++];
-        const ship = new Ship(null, { cloneOf: player, team: t, lights: false, engine: t.engine });
+        const ship = new Ship(null, { cloneOf: opts.rivals || player, team: t, lights: false, engine: t.engine });
         scene.add(ship.root);
         const racer = new TrackRacer(ship, track);
         e = { ship, racer, team: t, player: false };

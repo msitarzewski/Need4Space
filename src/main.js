@@ -17,6 +17,7 @@ import { TrackRacer, TRACK_W, PERKS } from './track.js';
 import { patchShaders } from './look.js';
 import { smoothstep } from './noise.js';
 import { loadShip, Ship } from './ship.js';
+import { SHIP_URLS, RIVAL_TIER, shipChoice, shipName } from './ships.js';
 import { Flight } from './flight.js';
 import { CameraRig } from './camera.js';
 import { Input } from './input.js';
@@ -35,7 +36,8 @@ import { beginLoadJobs, finishLoadJobs, stopLoadJobs } from './load-jobs.js';
 
 // the map: the circuit chosen in the menu (saved), or ?map=space / forest / ice / desert / meadow (the meadow: the old test range)
 const MAP = { meadow: 'meadow', forest: 'forest', space: 'space', ice: 'ice', desert: 'desert' }[new URLSearchParams(location.search).get('map') || savedSettings().map] || 'space';
-const SHIP_URL = { high: 'assets/racer_web.glb', mid: 'assets/racer_web_4k.glb', low: 'assets/racer_web_2k.glb' };   // (by memory tier)
+// the ship: the one chosen in the menu (saved), or ?ship=feather / rocket (ships.js); its model by memory tier
+const SHIP = shipChoice(savedSettings().ship), SHIP_URL = SHIP_URLS[SHIP], SHIP_NAME = shipName(SHIP);
 const LUTS = ['assets/agx_punchy_lut65.bin', 'assets/agx_mhc_lut65.bin'];   // Blender's AgX looks: Punchy, Medium High Contrast
 const status = (t) => (document.getElementById('loadtext').textContent = t);
 // The loading bar: each step's share of it (by how long it usually takes) and how far into it. The page's first script
@@ -99,9 +101,12 @@ async function boot() {
     if (!e.total) return;
     got = `  ${(e.loaded / 1e6).toFixed(1)} / ${(e.total / 1e6).toFixed(1)} MB`;
     gotF = e.loaded / e.total;
-    if (!baking) { status('Loading the Feather S1' + got); progress('ship', gotF); }
+    if (!baking) { status(`Loading the ${SHIP_NAME}` + got); progress('ship', gotF); }
   });
   shipLoad.catch(() => {});
+  // the rivals are Feathers whichever ship the player flies: another ship brings the Feather along for them
+  const rivalLoad = SHIP !== 'feather' ? loadShip(SHIP_URLS.feather[RIVAL_TIER[Q.tier]]) : null;
+  rivalLoad?.catch(() => {});
   status(MAP === 'meadow' ? 'Raising the hills' : 'Building the circuit');
   progress('circuit');
   await Promise.all([nextFrame(), bakedLoad, jobLoad]);
@@ -113,11 +118,13 @@ async function boot() {
   progress('circuit', 1);
   await runBakes(renderer, (what, k, n) => { status(`${what}  ${k} / ${n}`); progress(/Painting/.test(what) ? 'paint' : 'bakes', k / n); });
   baking = false;
-  status('Loading the Feather S1' + got);
+  status(`Loading the ${SHIP_NAME}` + got);
   progress('ship', gotF);
   const ship = await shipLoad;
+  const rivalShip = rivalLoad ? await rivalLoad : ship;
   await world.ready;                                   // (a world's own models: the space station's - before the warm-up)
   ship.upgradeMaterials(renderer.capabilities.getMaxAnisotropy(), renderer);
+  if (rivalShip !== ship) rivalShip.upgradeMaterials(renderer.capabilities.getMaxAnisotropy(), renderer);
   scene.add(ship.root);
   console.info(`ship: ${Math.round(ship.tris)} tris, ${ship.rotors.length} rotors, canopy ${!!ship.canopy}, ` +
     `plumes ${ship.plumes.length}, tangents repaired ${ship.tangentsFixed}`);
@@ -129,7 +136,7 @@ async function boot() {
   // eight rivals, cloned before the player's ship first animates (their canopies and rotors start at rest)
   status('Rolling out the rivals');
   progress('rivals');
-  const race = racer ? new Race(scene, track, ship, racer) : null;
+  const race = racer ? new Race(scene, track, ship, racer, { rivals: rivalShip, name: SHIP_NAME }) : null;
   world.race = race;                                       // (a world may read the ships: the ice planet's wakes)
   let mode = racer ? 'race' : 'free';
   let ctl = racer || flight;
@@ -659,7 +666,7 @@ async function boot() {
   };
   const heroOrbit = () => { rig.mode = 'orbit'; Object.assign(rig.orbit, { yaw: 2.35, pitch: 0.16, dist: 22 }); rig.anchor = null; rig.idle = 0; };
   let pilot = null;                                      // past the flag the rivals' AI flies the player's cool-down lap
-  const menu = new Menu({ settings, hud, input, rig, camera, race, track, ship, world, map: MAP,
+  const menu = new Menu({ settings, hud, input, rig, camera, race, track, ship, world, map: MAP, shipId: SHIP,
     mode: () => mode, engineOn: () => ship.engineOn, focus: () => ship.root.position,
     status: () => ({ race: race && mode === 'race' ? race.hud() : null }),
     startRace: () => { hud.hideResults(); setMode('race'); placeStart(false); resetLap(); heroOrbit(); engines(); },
