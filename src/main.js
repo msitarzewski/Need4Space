@@ -346,6 +346,42 @@ async function boot() {
     if (half !== aoHalf) { aoHalf = half; if (gtao.fullSize) gtao.setSize(...gtao.fullSize); }
   };
   let redraw = 2;                                          // frames still to draw while paused (see frame())
+  // A setting that changes what the materials' programs are (Low's lite shaders and fewer lights, shadows on / off,
+  // a pass turned on): every program of the world built again at once, in parallel, then one draw of everything at an
+  // eighth of the size off screen (the shadow, depth and AO variants) - as the loading screen does - rather than one
+  // by one as each thing comes into view in the race (High -> Low mid-session: a 300 ms freeze, then 12-30 ms hitches
+  // for ~20 more programs over the next lap, on a fast desktop).
+  let warmed = false, programSig = '', warming = null, warmAgain = false;
+  const rewarm = () => {
+    if (warming) { warmAgain = true; return warming; }
+    warming = (async () => {
+      do {
+        warmAgain = false;
+        const keep = [];
+        const showAll = () => { for (const root of [scene, world.sky].filter(Boolean)) root.traverse((o) => { if (o.isLight) return; keep.push([o, o.visible, o.frustumCulled]); o.visible = true; o.frustumCulled = false; }); };
+        const restore = () => { for (const [o, v, f] of keep) { o.visible = v; o.frustumCulled = f; } keep.length = 0; };
+        const jobs = [[scene, camera]];
+        if (world.sky) jobs.push([world.sky, world.skyCam]);
+        // (compileAll hands every program over before its first wait: shown only for that moment, no frame between)
+        showAll();
+        renderer.setRenderTarget(scenePass.msaa);
+        const built = compileAll(renderer, [...jobs, ...postJobs(composer.passes.filter((p) => p.enabled || p === lens))]);
+        renderer.setRenderTarget(null);
+        restore();
+        await built;
+        showAll();
+        composer.setPixelRatio(pixelRatio * renderScale / 8);
+        composer.setSize(innerWidth, innerHeight);
+        composer.renderToScreen = false;
+        scene.updateMatrixWorld(); composer.render();
+        composer.renderToScreen = true;
+        restore();
+        resize();
+      } while (warmAgain);
+      warming = null;
+    })();
+    return warming;
+  };
   const resize = () => {
     redraw = 2;
     camera.aspect = innerWidth / innerHeight;
@@ -416,6 +452,12 @@ async function boot() {
     audio.lite = !!v.laptop;                          // (fewer rival voices; its buffer is set when the sound starts)
     audio.setLevels(v.music, v.sfx);                 // music and effects volume
     redraw = 2;                                      // (a paused picture shows the change behind the settings)
+    // what the programs are built for: the lite shaders, the lights on, the shadows, the passes in use - a change
+    // (a graphics preset, shadows on / off) builds them all again now, in the menu (rewarm below)
+    const sig = [Q.lite, renderer.shadowMap.enabled, world.worldOnly, ...rivalLights.map((l) => l.visible),
+      ...composer.passes.map((p) => p.enabled)].join();
+    if (warmed && sig !== programSig) rewarm();
+    programSig = sig;
   }, integratedGPU(gpuName) || isTouch());             // (a phone or tablet: Laptop mode on a first visit too)
 
   const lap = { started: false, time: 0, last: Infinity, best: Infinity, lap: 1, idx: START, progress: 0, s: 0 };
@@ -491,6 +533,7 @@ async function boot() {
     console.info(`warm-up: ${renderer.info.programs.length} programs, ${Math.round(performance.now() - t0)} ms`);
   }
   progress('warm', 1);
+  warmed = true;
   document.getElementById('loading').classList.add('done');
   audio.prepareMusic();                              // (the songs load once the game has: not over the ship's download)
 
@@ -515,7 +558,7 @@ async function boot() {
   // test hooks: __feather.state(), __feather.advance(seconds) (ticks without frames), __feather.shot(name)
   window.__feather = { ship, flight, racer, race, rig, world, track, input, lap, THREE, scene, renderer, composer, bloom, gtao, ssr, streaks,
     agx, camera, fx, settings, render, audio,
-    get ctl() { return ctl; }, get mode() { return mode; }, setMode,
+    get ctl() { return ctl; }, get mode() { return mode; }, setMode, get rewarming() { return warming; },
     state: () => ({ mode, x: ctl.pos.x, y: ctl.pos.y, z: ctl.pos.z, s: racer ? racer.s : 0, lat: racer ? racer.x : 0,
       speed: ctl.speed, agl: ctl.agl, power: ship.power, spin: ship.spin, canopy: ship.canopyT, throttle: ctl.throttle,
       cam: rig.mode, crashed: ctl.crashed, lap: lap.lap, lapTime: lap.time }) };
@@ -532,7 +575,9 @@ async function boot() {
     last = now;
     if (menu.paused !== wasPaused) { wasPaused = menu.paused; redraw = 2; }
     tick(menu.paused ? 0 : dt);                          // paused: a frame with no time in it (no physics, nothing moves)
-    if (!menu.paused) render();
+    // (while the programs are rebuilt the picture holds still: a draw would wait for each one still compiling)
+    if (warming) redraw = 0;
+    else if (!menu.paused) render();
     else if (redraw > 0) { redraw--; render(); }
     fpsN++; fpsT += raw;
     if (fpsT > 0.5) { fpsEl.textContent = `${Math.round(fpsN / fpsT)} fps  ${(1000 * fpsT / fpsN).toFixed(1)} ms`; fpsN = fpsT = 0; }

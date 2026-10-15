@@ -2,6 +2,13 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.2.2', date: '15 Oct 2026', name: 'Smooth preset switching',
+    notes: [
+      'Changing the graphics quality mid-session no longer stutters in the race',
+      'The shaders are rebuilt at once in the menu, as the loading screen does',
+    ],
+  },
+  {
     version: '1.2.1', date: '15 Oct 2026', name: 'Graphics presets',
     notes: [
       'Graphics quality in Settings: Low (laptop), Balanced and High',
