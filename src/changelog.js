@@ -2,11 +2,14 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
-    version: '1.3.0', date: '16 Oct 2026', name: 'One rocket',
+    version: '1.3.0', date: '16 Oct 2026', name: 'The Comet',
     notes: [
-      'A second ship: the Comet R1, one big rocket in the back of a titanium manta riding two hover sponsons (title menu, Ship)',
-      'It handles exactly like the Feather S1: the same span, the same ride height',
-      'Its bell drives the flame, the glowing throat, the gas trail and the heat shimmer; brake lights glow red in its trailing edge',
+      'A second ship: the Comet R1, a titanium manta on two hover sponsons with its rocket in a long tail cone (title menu, Ship)',
+      'Its nozzle has 18 teeth: they fan out with the engine off and under the brake, close in on the throttle and spin faster with speed and boost',
+      'It flies differently: a higher top speed and sharper in the turns, less boost, and every knock costs it half as much again',
+      'The Ship screen is a showroom: each ship alone on a turning stand (drag to look round, scroll to zoom) with its stats',
+      'Both ships refinished: deep gloss paint, dark trim, dark engine faces with only the ring lit, accent strips in the engine colour, lit by the deck under them',
+      'Engine glow rings go dark with the engines off',
       'The rivals still fly Feathers',
     ],
   },
