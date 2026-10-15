@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { mulberry32 } from './noise.js';
 import { moonMesh } from './celestial.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const merge = (gs) => {
   const all = gs.map((g) => (g.index ? g.toNonIndexed() : g));
@@ -85,31 +86,28 @@ function glowLights(list) {
   return pts;
 }
 
+// The ring station, modelled in Blender (racer/station/build.py): 36 habitat modules round a 1.8 km wheel (window
+// rows, foil wraps, radiators, docking ports) on two lattice truss rings, six lattice spokes with their elevator
+// tubes, a hub with docking towers, dishes and solar wings. Its axis is the group's z (it turns about it); the model
+// arrives with the ship (main.js waits for world.ready before the warm-up).
 function ringStation() {
   const g = new THREE.Group();
-  const R = 900, tube = 46;
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(R, tube, 24, 240), windowed(0x7d848e, 4, 420, 0.4));
-  const hub = new THREE.Mesh(new THREE.CylinderGeometry(130, 130, 260, 48), windowed(0x6f7680, 10, 60, 0.3));
-  hub.rotation.x = Math.PI / 2;
-  const caps = [-1, 1].map((sd) => { const c = new THREE.Mesh(new THREE.CylinderGeometry(60, 130, 80, 48), new THREE.MeshStandardMaterial({ color: 0x555c66, roughness: 0.5, metalness: 0.7 })); c.rotation.x = sd * Math.PI / 2; c.position.z = sd * 170; return c; });
-  g.add(ring, hub, ...caps);
-  for (let k = 0; k < 6; k++) {                                         // spokes, each a lit corridor
-    // (from inside the hub to the ring's core: a flat end laid on the hub's curve fought it for the same pixels)
-    const a = (k / 6) * Math.PI * 2, s = new THREE.Mesh(new THREE.CylinderGeometry(14, 14, R - 118, 12), windowed(0x666d77, 24, 3, 0.5, new THREE.Color(0.6, 0.85, 1.0)));
-    s.position.set(Math.cos(a) * (R + 118) / 2, Math.sin(a) * (R + 118) / 2, 0);
-    s.rotation.z = a - Math.PI / 2;
-    g.add(s);
-  }
-  // docking lights, steady, round each docking mouth (the cones' ends - the first ones sat half inside the cone),
-  // and beacons on the ring's rim, blinking slowly in turn
+  const R = 900, MOD_R = 48;
+  g.userData.ready = new GLTFLoader().loadAsync('assets/station.glb').then((gltf) => {
+    const m = gltf.scene;
+    m.rotation.x = Math.PI / 2;                                         // (glTF y up -> the Blender model's z, the axis)
+    m.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+    g.add(m);
+  }).catch((e) => console.error('station model', e));
+  // docking lights, steady, round each docking tower's end, and beacons on the ring's rim, blinking slowly in turn
   const lights = [], dock = new THREE.Color(3.2, 0.7, 0.45), beacon = new THREE.Color(4, 0.6, 0.4);
   for (const sd of [-1, 1]) for (let k = 0; k < 24; k++) {
     const a = (k / 24) * Math.PI * 2;
-    lights.push({ p: [Math.cos(a) * 63, Math.sin(a) * 63, sd * 212], c: dock, size: 6 });
+    lights.push({ p: [Math.cos(a) * 54, Math.sin(a) * 54, sd * 321], c: dock, size: 6 });
   }
   for (let k = 0; k < 12; k++) {
-    const a = (k / 12) * Math.PI * 2;
-    lights.push({ p: [Math.cos(a) * (R + tube + 3), Math.sin(a) * (R + tube + 3), 0], c: beacon, size: 12, blink: 1.6, phase: k * 0.52 });
+    const a = ((k + 0.25) / 12) * Math.PI * 2;
+    lights.push({ p: [Math.cos(a) * (R + MOD_R + 3), Math.sin(a) * (R + MOD_R + 3), 0], c: beacon, size: 12, blink: 1.6, phase: k * 0.52 });
   }
   const glow = glowLights(lights);
   g.add(glow);
@@ -223,6 +221,7 @@ export class Scenery {
   constructor(scene, sky, sunDir, renderer) {
     const rnd = mulberry32(919);
     this.station = ringStation();
+    this.ready = this.station.userData.ready;
     this.station.position.set(-2600, 950, -5400);
     this.station.rotation.set(0.35, 0.6, 0);
     this.gate = jumpGate();

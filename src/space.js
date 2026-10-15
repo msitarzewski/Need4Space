@@ -213,6 +213,7 @@ export class SpaceWorld {
     this.track.meshes(scene);
     if (this.wreck) for (const m of [...this.wreck.meshes, ...this.wreck.instMeshes, ...this.wreck.debrisMeshes, ...this.wreck.fxMeshes, this.wreck.sparks.mesh]) scene.add(m);
     this.scenery = new Scenery(scene, this.sky, SUN_DIR, renderer);
+    this.ready = this.scenery.ready;                                // (the station's model)
     this.noAO = [this.scenery.gate.userData.fieldMesh, ...(this.wreck ? [this.wreck.sparks.mesh, ...this.wreck.fxMeshes.filter((m) => m.material.transparent)] : [])];
     this.track.bakeDeck(renderer);
     // the meteorite's own shadow from the sun, once (crater rims, boulders - at any distance)

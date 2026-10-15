@@ -116,6 +116,7 @@ async function boot() {
   status('Loading the Feather S1' + got);
   progress('ship', gotF);
   const ship = await shipLoad;
+  await world.ready;                                   // (a world's own models: the space station's - before the warm-up)
   ship.upgradeMaterials(renderer.capabilities.getMaxAnisotropy(), renderer);
   scene.add(ship.root);
   console.info(`ship: ${Math.round(ship.tris)} tris, ${ship.rotors.length} rotors, canopy ${!!ship.canopy}, ` +
