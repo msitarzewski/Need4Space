@@ -27,6 +27,8 @@ export const SHADOW_HALF = 10, SHADOW_NEAR = 300, SHADOW_FAR = 500;
 export const MID_HALF = 45, MID_NEAR = 250, MID_FAR = 550;
 export const FAR_HALF = 170, FAR_NEAR = 100, FAR_FAR = 900;
 const MOON_DIR = SUN_DIR;
+// the Keeper: the colossus standing on the abyss's floor, its feet 900 m down, its head and lantern over the sea
+export const KEEPER = { x: 900, z: 250, foot: SEA_Y - 900 };
 
 // The circuit (x east, y up, z south; the sea at y 0). The grid faces north, the moon ahead and to the right.
 const P = [];
@@ -38,26 +40,29 @@ pt(40, 8, -260, 6); pt(200, 6, -480, 14); pt(460, 5, -600, 8, 'spray'); pt(760, 
 pt(1020, 6, -630, -4, 'arch'); pt(1260, 10, -580, -10);
 pt(1480, 26, -470, -16); pt(1680, 46, -300, -14); pt(1800, 62, -80, -4); pt(1830, 66, 80, 0, 'crest1');
 pt(1840, 58, 300); pt(1830, 60, 520, 0, 'breach');
-// a long descending left-hander, banked
-pt(1760, 54, 760, 18); pt(1580, 44, 930, 26); pt(1330, 30, 1010, 22); pt(1080, 16, 1000, 8);
-// the dive: into the sea and down to the city's gate
-pt(860, 4, 950, 0, 'diveIn'); pt(660, -18, 890); pt(470, -40, 830, 0, 'gate');
-// over the lip of the abyss and down its wall, the drowned city spread out on its floor 400 m down: round its great
-// dome, through the hall on the temple mount, under the aqueduct's top arcade
-pt(260, -72, 790, 0, 'avenue'); pt(40, -118, 740, -8); pt(-190, -165, 655, -16);
-pt(-370, -200, 480, -24, 'dome'); pt(-445, -224, 255, -16); pt(-418, -238, 30, -4);
-pt(-368, -244, -170, 0, 'hallIn'); pt(-318, -242, -390, 0, 'hallOut');
-pt(-228, -232, -600, 10, 'aqueduct'); pt(-68, -214, -790, 18); pt(170, -186, -905, 10);
+// a long descending left-hander, banked, and south of the Keeper the dive
+pt(1760, 54, 760, 18); pt(1580, 44, 930, 26); pt(1400, 30, 905, 20); pt(1292, 16, 740, 10); pt(1272, 5, 520, 0, 'diveIn');
+// down twice round the Keeper, the colossus standing out of the sea - 290 m out from its axis, to 620 m under the sea
+for (let k = 0; k <= 32; k++) {
+  const a = -(k / 32) * Math.PI * 4;
+  pt(KEEPER.x + 290 * Math.cos(a), -22 - 598 * (k / 32), KEEPER.z + 290 * Math.sin(a), -28, k === 0 ? 'gate' : k === 16 ? 'spiralMid' : k === 32 ? 'spiralOut' : null);
+}
+// through the city at its feet, among the towers: round the great dome, through the hall on the temple mount, under
+// the aqueduct, round and back
+pt(1160, -632, 20, -8, 'avenue'); pt(1000, -642, -230, -14); pt(780, -648, -420, -18, 'dome'); pt(520, -650, -520, -6);
+pt(280, -650, -560, 0, 'hallIn'); pt(40, -645, -590, 0, 'hallOut');
+pt(-170, -632, -680, -14, 'aqueduct'); pt(-420, -620, -820, -26); pt(-560, -600, -1060, -32); pt(-480, -582, -1320, -30); pt(-230, -560, -1440, -18); pt(60, -540, -1430, -6);
 // the long climb up out of the abyss, bursting out of the sea and off the kicker
-pt(430, -150, -955); pt(690, -106, -972); pt(940, -60, -978, 0, 'surge'); pt(1170, -18, -980); pt(1360, 10, -982, 0, 'crest2');
-pt(1580, 8, -990);
+pt(380, -485, -1330); pt(750, -385, -1210); pt(1120, -265, -1120); pt(1460, -150, -1065); pt(1760, -60, -1035, 0, 'surge');
+pt(1990, -12, -1022); pt(2190, 10, -1012, 0, 'crest2'); pt(2410, 8, -1010);
 // a barrel roll over the swell
-pt(1760, 12, -1005, 0, 'rollIn'); pt(1920, 12, -1018, 120); pt(2080, 12, -1031, 240); pt(2240, 12, -1044, 0, 'rollOut');
+pt(2590, 12, -1015, 0, 'rollIn'); pt(2750, 12, -1025, 120); pt(2910, 12, -1035, 240); pt(3070, 12, -1045, 0, 'rollOut');
 // the long sweep south past the lighthouse
-pt(2420, 16, -940, 14); pt(2520, 20, -760, 24); pt(2560, 24, -480, 12, 'light'); pt(2560, 26, -150); pt(2520, 22, 200, -6);
-pt(2440, 18, 560, -14); pt(2380, 16, 900, -18); pt(2200, 14, 1180, -24); pt(1900, 12, 1340, -14);
+pt(3250, 16, -940, 14); pt(3350, 20, -760, 24); pt(3390, 24, -480, 12, 'light'); pt(3390, 26, -150); pt(3350, 22, 200, -6);
+pt(3270, 18, 560, -14); pt(3150, 16, 900, -18); pt(2900, 14, 1180, -24); pt(2550, 12, 1340, -14);
+pt(2100, 10, 1420, 0);
 // west along the south, the loop
-pt(1500, 10, 1420, 0); pt(1150, 10, 1440, 0, 'preLoop');
+pt(1600, 10, 1440, 0); pt(1150, 10, 1440, 0, 'preLoop');
 for (let k = 0; k <= 12; k++) {
   const a = (k / 12) * Math.PI * 2;
   pt(950 - 80 * Math.sin(a), 90 - 80 * Math.cos(a), 1440 + 40 * (1 - Math.cos(a / 2)), 0, k === 0 ? 'loopIn' : k === 12 ? 'loopOut' : null);
@@ -242,7 +247,8 @@ export class OceanWorld {
     this.noAO.push(this.ocean.mesh, abyss, this.shafts.mesh);
     lap('sea');
     // the drowned city
-    this.city = new City(this.track, this.grid, { dens: this.dens });
+    this.city = new City(this.track, this.grid, { dens: this.dens, avoid: [{ x: KEEPER.x, z: KEEPER.z, r: 230 }] });
+    this.buildKeeper(scene);
     const cm = this.city.meshes();
     for (const m of [...cm.stone, ...cm.floor]) { m.layers.set(2); m.receiveShadow = true; scene.add(m); }
     scene.add(cm.glow, cm.halo, cm.street);
@@ -279,6 +285,36 @@ export class OceanWorld {
     this.heat = new UnderPass();
     lap('lights');
     console.info(`ocean built (ms): ${times.join(', ')}`);
+  }
+
+  // The Keeper (until its model is in): a colossus of dark stone standing on the abyss's floor - its robe falling to a
+  // broad hem 900 m down, its hooded head and shoulders out of the sea, its right arm raised holding a great lantern
+  // whose light lies on the sea; its eyes alight in the hood's shadow
+  buildKeeper(scene) {
+    const K = KEEPER, f0 = K.foot;
+    const prof = [[190, 0], [178, 40], [152, 200], [132, 450], [114, 700], [100, 860], [122, 930], [124, 962], [70, 992], [62, 1004],
+      [78, 1020], [84, 1050], [66, 1086], [30, 1100], [0, 1104]].map(([r, y]) => new THREE.Vector2(r, y));
+    const body = new THREE.LatheGeometry(prof, 64).translate(K.x, f0, K.z);
+    const arm = new THREE.CylinderGeometry(22, 30, 230, 24).translate(0, 115, 0)
+      .applyMatrix4(new THREE.Matrix4().makeRotationZ(-0.42)).translate(K.x + 104, f0 + 940, K.z);
+    const g = mergeGeometries([body.toNonIndexed(), arm.toNonIndexed()]);
+    g.deleteAttribute('uv');
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, this.rockMat || basaltMaterial({ key: 'keeper' }));
+    m.name = 'keeper';
+    m.layers.set(2); m.castShadow = m.receiveShadow = true;
+    scene.add(m);
+    // the lantern and the eyes; a real light at the lantern for the sea, the head and the ships near it
+    const top = new THREE.Vector3(K.x + 104 + Math.sin(0.42) * 230, f0 + 940 + Math.cos(0.42) * 230, K.z);
+    const lantern = new THREE.Mesh(new THREE.IcosahedronGeometry(9, 3), new THREE.MeshBasicMaterial({ color: new THREE.Color(16, 11, 6) }));
+    lantern.position.copy(top).add(new THREE.Vector3(0, -14, 0));
+    const eyes = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(3.2, 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 14, 16) }), 2);
+    for (const [i, sd] of [[0, -1], [1, 1]]) eyes.setMatrixAt(i, new THREE.Matrix4().makeTranslation(K.x - 62, f0 + 1050, K.z + sd * 14));
+    const light = new THREE.PointLight(new THREE.Color(1.0, 0.8, 0.55), 6e5, 1400, 2);
+    light.position.copy(lantern.position);
+    scene.add(lantern, eyes, light);
+    this.keeper = { mesh: m, lantern, light, top: lantern.position.clone() };
+    this.noAO.push(lantern, eyes);
   }
 
   // Sea stacks: basalt pillars standing out of the swell round the spray run and off the causeways, kept clear of the
@@ -386,10 +422,10 @@ export class OceanWorld {
       for (let k = 0; k < n; k++) { const a = o + k * 2; idx.push(a, a + 1, a + 3, a, a + 3, a + 2); }
     };
     let n = 0;
-    const M = new THREE.Matrix4(), deep = SEA_Y - 140;
+    const M = new THREE.Matrix4();
     for (let s = 60; s < tr.length; s += 120) {
       if (tr.inGap(s, 50) || tr.inLoop(s, 80) || tr.inCave(s, 60)) continue;
-      const f = tr.frame(s);
+      const f = tr.frame(s), deep = this.city ? this.city.basin.natural(f.P.x, f.P.z) - 6 : SEA_Y - 140;
       if (f.U.y < 0.93 || f.P.y < SEA_Y + 3) continue;
       const top = f.P.y - 1.8 - 2.4 - 1.6 - deep;
       let clear = true;
@@ -502,6 +538,7 @@ export class OceanWorld {
     const add = (p, col, I) => { if (p.y > SEA_Y - 1 && p.y < SEA_Y + 120) cand.push({ p, col, I, k: I / Math.max(100, p.distanceToSquared(cp)) }); };
     for (const l of this.lamps) if (l.intensity > 0) add(l.position, [l.color.r, l.color.g, l.color.b], l.intensity * 4);
     if (this.lightLamp) add(this.lightLamp.p, [1.0, 0.86, 0.62], 30000);
+    if (this.keeper) add(this.keeper.top, [1.0, 0.8, 0.55], 120000);
     for (const L of this.city.lamps) if (L.p.y > SEA_Y) add(L.p, L.col, Math.min(L.I, 20000));
     // down the track near the camera: the lamp posts' lenses (every 60 m, sides alternating) and the barriers' glow
     const i0 = tr.nearestIndex(cp), every = Math.round(60 / tr.step), th = OCEAN_LAYOUT.theme;
@@ -521,6 +558,10 @@ export class OceanWorld {
       U.seLC.value[j].set(c.col[0], c.col[1], c.col[2]);
     }
   }
+
+  // (the race is handed over before the warm-up: the beams are made then, so their shaders compile with the rest)
+  set race(r) { this._race = r; if (r) this.shipBeams(null); }
+  get race() { return this._race; }
 
   // Every ship's headlight seen: a lens glowing at its nose, and its beam - a soft cone ahead and down along the
   // light's aim, faint in the night air, plain to see in the water (the light coming from the ship, not out of nowhere)
@@ -561,6 +602,7 @@ export class OceanWorld {
         return { e, mat };
       });
     }
+    if (!cp) return;
     for (const b of this.beams) {
       const p = b.e.ship.root.position, under = p.y < this.level;
       b.mat.uniforms.k.value = (b.e.ship.power ?? 1) * (under ? 0.05 : 0.012);

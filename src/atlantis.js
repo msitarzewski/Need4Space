@@ -13,7 +13,7 @@ import { SEA_Y, SEA_GLSL } from './sea.js';
 import { sunOnly } from './look.js';
 
 const TAU = Math.PI * 2;
-export const FLOOR = SEA_Y - 430;                    // the abyss's floor, the city's streets
+export const FLOOR = SEA_Y - 900;                    // the abyss's floor, the city's streets
 // face kinds
 const ASHLAR = 0, SMOOTH = 1, TRIM = 2, GLOW = 3, WINDOW = 4, ROOF = 5, FLUTED = 6, DARK = 7;
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -557,7 +557,7 @@ export function lighthouseGeometry(x, y0, z, rot = 0) {
 
 // ---------------------------------------------------------------- the city
 export class City {
-  constructor(track, grid, { dens = 1 } = {}) {
+  constructor(track, grid, { dens = 1, avoid = [] } = {}) {
     this.track = track; this.grid = grid;
     const tr = track, rnd = mulberry32(8080), f = {}, lamps = [], B = new Builder();
     this.lamps = lamps;
@@ -570,7 +570,7 @@ export class City {
     const basin = (this.basin = new Basin(tr, grid, this.C, this.R));
     const ground = (x, z) => basin.height(x, z);
     const inside = (x, z) => Math.hypot((x - this.C.x) / this.R.x, (z - this.C.z) / this.R.z);
-    const occupied = [];
+    const occupied = avoid.map((a) => ({ ...a }));
     const clear = (g, margin) => grid.geometryClear(g, margin, 3);
     const side = (s, lat) => { tr.frame(s, f); const R = f.R.clone().setY(0).normalize(); return { x: f.P.x + R.x * lat, z: f.P.z + R.z * lat, y: f.P.y, R, T: f.T.clone().setY(0).normalize() }; };
     // (lamps added by a part built at scale s: their light and reach scaled with it)
@@ -579,8 +579,10 @@ export class City {
     // the great gate on the rim: over the way 20 m before the named point
     {
       const s = tr.at('gate', -20), p = side(s, 0), span = TRACK_W + 34, g0 = ground(p.x, p.z);
-      gateArch(B, span, p.y + 6 - g0, 13, 18, lamps, at(p.x, g0 - 2, p.z, Math.atan2(-p.R.z, p.R.x)));
-      occupied.push({ x: p.x, z: p.z, r: span / 2 + 20 });
+      if (p.y - g0 < 120) {
+        gateArch(B, span, p.y + 6 - g0, 13, 18, lamps, at(p.x, g0 - 2, p.z, Math.atan2(-p.R.z, p.R.x)));
+        occupied.push({ x: p.x, z: p.z, r: span / 2 + 20 });
+      }
     }
     // the colonnade down the lip of the abyss: a column every 16 m both sides, their tops 16 m over the deck - until the
     // floor falls away under it
@@ -687,7 +689,8 @@ export class City {
     // channel on top
     {
       const s = tr.at('aqueduct'), p = side(s, 0), g0 = ground(p.x, p.z);
-      const dir = p.R.clone().applyAxisAngle(V(0, 1, 0), 0.35), len = 1100, big = 100, small = 30, pier = 8;
+      const dir = p.R.clone().applyAxisAngle(V(0, 1, 0), 0.35), big = 100, small = 30, pier = 8;
+      let len = 1100;
       const O = g0 - 2, top = (p.y - 6) - O + big / 2 + 9;
       const rot = Math.atan2(-dir.z, dir.x), M = at(p.x, O, p.z, rot);
       const ring = (q, c, R, spring, d) => {
@@ -696,7 +699,7 @@ export class City {
         q.sweep(frames, hard([[0, -d], [0, d], [3.4, d], [3.4, -d]]), ASHLAR);
       };
       const localGround = (x) => ground(p.x + dir.x * x, p.z + dir.z * x) - 2 - O;
-      B.place(M, (q) => {
+      const arcade = (q) => {
         const spans = [];
         for (let x = big / 2 + pier; x < len / 2; x += small + pier) spans.push([x, x + small]);
         const all = [[-big / 2, big / 2], ...spans, ...spans.map(([a, b]) => [-b, -a])];
@@ -719,7 +722,10 @@ export class City {
           for (const sd of [-1, 1]) r.place(at(0, 3, sd * 5), (w) => w.box(len, 2.6, 1, ASHLAR, { step: 4 }));
           for (const sd of [-1, 1]) r.place(at(0, 1.2, sd * 5.56), (w) => w.box(len, 0.35, 0.12, GLOW, { step: 6 }));
         });
-      });
+      };
+      // (as long as it can be without crossing the track anywhere but under its middle arch)
+      for (; len > 300; len -= 100) { const tb = new Builder(); tb.place(M, arcade); if (clear(tb.geometry(), 4) >= 0) break; }
+      B.place(M, arcade);
       for (let x = -len / 2 + 40; x < len / 2; x += 60) {
         if (localGround(x) > top - 20) continue;
         lamps.push({ p: V(x, top - 6 + 5.6 + 1.5, 0).applyMatrix4(M), col: [1.0, 0.6, 0.25], I: 2400, reach: 80, size: 1.4, kind: 'orb' });
@@ -756,12 +762,12 @@ export class City {
       }
       return null;
     };
-    for (let k = 0; k < Math.round(120 * Math.max(0.6, dens)); k++) {
-      const r = 8 + rnd() * 12, h = 150 + Math.pow(rnd(), 0.8) * 240, close = k % 2 === 0;
+    for (let k = 0; k < Math.round(150 * Math.max(0.6, dens)); k++) {
+      const r = 9 + rnd() * 14, h = 170 + Math.pow(rnd(), 0.7) * 300, close = k % 2 === 0;
       if (place(r * 2.2 + 10, 120, (x, z) => {
         if (close) { const p = nearTrack(r); if (!p) return false; x = p.x; z = p.z; if (occupied.some((o) => Math.hypot(o.x - x, o.z - z) < o.r + r * 2.2 + 10)) return false; }
         const g0 = ground(x, z);
-        if (g0 > FLOOR + 120) return false;
+        if (g0 > FLOOR + 160) return false;
         const M = at(x, g0 - 3, z, rnd() * TAU);
         if (!test((tb, l) => tower(tb, r, h, l, M, mulberry32(k)))) return false;
         const n0 = lamps.length; tower(B, r, h, lamps, M, mulberry32(k)); scaleLamps(n0, r / 6);
