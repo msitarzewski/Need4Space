@@ -57,6 +57,7 @@ const ROWS = [
   ['heatHaze', 'Heat shimmer (desert)', [[true, 'On'], [false, 'Off']]],
   ['sandstorm', 'Sandstorm (desert)', [[true, 'On'], [false, 'Off']]],
   ['lensWater', 'Water on the lens', [[true, 'On'], [false, 'Off']]],
+  ['colossus', 'Broken capital ship in the sky (space)', [[true, 'On'], [false, 'Off']]],
   ['wreckFx', 'Derelict: sparks, flicker, drift, arcs (space)', [[true, 'On'], [false, 'Off']]],
   ['wreckMist', 'Derelict: coolant mist, sun beams (space)', [[true, 'On'], [false, 'Off']]],
   ['caveFx', 'Cave: daylight beams, spray, glowworms (forest moon)', [[true, 'On'], [false, 'Off']]],

@@ -112,6 +112,131 @@ function planetGroup(renderer) {
   return g;
 }
 
+// The colossus: a capital ship broken in two above the planet. Built and lit in Blender from where the sky's camera
+// stands (racer/colossus/build.py: the game's sun, planet-shine and starlight) and drawn here as that picture on a
+// plane the size of its camera's view - the sky only turns with the camera, so from here the picture is the ship.
+// The picture is stored at half its light (8 bits); its own lights are a second picture, one per channel (the break's
+// two groups of emergency lamps, the lit windows with the dying engine), sqrt-encoded to their peaks - drawn here
+// flickering. gap: where its break is (build.py meta), for the debris tumbling in it.
+export const COLOSSUS = {
+  dir: new THREE.Vector3(-0.0548, 0.1443, -0.988).normalize(), dist: 13000, fovH: 56, aspect: 2, gain: 2,
+  peaks: new THREE.Vector3(1.4467, 6.1497, 2.4834), lamp: new THREE.Color(0.62, 0.05, 0.022), window: new THREE.Color(0.8, 0.44, 0.18),
+  depth: [10500, 15500],                                            // (its depth layer's range along the camera's axis, m)
+  gap: { center: new THREE.Vector3(-927.58, 1710.56, -12737.62), axes: [[-0.86, -0.07, 0.51], [0.52, -0.13, 0.85], [0.01, 0.99, 0.14]] },
+};
+function colossus() {
+  const C = COLOSSUS, w = 2 * C.dist * Math.tan(THREE.MathUtils.degToRad(C.fovH) / 2), h = w / C.aspect;
+  const loader = new THREE.TextureLoader();
+  const tex = loader.load('assets/colossus/colossus.webp');
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const lights = loader.load('assets/colossus/colossus_lights.png');            // (data: no colour space)
+  const depth = loader.load('assets/colossus/colossus_depth.png');
+  depth.minFilter = depth.magFilter = THREE.NearestFilter; depth.generateMipmaps = false;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.ShaderMaterial({
+    transparent: true, depthWrite: true,
+    blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+    uniforms: { map: { value: tex }, lights: { value: lights }, depthMap: { value: depth }, gain: { value: C.gain }, time: { value: 0 }, peaks: { value: C.peaks },
+      lampCol: { value: C.lamp }, winCol: { value: C.window }, dist: { value: C.dist }, zRange: { value: new THREE.Vector2(...C.depth) } },
+    vertexShader: /* glsl */`varying vec2 vUv; varying vec3 vW;
+      void main() { vUv = uv; vec4 wp = modelMatrix * vec4(position, 1.0); vW = wp.xyz; gl_Position = projectionMatrix * viewMatrix * wp; }`,
+    fragmentShader: /* glsl */`
+      uniform sampler2D map, lights, depthMap; uniform float gain, time, dist; uniform vec2 zRange; uniform vec3 peaks, lampCol, winCol;
+      uniform mat4 projectionMatrix;                                // (three declares it for the vertex stage only)
+      varying vec2 vUv; varying vec3 vW;
+      // old emergency lamps on what power is left ("a very slow change, not flickering ... old, not like it was just
+      // destroyed"): each group swelling and fading over half a minute or so, never quite out
+      float slow(float t, float seed) {
+        float a = 0.5 + 0.5 * sin(t * 6.2832 / (26.0 + seed * 16.0) + seed * 5.0);
+        return 0.4 + 0.6 * a * (0.8 + 0.2 * sin(t * 0.05 + seed * 3.0));
+      }
+      void main() {
+        vec4 t = texture2D(map, vUv);
+        vec3 L = texture2D(lights, vUv).rgb;
+        L = L * L * peaks;
+        vec3 c = t.rgb * gain * t.a;
+        c += lampCol * (L.r * slow(time, 0.17) + L.g * slow(time, 0.71));
+        c += winCol * L.b * (0.88 + 0.12 * sin(time * 0.15));
+        gl_FragColor = vec4(c, t.a);
+        // its depth: the point along this pixel's ray at the render's distance (the plane stands at dist on the axis)
+        float dz = texture2D(depthMap, vUv).r;
+        if (t.a < 0.5 || dz > 0.995) gl_FragDepth = 1.0;
+        else {
+          vec4 cp = projectionMatrix * viewMatrix * vec4(vW * ((zRange.x + dz * (zRange.y - zRange.x)) / dist), 1.0);
+          gl_FragDepth = clamp(cp.z / cp.w * 0.5 + 0.5, 0.0, 1.0);
+        }
+      }`,
+  }));
+  // facing the observer, its up the camera's (the picture's up: world up taken off the view direction)
+  const right = new THREE.Vector3().crossVectors(C.dir, new THREE.Vector3(0, 1, 0)).normalize(), up = new THREE.Vector3().crossVectors(right, C.dir);
+  m.matrixAutoUpdate = false;
+  m.matrix.makeBasis(right, up, C.dir.clone().negate()).setPosition(C.dir.clone().multiplyScalar(C.dist));
+  m.renderOrder = 3;
+  return m;
+}
+
+// Debris tumbling in the colossus's break ("add some debris moving too between the cut"): the picture's own pieces
+// are frozen, so ~110 torn plates and chunks drift slowly round the gap where the render has it, each turning on its
+// own axis and catching the sun as it turns, cold. Lit as the render is (the sun, the planet's shine,
+// starlight). All in the shader - one draw, only the clock per frame.
+function colossusDebris() {
+  const C = COLOSSUS, n = 110, rnd = mulberry32(77), R = () => rnd();
+  const g = new THREE.InstancedBufferGeometry().copy(new THREE.BoxGeometry(1, 1, 1, 2, 2, 2));
+  g.instanceCount = n;
+  const pos = new Float32Array(n * 3), drift = new Float32Array(n * 3), axis = new Float32Array(n * 3), scale = new Float32Array(n * 3), wv = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) {
+    const gs = () => (R() + R() + R() - 1.5) / 1.5;                          // (round the middle of the gap, mostly)
+    pos.set([gs() * 700, gs() * 520, gs() * 480], i * 3);
+    const d = new THREE.Vector3(R() - 0.5, R() - 0.5, R() - 0.5).normalize().multiplyScalar(60 + 200 * R());
+    drift.set([d.x, d.y, d.z], i * 3);
+    const a = new THREE.Vector3(R() - 0.5, R() - 0.5, R() - 0.5).normalize();
+    axis.set([a.x, a.y, a.z], i * 3);
+    const big = R() < 0.15, s = big ? 32 + 28 * R() : 8 + 28 * R() ** 1.6;
+    scale.set(R() < 0.6 ? [s * (0.8 + 0.6 * R()), s * (0.5 + 0.5 * R()), 3 + 4 * R()] : [s * (0.5 + 0.5 * R()), s * (0.3 + 0.4 * R()), s * (0.2 + 0.3 * R())], i * 3);
+    wv.set([6.2832 / (50 + 90 * R()), R(), (0.04 + 0.4 * R()) * (R() < 0.5 ? -1 : 1), R() < 0.06 ? 0.6 + 0.6 * R() : 0], i * 4);
+  }
+  for (const [k, arr, sz] of [['iPos', pos, 3], ['iDrift', drift, 3], ['iAxis', axis, 3], ['iScale', scale, 3], ['iW', wv, 4]]) g.setAttribute(k, new THREE.InstancedBufferAttribute(arr, sz));
+  const axes = new THREE.Matrix3().set(...[0, 1, 2].flatMap((r) => C.gap.axes.map((col) => col[r])));    // (columns: the ship's x, y, z)
+  const m = new THREE.Mesh(g, new THREE.ShaderMaterial({
+    uniforms: { time: { value: 0 }, gc: { value: C.gap.center }, gaxes: { value: axes }, sunDir: { value: SUN_DIR }, planetDir: { value: PLANET_DIR } },
+    vertexShader: /* glsl */`
+      uniform float time; uniform vec3 gc; uniform mat3 gaxes;
+      attribute vec3 iPos, iDrift, iAxis, iScale; attribute vec4 iW;     // iW: drift rate, phase, spin rate, glow
+      varying vec3 vP; varying float vGlow;
+      float hh(float x) { return fract(sin(x) * 43758.5453); }
+      mat3 rot(vec3 a, float t) {
+        float c = cos(t), s = sin(t), k = 1.0 - c;
+        return mat3(c + a.x * a.x * k, a.y * a.x * k + a.z * s, a.z * a.x * k - a.y * s,
+                    a.x * a.y * k - a.z * s, c + a.y * a.y * k, a.z * a.y * k + a.x * s,
+                    a.x * a.z * k + a.y * s, a.y * a.z * k - a.x * s, c + a.z * a.z * k);
+      }
+      void main() {
+        mat3 Rm = rot(iAxis, iW.z * time + iW.y * 6.2832);
+        vec3 off = iPos + iDrift * sin(iW.x * time + iW.y * 6.2832);
+        float k = dot(position, vec3(12.9898, 78.233, 37.719)) + iW.y * 91.7;
+        vec3 jag = position + (vec3(hh(k), hh(k + 1.7), hh(k + 3.1)) - 0.5) * 0.45;     // (a torn chunk, its own shape)
+        vec3 wp = gc + gaxes * off + Rm * (jag * iScale);
+        vP = wp; vGlow = iW.w;
+        gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
+      }`,
+    fragmentShader: /* glsl */`
+      uniform float time; uniform vec3 sunDir, planetDir; varying vec3 vP; varying float vGlow;
+      void main() {
+        vec3 v = normalize(-vP), n = normalize(cross(dFdx(vP), dFdy(vP)));        // (faceted)
+        if (dot(n, v) < 0.0) n = -n;
+        const float albedo = 0.09;
+        vec3 sun = vec3(1.0, 0.96, 0.9) * 5.5, shine = vec3(1.0, 0.7, 0.48) * 0.35, amb = vec3(0.5, 0.56, 0.69) * 0.03;
+        vec3 c = albedo / 3.14159 * (sun * max(dot(n, sunDir), 0.0) + shine * max(dot(n, planetDir), 0.0)) + albedo * amb;
+        // bare metal: a tight glint toward the sun - the plates flash as they turn
+        float ns = max(dot(n, sunDir), 0.0);
+        c += sun * pow(max(dot(n, normalize(sunDir + v)), 0.0), 80.0) * ns * 0.04;
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+  }));
+  m.frustumCulled = false;
+  m.renderOrder = 4;
+  return m;
+}
+
 // the sun: a globe of plasma 4.8 deg across, prominences and eruptions round it (celestial.js)
 function sunGroup() {
   const g = new THREE.Group();
@@ -165,7 +290,9 @@ export class SpaceWorld {
     this.stars = stars();
     this.planet = planetGroup(renderer);
     this.sunG = sunGroup();
-    this.sky.add(this.nebula, this.stars, this.planet, this.sunG);
+    this.colossus = colossus();
+    this.colossusDebris = colossusDebris();
+    this.sky.add(this.nebula, this.stars, this.planet, this.sunG, this.colossus, this.colossusDebris);
     this.bakeNebula(renderer);
     // environment for reflections: the same sky without the sun's disc (the sun light makes its own highlight)
     // (after the sky's own bakes: a bake too)
@@ -285,6 +412,11 @@ export class SpaceWorld {
     place(this.sunFar, FAR_HALF, camera ? camera.position.clone().addScaledVector(fwd, 140) : p);
   }
 
+  // the settings' own switches for this world
+  setOptions(v) {
+    this.colossus.visible = this.colossusDebris.visible = v.colossus !== false;
+  }
+
   update(t, camera, shipPos, s, renderer) {
     this.skyCam.quaternion.copy(camera.quaternion);
     this.skyCam.fov = camera.fov;
@@ -297,6 +429,8 @@ export class SpaceWorld {
     this.wreck?.update(t, camera);
     this.scenery.update(t, Math.max(0, t - (this.lastT ?? t)));
     this.sunG.userData.surf.material.uniforms.time.value = t;
+    this.colossus.material.uniforms.time.value = t;
+    this.colossusDebris.material.uniforms.time.value = t;
     const cu = this.sunG.userData.corona.material.uniforms;
     cu.time.value = t;
     // now and then the sun throws off a plume of matter (every 25-50 s, somewhere round the limb)
