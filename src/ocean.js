@@ -336,6 +336,7 @@ export class OceanWorld {
     rm.name = 'lighthouse-rock';
     rm.layers.set(2); rm.castShadow = rm.receiveShadow = true;
     const L = lighthouseGeometry(x, top + 2, z, 0.4);
+    this.lightLamp = L.lamp;
     const tm = new THREE.Mesh(L.geometry, stoneMaterial({ key: 'lighthouse' }));
     tm.name = 'lighthouse';
     tm.layers.set(2); tm.castShadow = tm.receiveShadow = true;
@@ -487,6 +488,35 @@ export class OceanWorld {
     if (Math.abs(x) < TRACK_W_HALF + 4 && y > -6 && y < 6.5) p.addScaledVector(tr.U[i], 6.5 - y);
   }
 
+  // The lights that show in the sea: of every light near enough to the water, the twelve that shine brightest at the
+  // camera - the gantries' lamps, the lamp posts and the barriers' glow down the track near it, the lighthouse, the
+  // braziers and the dome's lantern out of the sea, the ships' engines
+  reflectLights(cp) {
+    const tr = this.track, cand = (this._cand ||= []), U = this.ocean.U;
+    cand.length = 0;
+    const add = (p, col, I) => { if (p.y > SEA_Y - 1 && p.y < SEA_Y + 120) cand.push({ p, col, I, k: I / Math.max(100, p.distanceToSquared(cp)) }); };
+    for (const l of this.lamps) if (l.intensity > 0) add(l.position, [l.color.r, l.color.g, l.color.b], l.intensity * 4);
+    if (this.lightLamp) add(this.lightLamp.p, [1.0, 0.86, 0.62], 30000);
+    for (const L of this.city.lamps) if (L.p.y > SEA_Y) add(L.p, L.col, Math.min(L.I, 20000));
+    // down the track near the camera: the lamp posts' lenses (every 60 m, sides alternating) and the barriers' glow
+    const i0 = tr.nearestIndex(cp), every = Math.round(60 / tr.step), th = OCEAN_LAYOUT.theme;
+    const X = TRACK_W / 2 + 0.35;
+    for (let d = -3; d <= 8; d++) {
+      const k = Math.floor(i0 / every) + d, i = ((k * every) % tr.n + tr.n) % tr.n, side = ((k % 2) + 2) % 2 ? 1 : -1;
+      if (tr.P[i].y > SEA_Y + 40) continue;
+      add(tr.P[i].clone().addScaledVector(tr.R[i], side * (X - 1.15)).addScaledVector(tr.U[i], 1.2 + 4.04), th.lamp, 900);
+      for (const sd of [-1, 1]) add(tr.P[i].clone().addScaledVector(tr.R[i], sd * (TRACK_W / 2 + 0.7)).addScaledVector(tr.U[i], 3), th.field, 260);
+    }
+    if (this.race) for (const e of this.race.entries) add(e.ship.root.position, [e.ship.engineColor?.r ?? 0.3, e.ship.engineColor?.g ?? 0.6, e.ship.engineColor?.b ?? 1], 700);
+    cand.sort((a, b) => b.k - a.k);
+    for (let j = 0; j < 12; j++) {
+      const c = cand[j];
+      if (!c) { U.seLP.value[j].set(0, -1e5, 0, 0); continue; }
+      U.seLP.value[j].set(c.p.x, c.p.y, c.p.z, c.I);
+      U.seLC.value[j].set(c.col[0], c.col[1], c.col[2]);
+    }
+  }
+
   // the camera coming up out of the sea: water on the lens (main.js)
   wetCheck(p) {
     const under = p.y < this.level, hit = this.camUnder === true && !under;
@@ -530,7 +560,7 @@ export class OceanWorld {
     this.dome.material.uniforms.under.value = Math.max(0, this.level - cp.y);
     const deep = smoothstep(0, 1.5, this.level - cp.y);
     // the eye opening up in the dark of the deep (main.js: the exposure times this)
-    this.exposureK = 1 + 1.1 * smoothstep(10, 220, this.level - cp.y);
+    this.exposureK = 1 + 0.8 * smoothstep(10, 220, this.level - cp.y);
     this.heat.enabled = deep > 0;
     this.heat.quad.material.uniforms.time.value = t;
     this.heat.quad.material.uniforms.deep.value = deep;
@@ -554,6 +584,7 @@ export class OceanWorld {
         m.visible = sp.center.distanceTo(cp) - sp.radius < reach;
       }
     }
+    this.reflectLights(cp);
     // the ships, for the life (splashes where they go into the sea or out of it, bubbles under it)
     const ws = this.shipsWet;
     if (this.race) this.race.entries.forEach((e, k) => {

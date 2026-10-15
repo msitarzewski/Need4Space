@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { mulberry32, smoothstep, fbm } from './noise.js';
 import { TRACK_W } from './track.js';
 import { SEA_Y, SEA_GLSL } from './sea.js';
+import { sunOnly } from './look.js';
 
 const TAU = Math.PI * 2;
 export const FLOOR = SEA_Y - 430;                    // the abyss's floor, the city's streets
@@ -259,23 +260,50 @@ function ziggurat(B, w, tiers, th, lamps, M) {
 
 // a slender tower: a base, a shaft in sections with ring balconies, a lit crown
 function tower(B, r, h, lamps, M, rnd) {
+  // three kinds: a stepped spire on a square or eight-sided plan; a round tower of galleried stages under a ribbed
+  // dome and a lantern; a slender needle bundled with two lower shafts. Every stage: a plinth band, a shaft of windows,
+  // a cornice with a glowing band under it
+  const kind = rnd(), sq = kind < 0.45, seg = sq ? (rnd() < 0.5 ? 4 : 8) : 24, opts = sq ? { a0: Math.PI / seg, a1: Math.PI / seg + TAU } : {};
+  const sk = sq ? 1 / Math.cos(Math.PI / seg) : 1;          // (a polygon's corner radius for its face's distance)
   B.place(M, (q) => {
-    q.box(r * 3, 5, r * 3, TRIM, { step: 3 });
-    const prof = [[r * 1.15, 5, ASHLAR]];
-    const secs = 3 + Math.floor(rnd() * 3);
-    for (let i = 0; i < secs; i++) {
-      const y0 = 5 + (h - 18) * (i / secs), y1 = 5 + (h - 18) * ((i + 1) / secs), rr = r * (1.1 - 0.25 * (i / secs));
-      prof.push([rr, y0, WINDOW], [rr, y1 - 2.5, TRIM], [rr + 1.6, y1 - 2, TRIM], [rr + 1.6, y1, TRIM], [rr * 0.95, y1, ASHLAR]);
+    q.lathe([[r * 2.1 * sk, 0, TRIM], [r * 2.1 * sk, 4, TRIM], [r * 1.75 * sk, 4, TRIM], [r * 1.75 * sk, 8, TRIM], [r * 1.35 * sk, 8, TRIM], [r * 1.35 * sk, 11, TRIM], [0, 11, TRIM]], seg, opts);
+    const stages = 3 + Math.floor(rnd() * 3), topH = kind < 0.45 ? h * 0.24 : kind < 0.8 ? r * 1.6 : h * 0.18;
+    let y = 11, rr = r * 1.2;
+    const body = h - topH - 11;
+    for (let i = 0; i < stages; i++) {
+      const sh = body * (i === 0 ? 0.34 : 0.66 / (stages - 1)), gallery = !sq && i > 0 && rnd() < 0.6;
+      const prof = [[rr * 1.04 * sk, y, TRIM], [rr * 1.04 * sk, y + 2.2, TRIM], [rr * sk, y + 2.2, WINDOW], [rr * 0.97 * sk, y + sh - 4.5, GLOW],
+        [rr * 0.97 * sk, y + sh - 3.8, TRIM], [rr * 1.16 * sk, y + sh - 2.6, TRIM], [rr * 1.18 * sk, y + sh, TRIM], [rr * 0.9 * sk, y + sh, TRIM]];
+      q.lathe(prof, seg, opts);
+      if (gallery) {
+        // a gallery: a ring of columns round a recessed core, a lamp-lit ring beam over them
+        const gh = Math.min(16, sh * 0.35), n = Math.max(8, Math.round(rr * 1.4));
+        q.lathe([[rr * 0.72, y + sh, WINDOW], [rr * 0.72, y + sh + gh, TRIM]], seg);
+        for (let k = 0; k < n; k++) { const a = (k / n) * TAU; q.place(at(Math.cos(a) * rr * 0.98, y + sh, Math.sin(a) * rr * 0.98), (c) => column(c, gh, Math.max(0.5, rr * 0.06))); }
+        q.lathe([[rr * 1.1, y + sh + gh, TRIM], [rr * 1.1, y + sh + gh + 1.6, GLOW], [rr * 1.1, y + sh + gh + 2.2, TRIM], [rr * 0.9, y + sh + gh + 2.6, TRIM]], seg);
+        y += gh + 2.6;
+      }
+      y += sh;
+      rr *= 0.8;
     }
-    const yc = h - 13;
-    prof.push([r * 0.85, yc, TRIM], [r * 1.3, yc + 2, TRIM], [r * 0.9, yc + 2.4, GLOW], [r * 0.9, yc + 4, GLOW], [r * 1.25, yc + 4.4, TRIM], [r * 0.4, h, ROOF], [0, h + 0.6, TRIM]);
-    q.lathe(prof, 20);
-    // four lines of light up the shaft, catching the eye from across the abyss
-    for (let k = 0; k < 4; k++) {
-      const a = (k / 4) * TAU + 0.4, rr = r * 1.1 + 0.1;
-      q.place(at(Math.cos(a) * rr, 5, Math.sin(a) * rr, -a), (c) => c.box(0.3, h - 24, 0.3, GLOW, { step: 6, top: false }));
+    if (kind < 0.45) {
+      // the spire, a crystal at its tip
+      q.lathe([[rr * 1.1 * sk, y, TRIM], [rr * 1.1 * sk, y + 1.5, TRIM], [rr * 0.95 * sk, y + 1.5, ROOF], [rr * 0.12 * sk, y + topH - 3, ROOF], [rr * 0.2 * sk, y + topH - 2.5, TRIM], [0, y + topH, TRIM]], seg, opts);
+      lamps.push({ p: V(0, y + topH + 2, 0).applyMatrix4(M), col: rnd() < 0.5 ? [0.25, 0.85, 1.0] : [0.35, 1.0, 0.8], I: 2400, reach: 90, size: r * 0.5, kind: 'crown' });
+    } else if (kind < 0.8) {
+      // a ribbed dome and its lantern
+      const dp = [[rr, y, TRIM], [rr * 1.08, y + 1.6, TRIM], [rr, y + 1.6, ROOF]];
+      for (let i = 1; i <= 12; i++) { const t = (i / 12) * Math.PI / 2; dp.push([rr * Math.cos(t) + (i === 12 ? 0.1 : 0), y + 1.6 + rr * 1.15 * Math.sin(t), ROOF]); }
+      q.lathe(dp, seg);
+      const ly = y + 1.6 + rr * 1.15;
+      q.lathe([[rr * 0.28, ly - 0.5, WINDOW], [rr * 0.28, ly + rr * 0.35, TRIM], [rr * 0.36, ly + rr * 0.4, ROOF], [0, ly + rr * 0.75, TRIM]], 12);
+      lamps.push({ p: V(0, ly + rr * 0.15, 0).applyMatrix4(M), col: rnd() < 0.5 ? [1.0, 0.62, 0.25] : [0.25, 0.85, 1.0], I: 2600, reach: 90, size: r * 0.6, kind: 'crown' });
+    } else {
+      // a needle, two lower shafts bound to it
+      q.lathe([[rr * 0.8, y, WINDOW], [rr * 0.5, y + topH - 4, GLOW], [rr * 0.5, y + topH - 2, TRIM], [0, y + topH + 8, TRIM]], 16);
+      for (const sd of [-1, 1]) q.place(at(sd * r * 1.55, 11, 0), (c) => c.lathe([[r * 0.55, 0, WINDOW], [r * 0.5, h * 0.55, TRIM], [r * 0.62, h * 0.55 + 1.5, TRIM], [r * 0.3, h * 0.55 + r * 1.2, ROOF], [0, h * 0.55 + r * 1.3, TRIM]], 16));
+      lamps.push({ p: V(0, y + topH + 9, 0).applyMatrix4(M), col: [0.4, 0.9, 1.0], I: 2200, reach: 90, size: r * 0.4, kind: 'crown' });
     }
-    lamps.push({ p: V(0, yc + 3.2, 0).applyMatrix4(M), col: rnd() < 0.5 ? [0.25, 0.85, 1.0] : [1.0, 0.62, 0.25], I: 2600, reach: 90, size: r * 0.9, kind: 'crown' });
   });
 }
 
@@ -378,6 +406,8 @@ vec3 ctGlow = vec3(0.0); float ctRough = 0.7, ctWet = 0.0;`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
   // the lamps' light (baked), and what glows of itself
   totalEmissiveRadiance += diffuseColor.rgb * vLit + ctGlow;`);
+    // (the scene's lamps follow the city's own - their light is baked in already: twice, the hall's columns went white)
+    sh.fragmentShader = sunOnly(sh.fragmentShader);
   };
   mat.customProgramCacheKey = () => `ocean-${key}`;
   return mat;
@@ -450,6 +480,7 @@ float slN(vec2 x) { vec2 i = floor(x), u = fract(x); u = u * u * (3.0 - 2.0 * u)
     diffuseColor.rgb = c;
   }`)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += diffuseColor.rgb * vLit;');
+    sh.fragmentShader = sunOnly(sh.fragmentShader);
   };
   mat.customProgramCacheKey = () => 'ocean-silt';
   return mat;
@@ -584,6 +615,8 @@ export class City {
         const n0 = lamps.length;
         domeTemple(B, 44, lamps, M, rnd);
         scaleLamps(n0, S);
+        // (its lantern: a soft source - at the building's scale its light whited out the dome under it)
+        for (let i = n0; i < lamps.length; i++) if (lamps[i].kind === 'crystal') Object.assign(lamps[i], { I: 9000, size: 14, reach: 420 });
         occupied.push({ x: p.x, z: p.z, r: 170 });
         this.dome = p;
         break;
@@ -781,10 +814,10 @@ export class City {
     const glow = new THREE.InstancedMesh(orb, new THREE.MeshBasicMaterial({ color: 0xffffff }), this.lamps.length);
     const M = new THREE.Matrix4(), c = new THREE.Color();
     this.lamps.forEach((L, i) => {
-      const s = { brazier: 2.6, crystal: 2.4, crown: 1.6, orb: 1.0, lantern: 0.75, niche: 0.7, street: 0.55 }[L.kind] || 1;
+      const s = Math.min(4, ({ brazier: 2.6, crystal: 2.4, crown: 1.6, orb: 1.0, lantern: 0.75, niche: 0.7, street: 0.55 }[L.kind] || 1) * Math.max(1, Math.sqrt(L.I / 20000)));
       M.compose(L.p, new THREE.Quaternion(), V(s, L.kind === 'brazier' ? s * 0.6 : s, s));
       glow.setMatrixAt(i, M);
-      const k = L.kind === 'brazier' ? 12 : L.kind === 'crystal' ? 9 : 10;
+      const k = L.kind === 'brazier' ? 12 : L.kind === 'crystal' ? 6 : 10;
       glow.setColorAt(i, c.setRGB(L.col[0] * k, L.col[1] * k, L.col[2] * k));
     });
     glow.name = 'city-lamps';
@@ -792,8 +825,8 @@ export class City {
     const hq = new THREE.InstancedBufferGeometry().copy(new THREE.PlaneGeometry(2, 2));
     const hp = new Float32Array(this.lamps.length * 4), hc = new Float32Array(this.lamps.length * 3);
     this.lamps.forEach((L, i) => {
-      hp.set([L.p.x, L.p.y, L.p.z, Math.min(60, L.reach * 0.22 + 3)], i * 4);
-      const k = { brazier: 0.5, crystal: 0.45 }[L.kind] || 0.3;
+      hp.set([L.p.x, L.p.y, L.p.z, Math.min(28, L.reach * 0.2 + 3)], i * 4);
+      const k = ({ brazier: 0.5, crystal: 0.3 }[L.kind] || 0.3) * Math.min(1, 3000 / L.I + 0.25);
       hc.set([L.col[0] * k, L.col[1] * k, L.col[2] * k], i * 3);
     });
     hq.setAttribute('hP', new THREE.InstancedBufferAttribute(hp, 4));

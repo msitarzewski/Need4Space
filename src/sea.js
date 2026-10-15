@@ -350,7 +350,8 @@ export class Ocean {
     const wa = WAVES.map((W) => new THREE.Vector4(W.D.x, W.D.y, W.k, W.A)), wb = WAVES.map((W) => new THREE.Vector4(W.Q, W.w, W.ph, 0));
     this.U = { seCenter: { value: new THREE.Vector3() }, seTime: { value: 0 }, seWaveA: { value: wa }, seWaveB: { value: wb },
       seSky: { value: skyCube }, seDetail: { value: rippleTexture(renderer) }, seBio: { value: 1 },
-      seRings: { value: Array.from({ length: 16 }, () => new THREE.Vector4(0, 0, -1e6, 0)) } };
+      seRings: { value: Array.from({ length: 16 }, () => new THREE.Vector4(0, 0, -1e6, 0)) },
+      seLP: { value: Array.from({ length: 12 }, () => new THREE.Vector4(0, -1e5, 0, 0)) }, seLC: { value: Array.from({ length: 12 }, () => new THREE.Vector3()) } };
     const mat = new THREE.ShaderMaterial({
       uniforms: this.U, side: THREE.DoubleSide, transparent: true, depthWrite: true,
       blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
@@ -377,7 +378,7 @@ export class Ocean {
           gl_Position = projectionMatrix * viewMatrix * vec4(vW, 1.0);
         }`,
       fragmentShader: /* glsl */`
-        uniform samplerCube seSky; uniform sampler2D seDetail; uniform float seTime, seBio; uniform vec4 seRings[16];
+        uniform samplerCube seSky; uniform sampler2D seDetail; uniform float seTime, seBio; uniform vec4 seRings[16]; uniform vec4 seLP[12]; uniform vec3 seLC[12];
         varying vec3 vW; varying vec3 vN0; varying float vJac; varying float vCrest;
         ${SEA_GLSL}
         void main() {
@@ -421,6 +422,18 @@ export class Ocean {
             vec3 sss = vec3(0.004, 0.03, 0.034) * thin * (0.4 + back) * (1.0 - far);
             vec3 foamC = SE_SUNRAD * 0.07 * (0.4 + 0.6 * max(dot(N, SE_SUN), 0.0)) + vec3(0.016, 0.02, 0.026);
             vec3 c = refl * F + SE_SUNRAD * spec + sss * (1.0 - F);
+            // the lights near the sea (the track's lamps, the gantries, the lighthouse, the braziers, the ships' engines)
+            // in it: each a long shimmering streak broken up by the waves
+            for (int i = 0; i < 12; i++) {
+              vec4 lp = seLP[i];
+              if (lp.w <= 0.0) continue;
+              vec3 Lv = lp.xyz - vW;
+              float d2 = dot(Lv, Lv);
+              vec3 l = Lv * inversesqrt(d2), hh = normalize(l + V);
+              float nhl = max(dot(N, hh), 0.0), ar = 0.0025, dl = nhl * nhl * (ar - 1.0) + 1.0;
+              float Fl = 0.02 + 0.98 * pow(1.0 - max(dot(hh, V), 0.0), 5.0);
+              c += seLC[i] * lp.w * (ar / (3.14159 * dl * dl)) * Fl * max(dot(N, l), 0.0) / max(4.0 * nv, 0.12) / d2;
+            }
             float a = F;
             c = mix(c, foamC, foam); a = mix(a, 1.0, foam * 0.92);
             c += bio;
