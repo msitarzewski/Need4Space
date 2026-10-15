@@ -461,37 +461,64 @@ export class Ocean {
       vertexShader: /* glsl */`
         uniform vec3 seCenter; uniform float seTime; uniform vec4 seWaveA[6], seWaveB[6];
         attribute float aSpace;
-        varying vec3 vW; varying vec3 vN0; varying float vJac; varying float vCrest;
+        varying vec3 vW; varying vec2 vXZ;
         void main() {
           vec2 xz = seCenter.xz + position.xz;
+          vXZ = xz;
           vec3 disp = vec3(0.0), n = vec3(0.0, 1.0, 0.0);
           float jac = 1.0;
           for (int i = 0; i < 6; i++) {
             vec4 a = seWaveA[i], b = seWaveB[i];
-            // (a wave finer than ~4 grid steps here is left out: it would alias into a shimmer)
-            float k = a.z, A = a.w * clamp(6.2831853 / k / (aSpace * 4.0) - 0.5, 0.0, 1.0);
+            // (the shape only where the grid draws it smoothly - a wave under ~12 grid steps here is left flat: the grid
+            // moves with the camera, and its coarse corners on a wave put the surface each pixel sees somewhere new each
+            // frame, the reflections swimming as the camera went; the waves' look there is the fragment's own)
+            float k = a.z, A = a.w * clamp(6.2831853 / k / (aSpace * 12.0) - 0.5, 0.0, 1.0);
             float ph = k * dot(a.xy, xz) - b.y * seTime + b.z, c = cos(ph), s = sin(ph);
             disp.xz += b.x * A * a.xy * c; disp.y += A * s;
             n.xz -= a.xy * k * A * c; n.y -= b.x * k * A * s;
             jac -= b.x * k * A * s;
           }
           vW = vec3(xz.x + disp.x, ${f(SEA_Y)} + disp.y, xz.y + disp.z);
-          vN0 = n; vJac = jac; vCrest = disp.y;
           gl_Position = projectionMatrix * viewMatrix * vec4(vW, 1.0);
         }`,
       fragmentShader: /* glsl */`
         uniform samplerCube seSky; uniform sampler2D seDetail; uniform float seTime, seBio; uniform vec4 seRings[16]; uniform vec4 seLP[12]; uniform vec3 seLC[12];
         uniform sampler2D seRefl; uniform mat4 seReflM; uniform float seReflOn;
-        varying vec3 vW; varying vec3 vN0; varying float vJac; varying float vCrest;
+        uniform vec4 seWaveA[6], seWaveB[6];
+        varying vec2 vXZ;
         ${SEA_GLSL}
         void main() {
-          vec3 V = cameraPosition - vW;
+          // the swell worked out again here, exactly, at this point's own place on the sea: the grid follows the camera,
+          // and its corners sampled the waves at new places as it moved - between them the waves' shape and slope (and
+          // every reflection on them) swam as the camera went. A wave finer than ~6 pixels here faded out instead
+          vec2 fwXZ = fwidth(vXZ);
+          float fpx = max(fwXZ.x, fwXZ.y);
+          vec3 sD = vec3(0.0), sN = vec3(0.0, 1.0, 0.0);
+          vec2 sNL = vec2(0.0);                    // (the slope of the long swells alone: what bends the reflections)
+          vec2 sNC = vec2(0.0);                    // (the slope of the waves big on the screen: what the highlights ride)
+          float sJ = 1.0;
+          for (int i = 0; i < 6; i++) {
+            vec4 a = seWaveA[i], b = seWaveB[i];
+            float k = a.z, A = a.w * clamp(6.2831853 / k / (fpx * 6.0) - 0.5, 0.0, 1.0);
+            float ph = k * dot(a.xy, vXZ) - b.y * seTime + b.z, c = cos(ph), s = sin(ph);
+            sD.xz += b.x * A * a.xy * c; sD.y += A * s;
+            sN.xz -= a.xy * k * A * c; sN.y -= b.x * k * A * s;
+            // (a swell bends the mirror only where it spans dozens of pixels: far off, a few pixels each, the reflections
+            // broke into bands that reshuffled every frame as the camera moved)
+            float big = a.w * clamp(6.2831853 / k / (fpx * 40.0) - 0.5, 0.0, 1.0);
+            if (i < 3) sNL -= a.xy * k * big * c;
+            sNC -= a.xy * k * big * c;
+            sJ -= b.x * k * A * s;
+          }
+          vec3 sW = vec3(vXZ.x + sD.x, ${f(SEA_Y)} + sD.y, vXZ.y + sD.z);
+          float sC = sD.y;
+          vec3 V = cameraPosition - sW;
           float dist = length(V);
           V /= dist;
-          vec3 Ng = normalize(vN0);
+          vec3 Ng = normalize(sN);
           // the ripples: two layers drifting across each other, fading out far off (their mips flatten them anyway)
-          vec4 r1 = texture2D(seDetail, vW.xz / 41.0 + seTime * vec2(0.012, -0.007));
-          vec4 r2 = texture2D(seDetail, vW.xz / 14.0 + seTime * vec2(-0.009, -0.018));
+          vec4 r1 = texture2D(seDetail, sW.xz / 41.0 + seTime * vec2(0.012, -0.007));
+          vec4 r2 = texture2D(seDetail, sW.xz / 14.0 + seTime * vec2(-0.009, -0.018));
           float far = smoothstep(120.0, 2600.0, dist);
           vec2 sl = ((r1.xy - 0.5) * 0.9 + (r2.xy - 0.5) * 0.6) * (1.0 - 0.75 * far);
           vec3 N = normalize(Ng + vec3(sl.x, 0.0, sl.y));
@@ -499,14 +526,14 @@ export class Ocean {
           vec3 dNx = dFdx(N), dNy = dFdy(N);
           float aa = min(0.5 * max(dot(dNx, dNx), dot(dNy, dNy)), 0.18);
           float foamN = r1.a * 0.55 + r2.a * 0.45;
-          float foam = smoothstep(0.62, 0.2, vJac) * smoothstep(0.42, 0.7, foamN);
+          float foam = smoothstep(0.62, 0.2, sJ) * smoothstep(0.42, 0.7, foamN);
           // rings spreading where something broke the sea (a leap, a splash, a ship going in): foam, and the plankton lit
           float ringK = 0.0;
           for (int i = 0; i < 16; i++) {
             vec4 rg = seRings[i];
             float age = seTime - rg.z;
             if (age < 0.0 || age > 7.0) continue;
-            float d = distance(vW.xz, rg.xy), rad = 1.5 + age * (3.0 + rg.w * 0.35), w = 0.6 + rg.w * 0.12 + age * 0.4;
+            float d = distance(sW.xz, rg.xy), rad = 1.5 + age * (3.0 + rg.w * 0.35), w = 0.6 + rg.w * 0.12 + age * 0.4;
             float band = exp(-pow((d - rad) / w, 2.0)) + 0.7 * exp(-pow((d - rad * 0.62) / (w * 0.8), 2.0));
             ringK += band * (1.0 - smoothstep(1.5, 7.0, age)) * smoothstep(0.0, 0.2, age) + (1.0 - smoothstep(0.0, rad * 0.7 + 2.0, d)) * (1.0 - smoothstep(0.0, 2.5, age)) * 0.9;
           }
@@ -514,8 +541,8 @@ export class Ocean {
           // plankton: points of cyan where the foam churns, flaring and fading
           // (a smooth swell and fade each: a hard wrap switched each one off at once, a flicker)
           float spark = pow(0.5 + 0.5 * sin((r2.b * 7.0 + r1.a * 3.0) * 6.2831853 + seTime * 1.1), 10.0) * smoothstep(0.55, 0.85, foamN);
-          float bloom = smoothstep(0.58, 0.82, texture2D(seDetail, vW.xz / 1900.0 + seTime * 0.0008).b * 0.6 + texture2D(seDetail, vW.xz / 700.0 - seTime * 0.0011).a * 0.4);
-          float crestGlow = bloom * smoothstep(0.4, 2.2, vCrest) * smoothstep(0.35, 0.75, foamN) * (0.6 + 0.4 * sin(seTime * 1.3 + foamN * 9.0));
+          float bloom = smoothstep(0.58, 0.82, texture2D(seDetail, sW.xz / 1900.0 + seTime * 0.0008).b * 0.6 + texture2D(seDetail, sW.xz / 700.0 - seTime * 0.0011).a * 0.4);
+          float crestGlow = bloom * smoothstep(0.4, 2.2, sC) * smoothstep(0.35, 0.75, foamN) * (0.6 + 0.4 * sin(seTime * 1.3 + foamN * 9.0));
           vec3 bio = vec3(0.05, 0.9, 1.25) * crestGlow * 1.6 * seBio * (1.0 - far * 0.7) + vec3(0.05, 0.9, 1.25) * (spark * (foam * 5.0 + 0.06) + clamp(ringK, 0.0, 1.0) * 0.3 * smoothstep(0.5, 0.85, foamN)) * seBio * (1.0 - far);
           vec3 T, L;
           if (dot(V, Ng) >= 0.0) {
@@ -525,17 +552,25 @@ export class Ocean {
             vec3 refl = textureLod(seSky, R, far * 3.0).rgb;
             // the mirror: what stands over the sea and the sky, broken up by the waves (the slope shifts where it is read)
             if (seReflOn > 0.5) {
-              vec4 rp = seReflM * vec4(vW.x, ${f(SEA_Y)}, vW.z, 1.0);
-              // (shifted by the swell's slope and half the ripples': by all of it the reflections danced)
-              vec2 ruv = rp.xy / rp.w + vec2(Ng.x + 0.5 * sl.x, Ng.z + 0.5 * sl.y) * 0.035 * (1.0 - 0.6 * far);
+              vec4 rp = seReflM * vec4(sW.x, ${f(SEA_Y)}, sW.z, 1.0);
+              // (bent by the long swells only, gently: by the short waves and the ripples too, everything mirrored in
+              // the sea boiled as the camera ran over them)
+              vec2 ruv = rp.xy / rp.w + sNL * 0.03 * (1.0 - 0.6 * far);
               float inScr = smoothstep(0.0, 0.02, min(min(ruv.x, 1.0 - ruv.x), min(ruv.y, 1.0 - ruv.y)));
-              refl = mix(refl, texture2D(seRefl, clamp(ruv, 0.001, 0.999)).rgb, inScr);
+              // (drawn out up and down a little, as a rippled sea draws reflections out: five taps)
+              float sy = 0.0025 + 0.006 * smoothstep(0.0, 0.5, far);
+              vec3 rm = vec3(0.0);
+              for (int j = -2; j <= 2; j++) rm += texture2D(seRefl, clamp(ruv + vec2(0.0, float(j) * sy), 0.001, 0.999)).rgb * (3.0 - abs(float(j)));
+              refl = mix(refl, rm / 9.0, inScr);
             }
-            float rough = mix(0.13, 0.3, far), a2 = min(rough * rough * rough * rough + aa, 1.0);
+            float rough = mix(0.17, 0.3, far), a2 = min(rough * rough * rough * rough + aa, 1.0);      // (the moon's glade a little broader: calmer)
+            // the highlights ride the waves big on the screen and, near, the ripples: past ~100 m every finer slope put
+            // the glints somewhere new with each step of the camera - the moon's glade and the lamps' streaks boiled
+            vec3 Nh = normalize(vec3(sNC.x, 1.0, sNC.y) + vec3(sl.x, 0.0, sl.y) * (1.0 - smoothstep(40.0, 160.0, dist)));
             vec3 H = normalize(SE_SUN + V);
-            float nh = max(dot(N, H), 0.0), dd = nh * nh * (a2 - 1.0) + 1.0;
-            float spec = a2 / (3.14159 * dd * dd) * (0.02 + 0.98 * pow(1.0 - max(dot(H, V), 0.0), 5.0)) * max(dot(N, SE_SUN), 0.0) / max(4.0 * nv, 0.15);
-            float thin = smoothstep(0.2, 2.6, vCrest), back = pow(max(dot(-V, SE_SUN) * 0.5 + 0.5 + 0.3 * dot(N, -V), 0.0), 3.0);
+            float nh = max(dot(Nh, H), 0.0), dd = nh * nh * (a2 - 1.0) + 1.0;
+            float spec = a2 / (3.14159 * dd * dd) * (0.02 + 0.98 * pow(1.0 - max(dot(H, V), 0.0), 5.0)) * max(dot(Nh, SE_SUN), 0.0) / max(4.0 * nv, 0.15);
+            float thin = smoothstep(0.2, 2.6, sC), back = pow(max(dot(-V, SE_SUN) * 0.5 + 0.5 + 0.3 * dot(N, -V), 0.0), 3.0);
             vec3 sss = vec3(0.004, 0.03, 0.034) * thin * (0.4 + back) * (1.0 - far);
             vec3 foamC = SE_SUNRAD * 0.07 * (0.4 + 0.6 * max(dot(N, SE_SUN), 0.0)) + vec3(0.016, 0.02, 0.026);
             vec3 c = refl * F + SE_SUNRAD * spec + sss * (1.0 - F);
@@ -544,12 +579,12 @@ export class Ocean {
             for (int i = 0; i < 12; i++) {
               vec4 lp = seLP[i];
               if (lp.w <= 0.0) continue;
-              vec3 Lv = lp.xyz - vW;
+              vec3 Lv = lp.xyz - sW;
               float d2 = dot(Lv, Lv);
               vec3 l = Lv * inversesqrt(d2), hh = normalize(l + V);
-              float nhl = max(dot(N, hh), 0.0), ar = 0.0025 + aa, dl = nhl * nhl * (ar - 1.0) + 1.0;
+              float nhl = max(dot(Nh, hh), 0.0), ar = 0.006 + 0.02 * smoothstep(60.0, 500.0, dist) + aa, dl = nhl * nhl * (ar - 1.0) + 1.0;
               float Fl = 0.02 + 0.98 * pow(1.0 - max(dot(hh, V), 0.0), 5.0);
-              c += seLC[i] * lp.w * (ar / (3.14159 * dl * dl)) * Fl * max(dot(N, l), 0.0) / max(4.0 * nv, 0.12) / d2;
+              c += seLC[i] * lp.w * (ar / (3.14159 * dl * dl)) * Fl * max(dot(Nh, l), 0.0) / max(4.0 * nv, 0.12) / d2;
             }
             float a = F;
             c = mix(c, foamC, foam); a = mix(a, 1.0, foam * 0.92);
@@ -669,7 +704,7 @@ export class UnderPass extends Pass {
               float r = 0.18 + 0.22 * uh(id + 3.1), d = length(f - o2);
               b = max(b, step(0.45, uh(id + 1.7)) * (smoothstep(r, r * 0.7, d) - 0.6 * smoothstep(r * 0.6, 0.0, d)));
             }
-            c = mix(c, c * 0.6 + vec3(0.32, 0.5, 0.55), clamp(b * froth * 1.4 + froth * 0.25, 0.0, 1.0));
+            c = mix(c, c * 0.75 + vec3(0.2, 0.32, 0.36), clamp(b * froth * 0.55 + froth * 0.08, 0.0, 1.0));
           }
           gl_FragColor = vec4(c, 1.0);
         }`,

@@ -2,6 +2,16 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.4.2', date: '16 Oct 2026', name: 'Calm water',
+    notes: [
+      'Reflections on the sea hold still as you drive: far off they no longer break into bands that reshuffle every moment',
+      'The moon’s glitter and the lamps’ streaks on the water are calmer',
+      'Going under the sea: a quick splash instead of seconds of bubbles over the view',
+      'Shoals glow faintly and can be seen coming from a few hundred metres, not only in your headlights',
+      'Leaping fish break the surface further ahead',
+    ],
+  },
+  {
     version: '1.4.1', date: '16 Oct 2026', name: 'Into the deep',
     notes: [
       'The sea reads as water where the road dives in: foam laps at the waterline and what lies under the surface turns teal and dims',

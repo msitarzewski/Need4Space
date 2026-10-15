@@ -269,8 +269,10 @@ class Spray {
           }
           vec4 mv = viewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
-          gl_PointSize = clamp(size * pr * projectionMatrix[1][1] * 360.0 / -mv.z, 1.0, 90.0);
+          gl_PointSize = clamp(size * pr * projectionMatrix[1][1] * 360.0 / -mv.z, 1.0, kind > 1.5 ? 24.0 : 90.0);
           vA = (1.0 - smoothstep(life * 0.55, life, t)) * smoothstep(0.0, 0.06, t) * smoothstep(1.0, 4.0, -mv.z);
+          // (a bubble near the lens: gone - the ship's own stream ran back through the chase camera, disks over the view)
+          if (kind > 1.5) vA *= smoothstep(3.0, 8.0, -mv.z);
           vC *= seTrans(cameraPosition, p, lvl);
         }`,
       fragmentShader: /* glsl */`
@@ -567,6 +569,8 @@ export class SeaLife {
   transformed = P + B * (q * iB.w);
   objectNormal = B * normal;`,
       color: `diffuseColor.rgb = mix(vec3(0.7, 0.74, 0.76), vec3(0.12, 0.2, 0.26), smoothstep(-0.02, 0.06, vLL.y));`,
+      // (a glow of their own, as the shoals along the way: seen from afar, not only in the headlights)
+      emissive: `totalEmissiveRadiance += vec3(0.05, 0.2, 0.26) + vec3(0.55, 0.8, 0.85) * 0.5 * pow(abs(dot(normal, normalize(vViewPosition))), 6.0);`,
     });
     this.shoal = new THREE.Mesh(g, shoalMat);
     this.shoal.frustumCulled = false;
@@ -655,10 +659,11 @@ export class SeaLife {
     this.spray.U.lvl.value = lvl; this.spray.U.pr.value = pr;
     this.jellyMat.uniforms.lvl.value = lvl; this.snowMat.uniforms.lvl.value = lvl; this.snowMat.uniforms.pr.value = pr;
     const tr = this.track, rnd = this.rnd, f = {};
-    // schools: one every ~0.5-1.2 s somewhere 150-450 m ahead, off to a side, where the track runs over the sea
+    // schools: one every ~0.5-1.2 s somewhere 170-450 m ahead, off to a side, where the track runs over the sea (from
+    // 90 m on they leapt up beside the ship at once)
     if (s !== null && t > (this.nextSchool ?? 0)) {
       this.nextSchool = t + 0.5 + rnd() * 0.7;
-      const ahead = tr.wrap(s + 90 + rnd() * 220);
+      const ahead = tr.wrap(s + 170 + rnd() * 280);
       tr.frame(ahead, f);
       if (f.P.y > SEA_Y + 1.5 && f.P.y < SEA_Y + 40) {
         const sd = rnd() < 0.5 ? -1 : 1, lat = sd * (36 + rnd() * 90);

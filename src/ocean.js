@@ -801,18 +801,21 @@ export class OceanWorld {
     this.heat.enabled = deep > 0;
     this.heat.quad.material.uniforms.time.value = t;
     this.heat.quad.material.uniforms.deep.value = deep;
-    // the camera going into the sea: the froth over the lens, and a burst of bubbles round it
+    // the camera going into the sea: a brief froth over the lens, and a burst of bubbles round the way ahead - off to
+    // the sides and out of the way (260 of them a few metres ahead for 3 s and the froth for a second: nothing could
+    // be seen for the first seconds under)
     const wentIn = this.camWasUnder === false && deep > 0.5;
     this.camWasUnder = deep > 0.5;
     if (wentIn) {
       this.frothT = t;
-      const rnd = this.life.rnd, fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-      for (let k = 0; k < 260; k++) {
-        const p = cp.clone().addScaledVector(fwd, 1 + rnd() * 9).add(new THREE.Vector3((rnd() - 0.5) * 7, (rnd() - 0.5) * 5, (rnd() - 0.5) * 7));
-        this.life.spray.add(p, (rnd() - 0.5) * 3, rnd() * 2, (rnd() - 0.5) * 3, t, 3, 2);
+      const rnd = this.life.rnd, q = camera.quaternion, fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(q), side = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+      for (let k = 0; k < 70; k++) {
+        const sd = rnd() < 0.5 ? -1 : 1;
+        const p = cp.clone().addScaledVector(fwd, 6 + rnd() * 14).addScaledVector(side, sd * (3 + rnd() * 6)).add(new THREE.Vector3(0, (rnd() - 0.6) * 4, 0));
+        this.life.spray.add(p, (rnd() - 0.5) * 2, rnd() * 1.5, (rnd() - 0.5) * 2, t, 1 + Math.round(rnd()), 2);
       }
     }
-    const fr = this.frothT !== undefined ? Math.max(0, 1 - (t - this.frothT) / 0.9) : 0;
+    const fr = this.frothT !== undefined ? Math.max(0, 1 - (t - this.frothT) / 0.45) : 0;
     this.heat.quad.material.uniforms.froth.value = fr * fr * deep;
     this.city.haloMat && (this.cityMeshes.halo.material.uniforms.lvl.value = this.level);
     this.ocean.update(t, camera);

@@ -91,7 +91,7 @@ function fishPoints(A, B, n, { d0 = 0, d1 = 1, f0 = 650, f1 = 760 } = {}) {
         float cover = min(1.0, lp / 1.5) * min(1.0, wp);
         float de = length(mv.xyz);                   // (as the meshes' cut: the distance, not the depth)
         float vis = smoothstep(fade.x, fade.y, de) * (1.0 - smoothstep(fade.z, fade.w, de)) * step(cameraPosition.y, lvl) * step(P.y, lvl - 1.0);
-        vC = (vec3(0.03, 0.14, 0.2) + vec3(0.3, 0.42, 0.45) * flash) * cover * vis * seTrans(cameraPosition, P, lvl);
+        vC = (vec3(0.05, 0.22, 0.3) + vec3(0.35, 0.5, 0.55) * flash) * cover * vis * seTrans(cameraPosition, P, lvl);
         gl_Position = projectionMatrix * mv;
         gl_PointSize = vis > 0.0 ? S : 0.0;
       }`,
@@ -419,8 +419,9 @@ export class Seabed {
   // (past ~200 m a glint each instead - fishPoints - fading in as the shape goes)
   if (distance(P, cameraPosition) > 235.0) transformed = vec3(0.0, -1e5, 0.0);`,
         color: `diffuseColor.rgb = mix(vec3(0.6, 0.66, 0.7), vec3(0.2, 0.32, 0.38), vSeed.x) * (0.85 + 0.3 * vAl);`,
-        // (a faint glint of their own: a school reads as a shimmering cloud in the dark)
-        emissive: `totalEmissiveRadiance += vec3(0.04, 0.08, 0.09) + vec3(0.55, 0.8, 0.85) * 0.45 * pow(abs(dot(normal, normalize(vViewPosition))), 6.0);`,
+        // (a glow of their own, lanternfish-like, and a glint: a school reads as a shimmering cloud from a few hundred
+        // metres - as dim as the water round them, they were seen only once the headlights caught them, in the face)
+        emissive: `totalEmissiveRadiance += vec3(0.05, 0.2, 0.26) + vec3(0.55, 0.8, 0.85) * 0.5 * pow(abs(dot(normal, normalize(vViewPosition))), 6.0);`,
       });
       mat.userData.uniforms = this.shipU;
       mat.onBeforeCompile = ((ob) => (sh) => {
