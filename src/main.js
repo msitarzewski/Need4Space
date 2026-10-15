@@ -471,6 +471,7 @@ async function boot() {
     bloom.enabled = v.bloom;
     heat.enabled = v.engineHeat !== false;
     Ship.trailStyle = v.engineTrails || 'puffs';
+    Ship.nozzleMotion = v.nozzleMotion !== false;
     blurOn = v.blur;
     Ship.brakeLights = v.brakeLights;
     const size = { high: 4096, medium: 2048 }[v.shadows];

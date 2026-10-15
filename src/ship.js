@@ -506,7 +506,9 @@ const BAY_FILL = ['Chip', 'PCB', 'Cable', 'CableOrange', 'Copper', 'Gold'];
 const BRAKE_RED = new THREE.Color(1, 0, 0.014), BRAKE_I = 1.15, _brakeC = new THREE.Color();
 // the engine glow rings: [centre-line radius, width] (m), in each ring's own space (its own xy plane) - ThroatGlow:
 // the rocket's throat insert, a band down the bell's wall whose glow fades from the throat toward the exit
-const RINGS = { InletGlow: [0.51, 0.03], ExhaustGlow: [0.54, 0.035], TailGlow: [0.15, 0.016], ThroatGlow: [0.33, 0.05] };
+// the side exits' shimmer: wider than the exit (x its radius) and reaching further behind (x the marker's reach)
+const VENT_WIDTH = 1.5, VENT_REACH = 2.2;
+const RINGS = { InletGlow: [0.51, 0.03], ExhaustGlow: [0.54, 0.035], TailGlow: [0.15, 0.016], ThroatGlow: [0.40, 0.05] };
 const MAPS = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap', 'bumpMap', 'lightMap', 'displacementMap'];
 const IDENTITY = new THREE.Matrix4();
 
@@ -684,6 +686,7 @@ export class Ship {
     this.visual.add(this.model);
     this.clips = gltf ? gltf.animations : [];
     this.rotors = [];
+    this.folds = [];
     this.canopy = null;
     this.mats = {};
     this.tris = 0;
@@ -691,7 +694,10 @@ export class Ship {
       let m = o.userData && o.userData.motion;
       if (typeof m === 'string') m = JSON.parse(m);
       if (m && m.type === 'spin') {
-        this.rotors.push({ node: o, axis: toThree(m.axis), rps: m.rpm / 60, base: o.quaternion.clone(), angle: 0 });
+        this.rotors.push({ node: o, axis: toThree(m.axis), rps: m.rpm / 60, base: o.quaternion.clone(), angle: 0,
+          idle: m.idle || 0, spool: m.spool || 0, w: 0 });
+      } else if (m && m.type === 'fold') {      // a nozzle tooth: folded out with the engine off, closed in running
+        this.folds.push({ node: o, axis: toThree(m.axis), deg: m.deg, base: o.quaternion.clone() });
       } else if (m && m.type === 'hinge') {
         this.canopy = { node: o, axis: toThree(m.axis), deg: m.deg, base: o.quaternion.clone() };
       }
@@ -702,6 +708,15 @@ export class Ship {
         if (o.userData.parts == null) this.mats[o.material.name] = o.material;
       }
     });
+    // a copy made while the original's canopy stood open (or its nozzle's teeth folded out, its rotor turned) took that
+    // pose as its rest: closing the canopy left it open. Every moving part's rest is the original's own.
+    if (base) {
+      const rest = new Map([...base.rotors, ...(base.folds || []), ...(base.canopy ? [base.canopy] : [])].map((r) => [r.node.name, r.base]));
+      for (const r of [...this.rotors, ...this.folds, ...(this.canopy ? [this.canopy] : [])]) {
+        const q = rest.get(r.node.name);
+        if (q) { r.base.copy(q); r.node.quaternion.copy(q); }
+      }
+    }
     // the canopy: smoked; the bay windows: clear enough to see the electronics behind them
     if (this.mats.Glass) glassify(this.mats.Glass, 0x1c2433, 0.5);
     if (this.mats.BayGlass) glassify(this.mats.BayGlass, 0x223038, 0.12);
@@ -767,6 +782,15 @@ export class Ship {
     const marks = [];
     this.model.updateMatrixWorld(true);
     this.model.traverse((o) => { if (/^Plume_/.test(o.name) && o.userData.plume) marks.push(o); });
+    // hot air out of side exits (the rocket's sponsons): marker empties Heat_*, extras.heat = { r, len, dir } - more
+    // shimmer behind them with speed and throttle
+    this.vents = [];
+    this.ventHeat = 0;
+    this.model.traverse((o) => {
+      if (!/^Heat_/.test(o.name) || !o.userData.heat) return;
+      const m = typeof o.userData.heat === 'string' ? JSON.parse(o.userData.heat) : o.userData.heat;
+      this.vents.push({ node: o, r: m.r, len: m.len, dir: toThree(m.dir) });
+    });
     for (const o of marks) {
       const m = typeof o.userData.plume === 'string' ? JSON.parse(o.userData.plume) : o.userData.plume;
       const p = new Plume(this.visual, new THREE.Vector3().setFromMatrixPosition(o.matrixWorld), m.r, 1, this.engineColor);
@@ -1238,10 +1262,31 @@ export class Ship {
     }
     // rotors: the 24-blade fans and turbines stay under ~1.2 rev/s so the blades never strobe (wagon-wheel) at 60 Hz
     const thr = ctrl.throttle, boost = ctrl.boost;
+    // (a rotor with a spool time has inertia: it starts turning slowly as the engine starts, then runs faster with the
+    // throttle, the speed and the boost - the rocket's nozzle rotor. Never past 7.5 deg a frame: beyond half its 20 deg
+    // tooth spacing the 18 teeth strobe and the spin reads backwards, so how fast it can look depends on the frame rate)
+    const thr1 = clamp(thr, 0, 1), boost1 = clamp(boost + this.boostKick, 0, 1), sp = smoothstep(30, 340, ctrl.speed || 0);
     for (const r of this.rotors) {
-      r.angle += r.rps * 2 * Math.PI * this.spin * (1 + 0.15 * thr + 0.05 * boost) * dt;
-      r.node.quaternion.copy(r.base).multiply(new THREE.Quaternion().setFromAxisAngle(r.axis, r.angle));
+      if (r.spool) {
+        const target = Ship.nozzleMotion === false ? 0 : this.spin * (r.idle + 0.35 * thr1 + 1.1 * sp + 0.8 * boost1);
+        r.w += (target - r.w) * (1 - Math.exp(-dt / (this.power < 0.99 ? r.spool : r.spool * 0.3)));
+        r.angle += Math.min(r.rps * r.w, 7.5 / 360 / Math.max(dt, 1 / 360)) * 2 * Math.PI * dt;
+      } else r.angle += r.rps * 2 * Math.PI * this.spin * (1 + 0.15 * thr + 0.05 * boost) * dt;
+      r.node.quaternion.copy(r.base).multiply(_lq.setFromAxisAngle(r.axis, r.angle));
     }
+    // the nozzle's teeth: folded out with the engine off, closing in as it starts; running, they fan out under the brake
+    // (an air brake) and pull in tight on the throttle and the boost, a little open when coasting - eased, never snapping
+    if (this.folds.length) {
+      const run = ease(clamp((this.power - 0.05) / 0.7, 0, 1));
+      const want = Ship.nozzleMotion === false ? 0
+        : 1 - run * (1 - clamp(0.9 * (ctrl.brake ?? ctrl.brakeLight ?? 0) + 0.25 * (1 - thr1) * (1 - boost1), 0, 1));
+      this.foldK = (this.foldK ?? 1) + (want - (this.foldK ?? 1)) * (1 - Math.exp(-dt / 0.16));
+      for (const f of this.folds) f.node.quaternion.copy(f.base).multiply(_lq.setFromAxisAngle(f.axis, THREE.MathUtils.degToRad(f.deg) * this.foldK));
+    }
+    // the side exits' hot air: with the engine running, rising with speed and throttle
+    // ("way more powerful": as strong as the main engine's at full throttle and spreading wider and further behind -
+    // the pass caps every bend at the main engine's own, so the engine's shimmer is as it was)
+    if (this.vents.length) this.ventHeat = this.power * smoothstep(5, 110, ctrl.speed || 0) * (0.9 + 0.8 * thr1 + 0.9 * boost1);
     // glows
     const brake = ctrl.brake || 0;
     const drive = (0.85 + 0.45 * thr + 0.6 * boost + 0.5 * this.boostKick) * (1 - 0.45 * brake);
@@ -1397,6 +1442,13 @@ export class Ship {
       p.outer.localToWorld(b.set(0, 0, 1));
       p.outer.localToWorld(e.set(p.r * 1.02, 0, 0));
       add(a, b, e.distanceTo(a), p.heat);
+    }
+    if (this.ventHeat > 0.02) {           // the side exits: hot air streaming aft out of each
+      for (const v of this.vents) {
+        v.node.getWorldPosition(a);
+        b.copy(v.dir).transformDirection(v.node.matrixWorld).multiplyScalar(v.len * VENT_REACH).add(a);
+        add(a, b, v.r * VENT_WIDTH, this.ventHeat);
+      }
     }
   }
 
