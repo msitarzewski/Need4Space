@@ -2,6 +2,15 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.4.0', date: '16 Oct 2026', name: 'The drowned world',
+    notes: [
+      'A new circuit: the ocean planet - a night sea under a great moon, sea stacks, a lighthouse and a storm out to sea',
+      'The dive spirals down round the Keeper, a colossal statue holding its lantern over the water, into a drowned city lit 900 m down',
+      'Under the sea the light fades with depth: your headlights, the city’s lamps, moonlight shafts; fish, kelp, jellyfish and leviathans',
+      'Leaping fish and birds over the waves, reflections on the sea and lightning (Settings: sea life, sea reflections, lightning storm)',
+    ],
+  },
+  {
     version: '1.3.0', date: '16 Oct 2026', name: 'The Comet',
     notes: [
       'A second ship: the Comet R1, a titanium manta on two hover sponsons with its rocket in a long tail cone (title menu, Ship)',
