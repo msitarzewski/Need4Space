@@ -18,28 +18,69 @@ const TAU = Math.PI * 2, G = 9.81;
 export const LIFE_U = { lTime: { value: 0 } };
 
 // ---------------------------------------------------------------- shapes (length 1 along +z, the head at +0.5)
-// a fish: a spindle of revolution, a forked tail, a dorsal fin and two side fins; 'along' 0 at the nose .. 1 the tail
-function fishGeometry(NZ = 12, NA = 8) {
-  const pos = [], along = [], idx = [];
-  const girth = (t) => 0.13 * Math.pow(Math.sin(Math.PI * Math.min(1, 0.06 + t * 0.94)), 0.8) * (1 - 0.55 * t);
+// A fish (length 1 along +z, the head at +0.5): a body narrower than it is deep, round at the nose, deepest a third of
+// the way back, narrowing to the tail's stalk - which stays a stalk, so the tail grows out of it - and a forked tail on
+// it; a dorsal fin and two side fins whose roots lie inside the body. Each fin two-faced with its own normals (one
+// shared face, wound both ways, had normals that cancelled out). 'along' 0 at the nose .. 1 the tail's tips (the tail
+// beat bends the body and the tail by it alike). fins: false for the shoals' thousands (body and tail only)
+export function fishGeometry(NZ = 12, NA = 8, fins = true) {
+  const pos = [], nrm = [], along = [], idx = [];
+  // the body's half-depth along it: t 0 the nose .. 1 the stalk at z -0.31
+  const prof = [[0, 0.004], [0.04, 0.05], [0.12, 0.088], [0.3, 0.122], [0.5, 0.112], [0.7, 0.074], [0.86, 0.042], [1, 0.03]];
+  const girth = (t) => { for (let i = 1; i < prof.length; i++) if (t <= prof[i][0]) { const [t0, r0] = prof[i - 1], [t1, r1] = prof[i], u = (t - t0) / (t1 - t0); return r0 + (r1 - r0) * u * u * (3 - 2 * u); } return 0.03; };
+  const Z0 = 0.5, Z1 = -0.31, W = 0.56;                        // (W: its width over its depth)
+  const zAt = (t) => Z0 + (Z1 - Z0) * t;
   for (let i = 0; i <= NZ; i++) {
-    const t = i / NZ, z = 0.5 - t * 0.82, r = girth(t);
-    for (let j = 0; j < NA; j++) { const a = (j / NA) * TAU; pos.push(Math.cos(a) * r * 0.7, Math.sin(a) * r, z); along.push(t * 0.82); }
+    const t = Math.pow(i / NZ, 0.85), z = zAt(t), r = girth(t), dr = (girth(Math.min(1, t + 0.01)) - girth(Math.max(0, t - 0.01))) / (0.02 * (Z0 - Z1));
+    for (let j = 0; j < NA; j++) {
+      const a = (j / NA) * TAU, c = Math.cos(a), sn = Math.sin(a);
+      pos.push(c * r * W, sn * r, z);
+      const n = new THREE.Vector3(c / W, sn, dr).normalize();
+      nrm.push(n.x, n.y, n.z); along.push((Z0 - z) * 1.0);
+    }
   }
   for (let i = 0; i < NZ; i++) for (let j = 0; j < NA; j++) {
     const a = i * NA + j, b = i * NA + ((j + 1) % NA), c = a + NA, d = b + NA;
     idx.push(a, c, b, b, c, d);
   }
-  const fin = (pts) => { const b = pos.length / 3; for (const [x, y, z] of pts) { pos.push(x, y, z); along.push(0.5 - z + 0.0); } idx.push(b, b + 1, b + 2, b, b + 2, b + 1); if (pts.length > 3) idx.push(b, b + 2, b + 3, b, b + 3, b + 2); };
-  fin([[0, 0.02, -0.3], [0, 0.17, -0.5], [0, 0.0, -0.4]]);                 // the tail, two lobes
-  fin([[0, -0.02, -0.3], [0, -0.17, -0.5], [0, 0.0, -0.4]]);
-  fin([[0, 0.11, 0.12], [0, 0.2, -0.02], [0, 0.09, -0.08]]);              // dorsal
-  for (const sd of [1, -1]) fin([[sd * 0.08, -0.04, 0.22], [sd * 0.2, -0.09, 0.1], [sd * 0.07, -0.05, 0.12]]);
+  // the nose and the stalk's end closed
+  for (const [ring, z, sgn] of [[0, Z0 + 0.004, 1], [NZ, Z1 - 0.004, -1]]) {
+    const ci = pos.length / 3;
+    pos.push(0, 0, z); nrm.push(0, 0, sgn); along.push(Z0 - z);
+    for (let j = 0; j < NA; j++) { const a = ring * NA + j, b = ring * NA + (j + 1) % NA; if (sgn > 0) idx.push(ci, a, b); else idx.push(ci, b, a); }
+  }
+  // a flat fin in the plane its points lie in: both faces, each its own vertices and normal
+  const fin = (pts, tris) => {
+    const e1 = new THREE.Vector3(...pts[1]).sub(new THREE.Vector3(...pts[0])), e2 = new THREE.Vector3(...pts[2]).sub(new THREE.Vector3(...pts[0]));
+    const n = e1.cross(e2).normalize();
+    // (each triangle wound to face its side, whichever way it was listed)
+    const V = pts.map((q) => new THREE.Vector3(...q)), tn = new THREE.Vector3(), u = new THREE.Vector3();
+    const wound = tris.map(([p, q, r]) => (tn.subVectors(V[q], V[p]).cross(u.subVectors(V[r], V[p])).dot(n) >= 0 ? [p, q, r] : [p, r, q]));
+    for (const sg of [1, -1]) {
+      const b0 = pos.length / 3;
+      for (const [x, y, z] of pts) { pos.push(x, y, z); nrm.push(n.x * sg, n.y * sg, n.z * sg); along.push(Z0 - z); }
+      for (const [p, q, r] of wound) if (sg > 0) idx.push(b0 + p, b0 + q, b0 + r); else idx.push(b0 + p, b0 + r, b0 + q);
+    }
+  };
+  // the tail: forked, its root the stalk's own depth, a little inside it
+  const rs = girth(1) * 0.92;
+  fin([[0, rs, Z1 + 0.03], [0, -rs, Z1 + 0.03], [0, 0.17, -0.5], [0, 0.0, -0.405], [0, -0.17, -0.5], [0, 0.07, -0.47], [0, -0.07, -0.47]],
+    [[0, 5, 2], [0, 3, 5], [0, 1, 3], [1, 6, 3], [1, 4, 6]]);
+  if (fins) {
+    // the dorsal fin: its root along the back (just inside it), swept back to a point
+    const tb = (z) => girth((Z0 - z) / (Z0 - Z1)) * 0.94;
+    fin([[0, tb(0.14), 0.14], [0, tb(-0.06), -0.06], [0, tb(0.04) + 0.085, -0.07]], [[0, 1, 2]]);
+    // the side fins: rooted low on the flank behind the gill, angled back and out
+    for (const sd of [1, -1]) {
+      const z = 0.24, t = (Z0 - z) / (Z0 - Z1), r = girth(t), a = -0.55, x = sd * Math.cos(a) * r * W * 0.9, y = Math.sin(a) * r * 0.9;
+      fin([[x, y, z], [x, y - 0.01, z - 0.07], [x + sd * 0.11, y - 0.06, z - 0.11]], sd > 0 ? [[0, 1, 2]] : [[0, 2, 1]]);
+    }
+  }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
   g.setAttribute('along', new THREE.Float32BufferAttribute(along, 1));
   g.setIndex(idx);
-  g.computeVertexNormals();
   return g;
 }
 
@@ -357,7 +398,7 @@ export class SeaLife {
   // ---- leviathans
   buildLeviathans(scene) {
     const geo = leviathanGeometry();
-    const make = (key, len) => {
+    const make = (key, len, glow = 1) => {
       const mat = lifeMaterial({
         key, metalness: 0.1, roughness: 0.22, side: THREE.DoubleSide, fpars: 'varying float vAlong; varying float vSpan;',
         pars: 'attribute float along; attribute float span; uniform float bend; varying float vAlong; varying float vSpan;',
@@ -371,6 +412,7 @@ export class SeaLife {
   objectNormal = normal;`,
         color: `diffuseColor.rgb = mix(vec3(0.24, 0.27, 0.28), vec3(0.03, 0.045, 0.06), smoothstep(-0.02, 0.03, vLL.y)) * (0.8 + 0.4 * lfH(floor(vLL.xz * 300.0)));`,
         emissive: /* glsl */`{
+    vec3 lvE = totalEmissiveRadiance;
     // rows of lights down the flanks and along the fins' edges, breathing slowly
     vec2 q = vec2(vLL.z * 90.0, (vLL.y + 0.02) * 120.0);
     float spot = smoothstep(0.34, 0.12, length(fract(q) - 0.5)) * step(0.45, lfH(floor(q)));
@@ -384,6 +426,7 @@ export class SeaLife {
     totalEmissiveRadiance += vec3(0.15, 0.9, 1.0) * (line * 5.0 + chev * 2.2) * breathe + vec3(0.02, 0.09, 0.12) * smoothstep(0.02, -0.04, vLL.y);
     // the eyes
     totalEmissiveRadiance += vec3(0.4, 1.0, 0.9) * 6.0 * smoothstep(0.014, 0.006, length(vec2(abs(vLL.x) - 0.055, vLL.z - 0.44)) * 1.0) * step(0.0, vLL.y);
+    totalEmissiveRadiance = lvE + (totalEmissiveRadiance - lvE) * ${glow.toFixed(2)};
   }`,
       });
       mat.onBeforeCompile = ((ob) => (sh) => { ob(sh); sh.uniforms.bend = mat.userData.bend; })(mat.onBeforeCompile);
@@ -413,14 +456,25 @@ export class SeaLife {
       const vv = Math.sqrt(2 * G * E.apex), th = THREE.MathUtils.degToRad(E.across === false ? 62 : 70);
       E.vv = vv; E.vh = vv / Math.tan(th); E.T = (2 * vv) / G; E.t0 = -1e9;
     }
-    // the giant over the avenue: its way along the track from the gate to the dome, ~40 m over the deck, never higher
-    // than 14 m under the sea
-    const gl = 90, gm = make('giant', gl), way = [];
-    for (let s = tr.at('gate', -200); tr.inSpan(s, tr.at('gate', -200), tr.at('dome', 200)); s = tr.wrap(s + 40)) {
-      tr.frame(s, f);
-      way.push(new THREE.Vector3(f.P.x + f.R.x * 30, Math.min(f.P.y + 42, SEA_Y - 15), f.P.z + f.R.z * 30));
-    }
-    this.giant = { mesh: gm, curve: new THREE.CatmullRomCurve3(way, false, 'centripetal'), len: gl, speed: 9 };
+    // the giant over the drowned avenue, seen gliding from the ships below it: its way off to the side of the track
+    // from the foot of the dive to past the dome, high over the deck - never over the road itself (it hung over the
+    // dive's way in, its lights over the whole picture: it read as the ground gone wrong). Its lights dimmed: a creature,
+    // not a sign
+    const gl = 90, gm = make('giant', gl, 0.3);
+    const route = (sd) => {
+      const way = [];
+      for (let s = tr.at('spiralOut', 120); tr.inSpan(s, tr.at('spiralOut', 120), tr.at('dome', 260)); s = tr.wrap(s + 40)) {
+        tr.frame(s, f);
+        const R = f.R.clone().setY(0).normalize();
+        way.push(new THREE.Vector3(f.P.x + R.x * sd * 95, Math.min(f.P.y + 60, SEA_Y - 40), f.P.z + R.z * sd * 95));
+      }
+      let clear = 1e9;
+      for (const p of way) clear = Math.min(clear, tr.P[tr.nearestIndex(p)].distanceTo(p));
+      return { way, clear };
+    };
+    const ga = route(1), gb = route(-1), gw = ga.clear >= gb.clear ? ga : gb;
+    console.info(`the giant's way: ${gw.clear.toFixed(0)} m off the track at the nearest`);
+    this.giant = { mesh: gm, curve: new THREE.CatmullRomCurve3(gw.way, false, 'centripetal'), len: gl, speed: 9 };
     this.giant.length = this.giant.curve.getLength();
   }
 
@@ -659,6 +713,17 @@ export class SeaLife {
         this.ring(p.x, p.z, t, sz);
       }
       e.under = under;
+      // out of it: the water still on it flung off behind, more the wetter it is - off the tail and the wings' trailing
+      // edges, a few drops off the nose
+      if (!under && e.near && e.wet > 0.02 && e.vel) {
+        const side = new THREE.Vector3(-e.dir.z, 0, e.dir.x).normalize(), n = Math.round(30 * e.wet * e.wet);
+        for (let k = 0; k < n; k++) {
+          const back = rnd() < 0.8 ? 1 + rnd() * 5 : -3 - rnd() * 3, lat = (rnd() - 0.5) * (back > 0 ? 10 : 3);
+          const q = { x: p.x - e.dir.x * back + side.x * lat, y: p.y - 0.4 + (rnd() - 0.5) * 1.2, z: p.z - e.dir.z * back + side.z * lat };
+          const k2 = 0.82 + rnd() * 0.14;
+          this.spray.add(q, e.vel.x * k2 + (rnd() - 0.5) * 2, e.vel.y * k2 - 1 - rnd() * 2, e.vel.z * k2 + (rnd() - 0.5) * 2, t, 1 + Math.round(rnd()), 0);
+        }
+      }
       // under the sea: the water churned off it - bubbles streaming from its engines and spun off its wingtips
       if (under && e.near) {
         const side = new THREE.Vector3(-e.dir.z, 0, e.dir.x);

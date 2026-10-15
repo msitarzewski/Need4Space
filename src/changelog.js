@@ -2,6 +2,18 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.4.1', date: '16 Oct 2026', name: 'Into the deep',
+    notes: [
+      'The sea reads as water where the road dives in: foam laps at the waterline and what lies under the surface turns teal and dims',
+      'Ships come out of the sea wet: water runs off the hull and streams off behind them as it dries (Settings)',
+      'Calmer reflections on the sea: lights fade in and out of them, and fine ripples no longer sparkle',
+      'Under the sea: braziers round the Keeper’s feet light the colossus, and the deep is lit from above so rock and stone show their shape',
+      'Shoals can be seen far off, big schools swim out over the abyss, and the fish have proper tails',
+      'No more striped surface or rows of light beams when looking up from under the water',
+      'Distant parts of the city no longer pop in as you dive, and the giant creature no longer hangs over the road on the way in',
+    ],
+  },
+  {
     version: '1.4.0', date: '16 Oct 2026', name: 'The drowned world',
     notes: [
       'A new circuit: the ocean planet - a night sea under a great moon, sea stacks, a lighthouse and a storm out to sea',

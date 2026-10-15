@@ -12,7 +12,7 @@ import * as THREE from 'three';
 import { mulberry32, fbm } from './noise.js';
 import { TRACK_W } from './track.js';
 import { SEA_Y, SEA_GLSL } from './sea.js';
-import { LIFE_U } from './sealife.js';
+import { LIFE_U, fishGeometry } from './sealife.js';
 
 const TAU = Math.PI * 2, V = (x, y, z) => new THREE.Vector3(x, y, z);
 
@@ -53,34 +53,62 @@ function tuftGeometry() {
   g.computeVertexNormals();
   return g;
 }
-// a small fish (the shoals: thousands - few triangles)
-function minnowGeometry() {
-  const pos = [], along = [], idx = [], NZ = 6, NA = 4;
-  for (let i = 0; i <= NZ; i++) {
-    const t = i / NZ, z = 0.5 - t * 0.8, r = 0.12 * Math.pow(Math.sin(Math.PI * Math.min(1, 0.08 + t * 0.92)), 0.8) * (1 - 0.5 * t);
-    for (let j = 0; j < NA; j++) { const a = (j / NA) * TAU + Math.PI / 4; pos.push(Math.cos(a) * r * 0.6, Math.sin(a) * r, z); along.push(t * 0.8); }
-  }
-  for (let i = 0; i < NZ; i++) for (let j = 0; j < NA; j++) {
-    const a = i * NA + j, b = i * NA + ((j + 1) % NA), c = a + NA, d = b + NA;
-    idx.push(a, c, b, b, c, d);
-  }
-  const b = pos.length / 3;
-  pos.push(0, 0, -0.28, 0, 0.16, -0.5, 0, -0.16, -0.5); along.push(0.8, 1, 1);
-  idx.push(b, b + 1, b + 2, b, b + 2, b + 1);
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('along', new THREE.Float32BufferAttribute(along, 1));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  return g;
-}
-
 const inst = (base, attrs, count) => {
   const g = new THREE.InstancedBufferGeometry().copy(base);
   for (const [k, a] of Object.entries(attrs)) g.setAttribute(k, new THREE.InstancedBufferAttribute(a, a.length / count));
   g.instanceCount = count;
   return g;
 };
+
+// Fish too far off for their shape (or a whole school out over the abyss): each a glint as long as it is on the screen,
+// along the way it swims there, faintly lit of itself (lanternfish: a school reads as a shimmer of blue far off) and
+// flashing silver now and then as it turns. Never drawn thinner than a pixel or shorter than a pixel and a half: dimmed
+// in proportion instead, so a far school shimmers and never sparkles. The schools circle as the shoals' meshes do (the
+// same numbers: A x y z radius, B phase speed height length). d0..d1 its fade in, f0..f1 its fade out (m)
+function fishPoints(A, B, n, { d0 = 0, d1 = 1, f0 = 650, f1 = 760 } = {}) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  g.setAttribute('iA', new THREE.BufferAttribute(A, 4));
+  g.setAttribute('iB', new THREE.BufferAttribute(B, 4));
+  const m = new THREE.ShaderMaterial({
+    uniforms: { lTime: LIFE_U.lTime, lvl: { value: 0 }, pr: { value: 1 }, fade: { value: new THREE.Vector4(d0, d1, f0, f1) } },
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */`
+      uniform float lTime, lvl, pr; uniform vec4 fade; attribute vec4 iA, iB; varying vec3 vC; varying vec2 vDir; varying vec3 vE;
+      ${SEA_GLSL}
+      void main() {
+        float a = iB.x + lTime * iB.y, r = iA.w + sin(iB.x * 7.0 + lTime * 0.5) * 2.0;
+        vec3 P = iA.xyz + vec3(cos(a) * r, iB.z + sin(a * 2.0 + iB.x) * 1.5, sin(a) * r);
+        vec3 F = normalize(vec3(-sin(a), cos(a * 2.0 + iB.x) * 0.15, cos(a)) * sign(iB.y));
+        vec4 mv = viewMatrix * vec4(P, 1.0), mf = viewMatrix * vec4(P + F, 1.0);
+        float d = -mv.z, k = pr * projectionMatrix[1][1] * 360.0;
+        vec2 sd = mf.xy / max(-mf.z, 0.1) - mv.xy / max(d, 0.1);
+        float lp = iB.w * k * length(sd), wp = iB.w * 0.2 * k / max(d, 1.0);    // (its length and its depth on the screen, px)
+        float S = clamp(max(lp, 1.5), 1.5, 40.0);
+        vDir = length(sd) > 1e-6 ? normalize(sd) : vec2(1.0, 0.0);
+        vE = vec3(lp, max(wp, 1.0), S);
+        float flash = pow(0.5 + 0.5 * sin(lTime * 0.8 + iB.x * 13.0), 12.0);
+        float cover = min(1.0, lp / 1.5) * min(1.0, wp);
+        float de = length(mv.xyz);                   // (as the meshes' cut: the distance, not the depth)
+        float vis = smoothstep(fade.x, fade.y, de) * (1.0 - smoothstep(fade.z, fade.w, de)) * step(cameraPosition.y, lvl) * step(P.y, lvl - 1.0);
+        vC = (vec3(0.03, 0.14, 0.2) + vec3(0.3, 0.42, 0.45) * flash) * cover * vis * seTrans(cameraPosition, P, lvl);
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = vis > 0.0 ? S : 0.0;
+      }`,
+    fragmentShader: /* glsl */`
+      varying vec3 vC; varying vec2 vDir; varying vec3 vE;
+      void main() {
+        vec2 q = (gl_PointCoord - 0.5) * vec2(1.0, -1.0) * vE.z;
+        float u = dot(q, vDir) / (0.5 * max(vE.x, 1.5)), v = dot(q, vec2(-vDir.y, vDir.x)) / (0.5 * vE.y);
+        float e = u * u + v * v;
+        if (e > 1.0) discard;
+        gl_FragColor = vec4(vC * (1.0 - e * e), 1.0);
+      }`,
+  });
+  const pts = new THREE.Points(g, m);
+  pts.frustumCulled = false;
+  return pts;
+}
 
 // a lit material whose vertices the shader places in the world (as sealife.js does)
 function placedMaterial({ key, pars, place, color, emissive = '', side = THREE.DoubleSide, roughness = 0.7, metalness = 0 }) {
@@ -366,7 +394,7 @@ export class Seabed {
           B.set([rnd() * TAU, sp * (0.9 + rnd() * 0.2), (rnd() - 0.5) * r * 0.5, 0.8 + rnd() * 0.9 + hue * 0.001], i * 4);
         }
       }
-      const g = inst(minnowGeometry(), { iA: A, iB: B }, n);
+      const g = inst(fishGeometry(6, 5, false), { iA: A, iB: B }, n);
       this.shipU = { shipP: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, -1e5, 0, 0)) } };
       const mat = placedMaterial({
         key: 'shoals', side: THREE.FrontSide, metalness: 0.65, roughness: 0.3,
@@ -388,7 +416,8 @@ export class Seabed {
   q.x += sin(along * 5.0 - lTime * 18.0 + iB.x * 5.0) * 0.08 * along;
   transformed = P + B * (q * iB.w);
   objectNormal = B * normal;
-  if (distance(P, cameraPosition) > 260.0) transformed = vec3(0.0, -1e5, 0.0);`,
+  // (past ~200 m a glint each instead - fishPoints - fading in as the shape goes)
+  if (distance(P, cameraPosition) > 235.0) transformed = vec3(0.0, -1e5, 0.0);`,
         color: `diffuseColor.rgb = mix(vec3(0.6, 0.66, 0.7), vec3(0.2, 0.32, 0.38), vSeed.x) * (0.85 + 0.3 * vAl);`,
         // (a faint glint of their own: a school reads as a shimmering cloud in the dark)
         emissive: `totalEmissiveRadiance += vec3(0.04, 0.08, 0.09) + vec3(0.55, 0.8, 0.85) * 0.45 * pow(abs(dot(normal, normalize(vViewPosition))), 6.0);`,
@@ -408,16 +437,43 @@ mat3 lfBasis(vec3 f, float roll) {
       this.shoals.frustumCulled = false;
       this.shoals.name = 'shoals-way';
       scene.add(this.shoals);
-      console.info(`seabed: ${rocks.length} pinnacles, ${kelp.length} fronds, ${this.grass.geometry.instanceCount} tufts, ${n} fish in ${spots.length} shoals`);
+      this.shoalsFar = fishPoints(A, B, n, { d0: 175, d1: 235, f0: 620, f1: 760 });
+      this.shoalsFar.name = 'shoals-way-far';
+      scene.add(this.shoalsFar);
+      // the schools out over the abyss and the city, off the way (160 - 520 m out): seen only from afar, as glints
+      const far = [];
+      for (let k = 0; k < 400 && far.length < Math.round(48 * D); k++) {
+        const s = under[Math.floor(rnd() * under.length)];
+        tr.frame(s, f);
+        const R = f.R.clone().setY(0).normalize(), lat = (rnd() < 0.5 ? -1 : 1) * (160 + rnd() * 360), x = f.P.x + R.x * lat, z = f.P.z + R.z * lat;
+        const r = 18 + rnd() * 30, floor = basin.height(x, z), y = Math.min(SEA_Y - 30 - r * 0.3, f.P.y + (rnd() - 0.3) * 120);
+        if (y < floor + 25 + r * 0.3) continue;
+        if (tr.P[tr.nearestIndex(new THREE.Vector3(x, y, z))].distanceTo(new THREE.Vector3(x, y, z)) < 130 + r) continue;
+        far.push([x, y, z, r]);
+      }
+      const per2 = 340, n2 = far.length * per2, A2 = new Float32Array(n2 * 4), B2 = new Float32Array(n2 * 4);
+      i = 0;
+      for (const [x, y, z, r] of far) {
+        const dir = rnd() < 0.5 ? 1 : -1, sp = (0.12 + rnd() * 0.1) * dir;
+        for (let k = 0; k < per2; k++, i++) {
+          A2.set([x, y, z, r * (0.55 + rnd() * 0.6)], i * 4);
+          B2.set([rnd() * TAU, sp * (0.9 + rnd() * 0.2), (rnd() - 0.5) * r * 0.7, 0.7 + rnd() * 1.1], i * 4);
+        }
+      }
+      this.schools = fishPoints(A2, B2, n2, { d0: 0, d1: 1, f0: 700, f1: 820 });
+      this.schools.name = 'schools-far';
+      scene.add(this.schools);
+      console.info(`seabed: ${rocks.length} pinnacles, ${kelp.length} fronds, ${this.grass.geometry.instanceCount} tufts, ${n} fish in ${spots.length} shoals, ${n2} in ${far.length} schools far off`);
     }
-    this.meshes = [this.rocks, this.kelp, this.grass, this.anemones, this.vents, this.shoals].filter(Boolean);
+    this.meshes = [this.rocks, this.kelp, this.grass, this.anemones, this.vents, this.shoals, this.shoalsFar, this.schools].filter(Boolean);
   }
 
   // every frame: the sea's level at the camera, the ships near it (the fish scatter from them)
   update(t, lvl, ships, pr = 1, cam = null) {
     this.ventMat.uniforms.lvl.value = lvl; this.ventMat.uniforms.pr.value = pr;
     // (above the sea none of it is seen through the surface: not drawn)
-    if (cam && this.on !== false) { const under = cam.y < lvl + 2; for (const m of [this.grass, this.kelp, this.shoals, this.vents, this.anemones]) m.visible = under; }
+    if (cam && this.on !== false) { const under = cam.y < lvl + 2; for (const m of [this.grass, this.kelp, this.shoals, this.shoalsFar, this.schools, this.vents, this.anemones]) m.visible = under; }
+    for (const m of [this.shoalsFar, this.schools]) { m.material.uniforms.lvl.value = lvl; m.material.uniforms.pr.value = pr; }
     const sp = this.shipU.shipP.value;
     for (let k = 0; k < 4; k++) {
       const e = ships[k];

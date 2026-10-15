@@ -128,6 +128,34 @@ float bsWet = 0.0;`)
 }
 const f = (x) => (Number.isInteger(x) ? x.toFixed(1) : String(+x.toFixed(5)));
 
+// The light of the braziers round the Keeper's feet on its stone (and the pedestal's): each thrown up in a broad cone,
+// worked out here and nowhere else (as scene lights they would cost every lit pixel of the map). U: kLP (x, y, z,
+// strength) x 10, kLC its colour
+function keeperLit(mat, U, key) {
+  const ob = mat.onBeforeCompile;
+  mat.onBeforeCompile = (sh) => {
+    ob.call(mat, sh);
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vKW;')
+      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n  vKW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vKW;\nuniform vec4 kLP[10];\nuniform vec3 kLC;')
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
+  {
+    vec3 kN = inverseTransformDirection( geometryNormal, viewMatrix );
+    for ( int i = 0; i < 10; i++ ) {
+      vec3 kL = kLP[ i ].xyz - vKW;
+      float kd2 = dot( kL, kL );
+      kL *= inversesqrt( kd2 );
+      // (a broad cone up; its light carried far up the stone, gently - the colossus is 500 m tall beside the dive)
+      float kUp = smoothstep( 0.05, 0.5, -kL.y ) + 0.15;
+      reflectedLight.directDiffuse += kLC * kLP[ i ].w * max( dot( kN, kL ), 0.0 ) * kUp / ( kd2 * 0.35 + 3000.0 ) * BRDF_Lambert( material.diffuseColor );
+    }
+  }`);
+  };
+  mat.customProgramCacheKey = () => key;
+  return mat;
+}
+
 // A sea stack: a pillar of basalt out of the deep - its outline lobed and bitten, narrowing upward with ledges where a
 // softer layer wore back, leaning a little, its top a broken crown of spires. x, z, r (its radius at the sea), h (its
 // top over the sea)
@@ -302,10 +330,25 @@ export class OceanWorld {
   // Three levels of detail by the camera's distance; the dead inlay only close up; the bands' glow uneven along them.
   buildKeeper(scene) {
     const K = KEEPER, yF = K.floor - 5, yT = K.foot;
+    // braziers round the pedestal's lip throwing their light up the colossus (under the sea it was a dark shape, its
+    // robe flat blue panels beside the dive): their light worked out in the stone's own shader (keeperLit), their flames
+    // and glows the city's lamps'. Kept clear of the dive's road
+    const ups = [];
+    for (let k = 0; k < 10; k++) {
+      const a = (k / 10) * Math.PI * 2 + 0.17, p = new THREE.Vector3(K.x + Math.cos(a) * 253, yT - 2, K.z + Math.sin(a) * 253);
+      if (this.track.P[this.track.nearestIndex(p)].distanceTo(p) < 34) continue;
+      ups.push(p);
+    }
+    this.keeperU = { kLP: { value: Array.from({ length: 10 }, (_, i) => (ups[i] ? new THREE.Vector4(ups[i].x, ups[i].y + 7, ups[i].z, 70000) : new THREE.Vector4(0, -1e5, 0, 0))) },
+      kLC: { value: new THREE.Color(1.0, 0.62, 0.32) } };
+    const pedMat = keeperLit(basaltMaterial({ key: 'keeper-ped' }), this.keeperU, 'keeper-ped');
+    const bowl = [[0, 0], [1.7, 0], [1.9, 0.5], [1.1, 1.1], [0.8, 3.0], [2.6, 3.9], [2.9, 4.5], [2.4, 4.6], [0, 4.1]].map(([r, y]) => new THREE.Vector2(r * 1.4, y * 1.4));
+    const bowls = ups.map((p) => new THREE.LatheGeometry(bowl, 16).translate(p.x, p.y, p.z));
+    for (const p of ups) this.city.lamps.push({ p: p.clone().setY(p.y + 7.2), col: [1.0, 0.55, 0.2], I: 16000, reach: 180, size: 3.2, kind: 'brazier' });
     // the pedestal: a column of basalt, flared where it stands on the floor, a lip under the statue's hem (<= 250 m)
     const prof = [[0, yF], [268, yF], [262, yF + 30], [250, yF + 64], [238, yF + 130], [232, (yF + yT) / 2], [234, yT - 70],
       [244, yT - 36], [249, yT - 16], [246, yT - 8], [245, yT], [0, yT]].map(([r, y]) => new THREE.Vector2(r, y));
-    const ped = new THREE.Mesh(new THREE.LatheGeometry(prof, 96).translate(K.x, 0, K.z), this.rockMat || basaltMaterial({ key: 'keeper' }));
+    const ped = new THREE.Mesh(mergeGeometries([new THREE.LatheGeometry(prof, 96).translate(K.x, 0, K.z), ...bowls].map((g) => g.deleteAttribute('uv'))), pedMat);
     ped.name = 'keeper-pedestal';
     ped.layers.set(2); ped.receiveShadow = true;
     scene.add(ped);
@@ -338,6 +381,7 @@ export class OceanWorld {
   if (vKeepP.y < 40.0 && length(vKeepP.xz) > ${(245 / K.scale).toFixed(1)}) discard;`);
         };
         mat.customProgramCacheKey = () => 'keeper-stone';
+        keeperLit(mat, this.keeperU, 'keeper-stone');
       }
       // the bands: their glow along each run as baked (the vertex colour), dim and broken
       for (const g of glows.slice(0, 2)) for (const m of meshes(g)) {
@@ -598,6 +642,7 @@ export class OceanWorld {
     if (this.seabed.rocks) this.seabed.rocks.visible = true;
     this.mirrorOn = v.seaReflect !== false;
     this.stormOn = v.oceanStorm !== false;
+    this.wetOn = v.shipWet !== false;
     if (!this.mirrorOn) this.ocean.U.seReflOn.value = 0;
   }
 
@@ -615,14 +660,16 @@ export class OceanWorld {
 
   // The lights that show in the sea: of every light near enough to the water, the twelve that shine brightest at the
   // camera - the gantries' lamps, the lamp posts and the barriers' glow down the track near it, the lighthouse, the
-  // braziers and the dome's lantern out of the sea, the ships' engines
-  reflectLights(cp) {
+  // braziers and the dome's lantern out of the sea, the ships' engines. Each keeps its slot while it stays among the
+  // brightest and fades in and out of it (a light dropping out of the twelve vanished from the sea at once: flicker)
+  reflectLights(cp, dt = 1 / 60) {
     const tr = this.track, cand = (this._cand ||= []), U = this.ocean.U;
     cand.length = 0;
-    const add = (p, col, I) => { if (p.y > SEA_Y - 1 && p.y < SEA_Y + 120) cand.push({ p, col, I, k: I / Math.max(100, p.distanceToSquared(cp)) }); };
+    const key = (p) => `${Math.round(p.x)},${Math.round(p.y)},${Math.round(p.z)}`;
+    const add = (p, col, I, id = null) => { if (p.y > SEA_Y - 1 && p.y < SEA_Y + 120) cand.push({ p, col, I, k: I / Math.max(100, p.distanceToSquared(cp)), id: id ?? key(p) }); };
     for (const l of this.lamps) if (l.intensity > 0) add(l.position, [l.color.r, l.color.g, l.color.b], l.intensity * 4);
     if (this.lightLamp) add(this.lightLamp.p, [1.0, 0.86, 0.62], 30000);
-    if (this.keeper) add(this.keeper.top, [1.0, 0.8, 0.55], 120000);
+    if (this.keeper) add(this.keeper.top, [1.0, 0.8, 0.55], 120000, 'keeper');
     for (const L of this.castleLamps || []) add(L.p, L.col, L.I * 0.8);
     for (const L of this.city.lamps) if (L.p.y > SEA_Y) add(L.p, L.col, Math.min(L.I, 20000));
     // down the track near the camera: the lamp posts' lenses (every 60 m, sides alternating) and the barriers' glow
@@ -634,14 +681,27 @@ export class OceanWorld {
       add(tr.P[i].clone().addScaledVector(tr.R[i], side * (X - 1.15)).addScaledVector(tr.U[i], 1.2 + 4.04), th.lamp, 900);
       for (const sd of [-1, 1]) add(tr.P[i].clone().addScaledVector(tr.R[i], sd * (TRACK_W / 2 + 0.7)).addScaledVector(tr.U[i], 3), th.field, 260);
     }
-    if (this.race) for (const e of this.race.entries) add(e.ship.root.position, [e.ship.engineColor?.r ?? 0.3, e.ship.engineColor?.g ?? 0.6, e.ship.engineColor?.b ?? 1], 700);
+    if (this.race) this.race.entries.forEach((e, n) => add(e.ship.root.position, [e.ship.engineColor?.r ?? 0.3, e.ship.engineColor?.g ?? 0.6, e.ship.engineColor?.b ?? 1], 700, `ship${n}`));
     cand.sort((a, b) => b.k - a.k);
-    for (let j = 0; j < 12; j++) {
-      const c = cand[j];
-      if (!c) { U.seLP.value[j].set(0, -1e5, 0, 0); continue; }
-      U.seLP.value[j].set(c.p.x, c.p.y, c.p.z, c.I);
-      U.seLC.value[j].set(c.col[0], c.col[1], c.col[2]);
+    const top = new Map(), keep = new Map();
+    cand.forEach((c, j) => { if (j < 12) top.set(c.id, c); if (j < 18) keep.set(c.id, c); });
+    const slots = (this._slots ||= Array.from({ length: 12 }, () => ({ id: null, w: 0, c: null, p: new THREE.Vector3() }))), fade = Math.min(1, dt / 0.35);
+    for (const sl of slots) {
+      if (sl.id === null) continue;
+      const c = keep.get(sl.id);
+      if (c) { sl.c = c; sl.p.copy(c.p); sl.w = Math.min(1, sl.w + fade); top.delete(sl.id); } else if ((sl.w -= fade) <= 0) { sl.id = null; sl.w = 0; }
     }
+    for (const c of top.values()) {
+      const sl = slots.find((q) => q.id === null);
+      if (!sl) break;
+      sl.id = c.id; sl.c = c; sl.p.copy(c.p); sl.w = fade;
+    }
+    slots.forEach((sl, j) => {
+      const c = sl.c;
+      if (sl.id === null || !c) { U.seLP.value[j].set(0, -1e5, 0, 0); return; }
+      U.seLP.value[j].set(sl.p.x, sl.p.y, sl.p.z, c.I * sl.w * sl.w * (3 - 2 * sl.w));     // (a fading light where it was last)
+      U.seLC.value[j].set(c.col[0], c.col[1], c.col[2]);
+    });
   }
 
   // (the race is handed over before the warm-up: the beams are made then, so their shaders compile with the rest)
@@ -732,7 +792,7 @@ export class OceanWorld {
     this.cam = camera;
     this.keeperLod(cp);
     this.level = waveHeight(cp.x, cp.z, t);
-    this.fog.color.setRGB(1, t % 1000, this.level);
+    this.fog.color.setRGB(1, t, this.level);         // (the clock as the surface's: the water's edge on things laps with its swell)
     this.dome.material.uniforms.under.value = Math.max(0, this.level - cp.y);
     const deep = smoothstep(0, 1.5, this.level - cp.y);
     this.underK = deep;                              // (audio.js: the sound heard through the water)
@@ -782,16 +842,24 @@ export class OceanWorld {
         m.visible = sp.center.distanceTo(cp) - sp.radius < reach;
       }
     }
-    this.reflectLights(cp);
+    this.reflectLights(cp, dt);
     this.shipBeams(cp);
     // the ships, for the life (splashes where they go into the sea or out of it, bubbles under it)
     const ws = this.shipsWet;
     if (this.race) this.race.entries.forEach((e, k) => {
-      const w = (ws[k] ||= { pos: new THREE.Vector3(), dir: new THREE.Vector3(), speed: 0 });
+      const w = (ws[k] ||= { pos: new THREE.Vector3(), dir: new THREE.Vector3(), vel: new THREE.Vector3(), speed: 0 });
       w.pos.copy(e.ship.root.position);
+      w.vel.copy(e.racer.vel);
       w.speed = e.racer.vel.length();
       w.dir.copy(e.racer.vel).normalize();
       w.near = w.pos.distanceTo(cp) < 160;
+      // out of the sea: wet, drying over ~4.5 s (the hull's film and rivulets; water flung off it - sealife.js)
+      const under = w.pos.y < waveHeight(w.pos.x, w.pos.z, t) - 0.5;
+      if (w.wasUnder && !under) w.wetT = t;
+      w.wasUnder = under;
+      w.wet = this.wetOn !== false && w.wetT !== undefined ? Math.max(0, 1 - (t - w.wetT) / 4.5) : 0;
+      const U = e.ship.deckU;
+      if (U?.shipWet) { U.shipWet.value = w.wet; U.shipWetT.value = t; }
     });
     const pr = renderer ? renderer.getPixelRatio() * (this.renderScale || 1) : 1;
     this.life.update(t, dt, camera, s, this.level, ws, pr);

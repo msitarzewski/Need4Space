@@ -50,6 +50,10 @@ export function waveHeight(x, z, t) {
 
 // ---------------------------------------------------------------- the air and the water (every lit material)
 const KW = [0.012, 0.0062, 0.0046];       // the water's extinction (per m): clear - the city's lights show from far off
+// the top of the sea: a layer of plankton, bubbles and stirred-up silt, thick at the surface and gone a few tens of
+// metres down (per m at the surface; its depth scale) - from above it is what makes the sea read as water: what lies
+// under it greys and turns teal within a few metres; the deep under it stays clear
+const KT = [0.22, 0.055, 0.04], HT = 9;
 const KD = [0.1, 0.034, 0.025];           // how fast the light from above fades with depth (per m of depth)
 const MURK = [0.004, 0.022, 0.03];        // the murk's own radiance near the top, in equilibrium (dark teal)
 export const SEA_GLSL = /* glsl */`
@@ -60,7 +64,38 @@ const vec3 SE_SUNRAD = vec3(${f(SUN_E * SUN_COL.r)}, ${f(SUN_E * SUN_COL.g)}, ${
 const vec3 SE_KW = vec3(${KW.map(f).join(', ')});
 const vec3 SE_KD = vec3(${KD.map(f).join(', ')});
 const vec3 SE_MURK = vec3(${MURK.map(f).join(', ')});
+const vec3 SE_KT = vec3(${KT.map(f).join(', ')});
+const float SE_HT = ${f(HT)};
 const float SE_Y = ${f(SEA_Y)};
+// the swell's six waves (as the surface's): direction, wavenumber, height | steepness, speed, phase
+const vec4 SE_WA[6] = vec4[6](${WAVES.map((W) => `vec4(${f(W.D.x)}, ${f(W.D.y)}, ${f(W.k)}, ${f(W.A)})`).join(', ')});
+const vec4 SE_WB[6] = vec4[6](${WAVES.map((W) => `vec4(${f(W.Q)}, ${f(W.w)}, ${f(W.ph)}, 0.0)`).join(', ')});
+vec3 seDisp(vec2 xz, float t) {
+  vec3 o = vec3(0.0);
+  for (int i = 0; i < 6; i++) {
+    vec4 a = SE_WA[i], b = SE_WB[i];
+    float ph = a.z * dot(a.xy, xz) - b.y * t + b.z;
+    o.xz += b.x * a.w * a.xy * cos(ph); o.y += a.w * sin(ph);
+  }
+  return o;
+}
+// foam's lace: bubbles packed together, bright between them (the distance to the nearest of a scatter of points, 0 .. ~0.7)
+float seLace(vec2 p) {
+  vec2 i = floor(p), u = fract(p);
+  float d = 1.0;
+  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec2 g = vec2(float(x), float(y)), h = mod(i + g, 289.0);       // (wrapped: a hash of thousands of metres loses its bits)
+    vec2 o = fract(sin(vec2(dot(h, vec2(127.1, 311.7)), dot(h, vec2(269.5, 183.3)))) * 43758.5453);
+    d = min(d, length(g + o - u));
+  }
+  return d;
+}
+// the sea's height over xz at time t (the point the swell carries there found in two steps back)
+float seHeight(vec2 xz, float t) {
+  vec2 p = xz - seDisp(xz, t).xz;
+  p = xz - seDisp(p, t).xz;
+  return SE_Y + seDisp(p, t).y;
+}
 // the deep's own glow (the drowned city's light scattered through the water), and the fill it throws on what is down there
 const vec3 SE_DEEP = vec3(0.004, 0.02, 0.045);
 const vec3 SE_FILL = vec3(0.012, 0.045, 0.085);
@@ -91,14 +126,24 @@ void seAir(vec3 o, vec3 d, float dist, out vec3 T, out vec3 L) {
 }
 // through the water (o under the sea): the light from above at depth z falls as exp(-KD z); the murk scatters it -
 // the integral along the ray in closed form, a little more looking up toward the moon's light coming down
+// the top layer's transmittance along o + d t (t < dist)
+vec3 seTop(vec3 o, vec3 d, float dist) {
+  return exp(-SE_KT * seExp(max(SE_Y - o.y, 0.0), -d.y, dist, SE_HT));
+}
 void seWater(vec3 o, vec3 d, float dist, out vec3 T, out vec3 L) {
   float z0 = max(SE_Y - o.y, 0.0);
   vec3 a = SE_KD * d.y - SE_KW;                         // (always < 0: the water dims faster than the depth darkens)
   T = exp(-SE_KW * dist);
   float ph = 1.0 + 1.8 * pow(max(dot(d, normalize(SE_SUN * vec3(0.75, 1.0, 0.75))), 0.0), 6.0);
   L = SE_MURK * SE_KW * ph * exp(-SE_KD * z0) * (exp(a * dist) - 1.0) / a;
-  float zm = SE_Y - (o.y + d.y * dist * 0.5);
+  // (the depth the deep's glow is taken at: the same for everything past ~400 m - far things fade into what lies
+  // beyond them, the background, never against it)
+  float zm = SE_Y - (o.y + d.y * min(dist, 400.0) * 0.5);
   L += SE_DEEP * smoothstep(60.0, 260.0, zm) * (1.0 - T);
+  // the top layer: ahead of the rest going down from near the surface, beyond it going up
+  vec3 Tt = seTop(o, d, dist), Lt = SE_MURK * 1.3 * (1.0 - Tt);
+  L = d.y < 0.0 ? L * Tt + Lt : L + T * Lt;
+  T *= Tt;
 }
 // how much of a light at p reaches the camera at o through the air and the water (lvl: the sea at the camera)
 vec3 seTrans(vec3 o, vec3 p, float lvl) {
@@ -107,8 +152,14 @@ vec3 seTrans(vec3 o, vec3 p, float lvl) {
   vec3 d = r / max(dist, 1e-3);
   float s = abs(d.y) > 1e-5 ? (lvl - o.y) / d.y : -1.0;
   bool cross = s > 0.0 && s < dist;
-  if (o.y < lvl) return cross ? exp(-SE_KW * s) : exp(-SE_KW * dist);
-  return cross ? exp(-SE_KW * (dist - s)) : vec3(1.0);
+  vec3 tr = vec3(1.0);
+  if (o.y < lvl) {
+    float w = cross ? s : dist;
+    tr = exp(-SE_KW * w) * seTop(o, d, w);
+  } else if (cross) {
+    tr = exp(-SE_KW * (dist - s)) * seTop(o + d * s, d, dist - s);
+  }
+  return tr;
 }
 // the moon's light reaching depth z under the sea (its ray bent steeper going in), rippled by caustics near the top
 float seCaustic(vec2 p, float t) {
@@ -136,6 +187,30 @@ vec3 seSkyUnder(vec3 w) {
 // meets the sea (its level at the camera, the swell there: fogColor.b; the clock: fogColor.g). Seen from under the sea,
 // what is above it gets only the air beyond the surface here - the surface itself brings the water's share (Ocean).
 export const SEA_FOG_CHUNK = /* glsl */`#ifdef USE_FOG
+	{
+		// the water's edge on whatever stands in the sea (the deck going under, the barriers, the pylons, the rocks, the
+		// Keeper, a ship diving): a line of foam lapping round it with the swell, lace above it, the wet just over it
+		float seE = vFogWorld.y - SE_Y;
+		if ( abs( seE ) < 4.0 ) {
+			float seT = fogColor.g;
+			seE = vFogWorld.y - seHeight( vFogWorld.xz, seT );
+			if ( seE > -0.6 && seE < 1.8 ) {
+				// (its height mixed in: on a wall the lace runs up it as well as along)
+				vec2 seQ = vec2( vFogWorld.x + vFogWorld.y * 0.8, vFogWorld.z - vFogWorld.y * 0.6 );
+				float seN = 0.5 + 0.25 * sin( seQ.x * 0.9 + seT * 0.8 + 2.0 * sin( seQ.y * 0.7 - seT * 0.5 ) ) + 0.25 * sin( seQ.y * 1.1 - seT * 0.6 + 2.0 * sin( seQ.x * 0.5 + seT * 0.7 ) );
+				// the edge: dense at the line itself, thinning to threads above and below it
+				float seBand = 1.0 - smoothstep( 0.0, 0.16 + 0.2 * seN, abs( seE - 0.04 ) );
+				float seL = seLace( seQ * 2.6 + vec2( seT * 0.12, -seT * 0.08 ) ) * 0.65 + seLace( seQ * 6.1 - vec2( seT * 0.18, seT * 0.1 ) ) * 0.35;
+				float seF = smoothstep( 0.62 - 0.5 * seBand, 0.72 - 0.5 * seBand, seL ) * smoothstep( 0.0, 0.25, seBand );
+				vec3 seFC = vec3( 0.12, 0.15, 0.19 );
+				#if defined( RE_IndirectDiffuse )
+					seFC = max( seFC, ( reflectedLight.directDiffuse + reflectedLight.indirectDiffuse ) / max( diffuseColor.rgb, vec3( 0.05 ) ) * 0.7 );
+				#endif
+				gl_FragColor.rgb *= 1.0 - 0.3 * ( 1.0 - smoothstep( 0.0, 1.4, seE ) ) * step( 0.0, seE );
+				gl_FragColor.rgb = mix( gl_FragColor.rgb, seFC, clamp( seF, 0.0, 1.0 ) * 0.9 );
+			}
+		}
+	}
 	{
 		vec3 fogO = cameraPosition, fogRay = vFogWorld - fogO;
 		float fogDist = length( fogRay );
@@ -178,15 +253,17 @@ export function seaLight() {
 	vec3 seAmb = seSkyUnder( vFogWorld );
 	irradiance *= seAmb;
 	iblIrradiance *= seAmb;
-	// deep down, the city's light all round: a blue fill (shapes read against the dark)
-	vec3 seFill = SE_FILL * smoothstep( 50.0, 220.0, SE_Y - vFogWorld.y );
+	// deep down, the city's light all round: a blue fill, more of it from above than below - the same all round, the
+	// colossus and the rocks under it read as flat blue panels; from the dive's first turns down (the moon's light is gone
+	// by ~60 m)
+	vec3 seFill = SE_FILL * smoothstep( 15.0, 150.0, SE_Y - vFogWorld.y ) * ( 0.45 + 0.75 * max( inverseTransformDirection( geometryNormal, viewMatrix ).y, -0.6 ) );
 	// the lamps' and the ships' light rippling as the water moves (under the sea, near the camera)
 	{
 		float seZ = SE_Y - vFogWorld.y;
-		if ( seZ > 1.0 ) {
+		if ( seZ > 0.15 ) {
 			float rip = seCaustic( vFogWorld.xz * 1.6 + vFogWorld.y * 0.4, fogColor.g * 1.4 );
 			float near = 1.0 - smoothstep( 40.0, 90.0, distance( vFogWorld, cameraPosition ) );
-			reflectedLight.directDiffuse *= mix( 1.0, 0.55 + 0.45 * rip, near * smoothstep( 1.0, 4.0, seZ ) );
+			reflectedLight.directDiffuse *= mix( 1.0, 0.55 + 0.45 * rip, near * smoothstep( 0.15, 1.5, seZ ) );
 		}
 	}
 	irradiance += seFill;
@@ -280,7 +357,12 @@ export function seaSkyDome(renderer, size = 768) {
       void main() {
         vec3 d = normalize(vDir);
         vec4 a = textureCube(sky, d);
-        if (under > 0.0 && d.y < under / 24000.0) { gl_FragColor = vec4(SE_MURK * 0.5 * exp(-SE_KD * under), 1.0); return; }
+        if (under > 0.0 && d.y < under / 24000.0) {
+          vec3 T, L;
+          seWater(vec3(0.0, SE_Y - under, 0.0), d, 6000.0, T, L);
+          gl_FragColor = vec4(L, 1.0);
+          return;
+        }
         // a lightning flash: the cloud round it lit from inside, the sky round it a little
         if (flashK > 0.0) {
           float m = max(dot(d, normalize(flashDir)), 0.0);
@@ -413,6 +495,9 @@ export class Ocean {
           float far = smoothstep(120.0, 2600.0, dist);
           vec2 sl = ((r1.xy - 0.5) * 0.9 + (r2.xy - 0.5) * 0.6) * (1.0 - 0.75 * far);
           vec3 N = normalize(Ng + vec3(sl.x, 0.0, sl.y));
+          // the highlights widened where the ripples are finer than the pixels (a sub-pixel glint sparkled frame to frame)
+          vec3 dNx = dFdx(N), dNy = dFdy(N);
+          float aa = min(0.5 * max(dot(dNx, dNx), dot(dNy, dNy)), 0.18);
           float foamN = r1.a * 0.55 + r2.a * 0.45;
           float foam = smoothstep(0.62, 0.2, vJac) * smoothstep(0.42, 0.7, foamN);
           // rings spreading where something broke the sea (a leap, a splash, a ship going in): foam, and the plankton lit
@@ -427,7 +512,8 @@ export class Ocean {
           }
           foam = max(foam, clamp(ringK * 0.7, 0.0, 0.8) * smoothstep(0.4, 0.62, foamN + 0.1));
           // plankton: points of cyan where the foam churns, flaring and fading
-          float spark = smoothstep(0.78, 0.98, fract(r2.b * 7.0 + r1.a * 3.0 + seTime * 0.35)) * smoothstep(0.55, 0.85, foamN);
+          // (a smooth swell and fade each: a hard wrap switched each one off at once, a flicker)
+          float spark = pow(0.5 + 0.5 * sin((r2.b * 7.0 + r1.a * 3.0) * 6.2831853 + seTime * 1.1), 10.0) * smoothstep(0.55, 0.85, foamN);
           float bloom = smoothstep(0.58, 0.82, texture2D(seDetail, vW.xz / 1900.0 + seTime * 0.0008).b * 0.6 + texture2D(seDetail, vW.xz / 700.0 - seTime * 0.0011).a * 0.4);
           float crestGlow = bloom * smoothstep(0.4, 2.2, vCrest) * smoothstep(0.35, 0.75, foamN) * (0.6 + 0.4 * sin(seTime * 1.3 + foamN * 9.0));
           vec3 bio = vec3(0.05, 0.9, 1.25) * crestGlow * 1.6 * seBio * (1.0 - far * 0.7) + vec3(0.05, 0.9, 1.25) * (spark * (foam * 5.0 + 0.06) + clamp(ringK, 0.0, 1.0) * 0.3 * smoothstep(0.5, 0.85, foamN)) * seBio * (1.0 - far);
@@ -440,11 +526,12 @@ export class Ocean {
             // the mirror: what stands over the sea and the sky, broken up by the waves (the slope shifts where it is read)
             if (seReflOn > 0.5) {
               vec4 rp = seReflM * vec4(vW.x, ${f(SEA_Y)}, vW.z, 1.0);
-              vec2 ruv = rp.xy / rp.w + vec2(N.x, N.z) * 0.07 * (1.0 - 0.6 * far);
+              // (shifted by the swell's slope and half the ripples': by all of it the reflections danced)
+              vec2 ruv = rp.xy / rp.w + vec2(Ng.x + 0.5 * sl.x, Ng.z + 0.5 * sl.y) * 0.035 * (1.0 - 0.6 * far);
               float inScr = smoothstep(0.0, 0.02, min(min(ruv.x, 1.0 - ruv.x), min(ruv.y, 1.0 - ruv.y)));
               refl = mix(refl, texture2D(seRefl, clamp(ruv, 0.001, 0.999)).rgb, inScr);
             }
-            float rough = mix(0.13, 0.3, far), a2 = rough * rough * rough * rough;
+            float rough = mix(0.13, 0.3, far), a2 = min(rough * rough * rough * rough + aa, 1.0);
             vec3 H = normalize(SE_SUN + V);
             float nh = max(dot(N, H), 0.0), dd = nh * nh * (a2 - 1.0) + 1.0;
             float spec = a2 / (3.14159 * dd * dd) * (0.02 + 0.98 * pow(1.0 - max(dot(H, V), 0.0), 5.0)) * max(dot(N, SE_SUN), 0.0) / max(4.0 * nv, 0.15);
@@ -460,7 +547,7 @@ export class Ocean {
               vec3 Lv = lp.xyz - vW;
               float d2 = dot(Lv, Lv);
               vec3 l = Lv * inversesqrt(d2), hh = normalize(l + V);
-              float nhl = max(dot(N, hh), 0.0), ar = 0.0025, dl = nhl * nhl * (ar - 1.0) + 1.0;
+              float nhl = max(dot(N, hh), 0.0), ar = 0.0025 + aa, dl = nhl * nhl * (ar - 1.0) + 1.0;
               float Fl = 0.02 + 0.98 * pow(1.0 - max(dot(hh, V), 0.0), 5.0);
               c += seLC[i] * lp.w * (ar / (3.14159 * dl * dl)) * Fl * max(dot(N, l), 0.0) / max(4.0 * nv, 0.12) / d2;
             }
@@ -474,11 +561,14 @@ export class Ocean {
             vec3 Nd = -N;
             float ci = max(dot(Nd, V), 0.0), st2 = 1.777 * (1.0 - ci * ci);
             float Fr = st2 >= 1.0 ? 1.0 : 0.02 + 0.98 * pow(1.0 - sqrt(1.0 - st2), 5.0);
-            float rip = 0.5 + 0.5 * sin((r1.b * 0.6 + r2.b * 0.4) * 18.0 + seTime * 0.7);
             // through the window: the sky bent down to it, the moon a bright blur in it
             vec3 refr = refract(-V, Nd, 1.333);
             vec3 win = st2 < 1.0 ? (textureLod(seSky, refr, 2.0).rgb * 1.4 + SE_SUNRAD * (0.6 * pow(max(dot(refr, SE_SUN), 0.0), 60.0) + 0.06 * pow(max(dot(refr, SE_SUN), 0.0), 6.0))) * (1.0 - Fr) : vec3(0.0);
-            vec3 c = SE_MURK * (0.35 + 1.6 * rip * rip) * Fr + SE_SUNRAD * 0.012 * pow(rip, 6.0) * (1.0 - far) + foam * SE_SUNRAD * 0.02 + bio * 0.6 + win * (0.7 + 0.6 * rip);
+            // outside it the deep mirrored back: the water's own light, more of it where the reflection runs flatter (no
+            // bands drawn along the ripples' heights: they read as lines)
+            vec3 Rm = reflect(-V, Nd);
+            float graze = 1.0 - abs(Rm.y);
+            vec3 c = SE_MURK * (0.3 + 1.5 * graze * graze) * Fr + foam * SE_SUNRAD * 0.02 + bio * 0.6 + win;
             float a = 1.0 - (1.0 - Fr) * (1.0 - foam * 0.5);
             seWater(cameraPosition, -V, dist, T, L);
             float tw = dot(T, vec3(0.3333));
@@ -594,15 +684,21 @@ export class UnderPass extends Pass {
   }
 }
 
-// Moonlight shafts under the sea near the surface: long faint beams hanging from it along the moon's light bent going
-// in, flickering with the waves over them, fading with depth and off round the camera. Billboards turned about their
-// own axis, worked out round the camera every frame on the GPU (a fixed lattice that wraps)
+// Moonlight shafts under the sea near the surface: faint beams hanging from it along the moon's light bent going in,
+// flickering with the waves over them, fading with depth and off round the camera. Each its own width (a ribbon to a
+// broad curtain), length and strength - all alike they read as rows of stripes; faded where the eye looks along them
+// (from below, looking up their way, they fanned out over the whole view). Billboards turned about their own axis,
+// worked out round the camera every frame on the GPU (scattered over a square that wraps)
 export class Shafts {
-  constructor(n = 90) {
+  constructor(n = 56) {
     const g = new THREE.InstancedBufferGeometry().copy(new THREE.PlaneGeometry(1, 1).translate(0, -0.5, 0));
-    const a = new Float32Array(n * 4), rnd = (i) => (Math.sin(i * 12.9898 + 4.1) * 43758.5453) % 1;
-    for (let i = 0; i < n; i++) a.set([Math.abs(rnd(i)) * 220, Math.abs(rnd(i + 0.5)) * 220, 1.2 + Math.abs(rnd(i + 0.7)) * 3, 50 + Math.abs(rnd(i + 0.9)) * 90], i * 4);
+    const a = new Float32Array(n * 4), b = new Float32Array(n * 2), rnd = (i) => Math.abs((Math.sin(i * 12.9898 + 4.1) * 43758.5453) % 1);
+    for (let i = 0; i < n; i++) {
+      a.set([rnd(i) * 220, rnd(i + 0.5) * 220, 0.7 + Math.pow(rnd(i + 0.7), 2.2) * 8, 25 + rnd(i + 0.9) * 130], i * 4);
+      b.set([0.25 + 0.75 * rnd(i + 0.3), rnd(i + 0.1) * 6.2831853], i * 2);
+    }
     g.setAttribute('aS', new THREE.InstancedBufferAttribute(a, 4));
+    g.setAttribute('aK', new THREE.InstancedBufferAttribute(b, 2));
     g.instanceCount = n;
     const cy = Math.sqrt(1 - (1 - SUN_DIR.y * SUN_DIR.y) / 1.777), k = Math.sqrt(1 - cy * cy) / Math.hypot(SUN_DIR.x, SUN_DIR.z);
     const down = new THREE.Vector3(-SUN_DIR.x * k, -cy, -SUN_DIR.z * k).normalize();
@@ -610,24 +706,28 @@ export class Shafts {
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
       uniforms: { time: { value: 0 }, lvl: { value: 0 }, down: { value: down } },
       vertexShader: /* glsl */`
-        uniform float time, lvl; uniform vec3 down; attribute vec4 aS; varying float vA; varying vec2 vQ;
+        uniform float time, lvl; uniform vec3 down; attribute vec4 aS; attribute vec2 aK; varying float vA; varying vec2 vQ;
         void main() {
           vec3 c = cameraPosition;
-          // its foot on the surface, on a lattice round the camera that wraps as it moves
+          // its foot on the surface, on a square round the camera that wraps as it moves
           vec2 p = c.xz + mod(aS.xy - c.xz + 110.0, 220.0) - 110.0;
           vec3 top = vec3(p.x, lvl, p.y) - down * 2.0;
           vec3 axis = down, toCam = normalize(c - top), side = normalize(cross(axis, toCam));
           vec3 wp = top + side * position.x * aS.z + axis * (-position.y) * aS.w;
           vQ = vec2(position.x * 2.0, -position.y);
           float d = distance(c.xz, p);
-          vA = (1.0 - smoothstep(60.0, 110.0, d)) * smoothstep(18.0, 40.0, d) * (1.0 - smoothstep(10.0, 70.0, lvl - c.y)) * step(c.y, lvl)
-            * (0.55 + 0.45 * sin(time * 0.7 + aS.x * 0.37) * sin(time * 0.43 + aS.y * 0.21));
+          // (seen along its length it is a streak through everything: gone)
+          vec3 mid = top + axis * aS.w * 0.4;
+          float along = abs(dot(normalize(mid - c), axis));
+          float flick = 0.5 + 0.5 * sin(time * 0.37 + aK.y) * sin(time * 0.23 + aS.x * 0.21 + aK.y * 2.0);
+          vA = aK.x * (1.0 - smoothstep(60.0, 110.0, d)) * smoothstep(18.0, 40.0, d) * (1.0 - smoothstep(10.0, 70.0, lvl - c.y)) * step(c.y, lvl)
+            * (1.0 - smoothstep(0.5, 0.85, along)) * (0.35 + 0.65 * flick);
           gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
         }`,
       fragmentShader: /* glsl */`
         varying float vA; varying vec2 vQ;
         void main() {
-          float k = (1.0 - vQ.x * vQ.x) * pow(1.0 - vQ.y, 1.5) * smoothstep(0.0, 0.05, vQ.y);
+          float k = (1.0 - vQ.x * vQ.x) * (1.0 - vQ.x * vQ.x) * pow(1.0 - vQ.y, 1.5) * smoothstep(0.0, 0.05, vQ.y);
           gl_FragColor = vec4(vec3(0.035, 0.09, 0.105) * k * vA, 1.0);
         }`,
     }));

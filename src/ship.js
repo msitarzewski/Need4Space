@@ -624,11 +624,42 @@ function deckPatch(sh, U) {
   }
   Object.assign(sh.uniforms, U);
   sh.fragmentShader = sh.fragmentShader
-    .replace('#include <envmap_physical_pars_fragment>', DECK_PARS + pars
+    .replace('#include <envmap_physical_pars_fragment>', DECK_PARS + WET_PARS + pars
       .replace(ENV_IRR, 'return PI * envMapColor.rgb * envMapIntensity * ( 1.0 - deckShare( worldNormal ) );')
       .replace(ENV_RAD, 'return envMapColor.rgb * envMapIntensity * ( 1.0 - deckSeen( reflectVec, roughness ) );') + DECK_FNS)
     .replace('#include <lights_fragment_end>', C.lights_fragment_end.replace(IND_DIFF, DECK_ADD + IND_DIFF));
+  // (the water's film after the roughness is known - wherever it is set: the parts atlas sets its own in its place)
+  sh.fragmentShader = sh.fragmentShader.replace('#include <metalnessmap_fragment>', WET_FRAG + '#include <metalnessmap_fragment>');
+  sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWetP;')
+    .replace('#include <fog_vertex>', '#include <fog_vertex>\n\tvWetP = transformed;');
 }
+
+// Water running off the hull out of the sea (the ocean: shipWet 1 coming out .. 0 dry over a few seconds): a film over
+// all of it, rivulets wandering back along it and down, beads left where it has run off - glossy, the paint a shade
+// darker under it. In the ship's own frame (the model's units, its nose toward -z). Off (0): untouched
+const WET_PARS = /* glsl */`
+uniform float shipWet, shipWetT;
+varying vec3 vWetP;
+float wetH( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
+float wetN( vec2 p ) {
+	vec2 i = floor( p ), u = fract( p ); u = u * u * ( 3.0 - 2.0 * u );
+	return mix( mix( wetH( i ), wetH( i + vec2( 1.0, 0.0 ) ), u.x ), mix( wetH( i + vec2( 0.0, 1.0 ) ), wetH( i + vec2( 1.0, 1.0 ) ), u.x ), u.y );
+}
+`;
+const WET_FRAG = /* glsl */`
+	if ( shipWet > 0.0 ) {
+		vec3 wp = vWetP;
+		// rivulets: thin, wandering, running back and down - finer than the pixels far off, only the film
+		vec2 q = vec2( wp.x * 5.0 + wp.y * 3.0 + 0.6 * sin( wp.z * 1.7 + wp.x * 2.0 ), wp.z * 0.6 + wp.y * 0.5 - shipWetT * 2.4 );
+		float fine = 1.0 - smoothstep( 0.2, 0.5, max( fwidth( q.x ), fwidth( q.y ) ) );
+		float riv = smoothstep( 0.7, 0.9, wetN( q ) ) * ( 0.6 + 0.4 * wetN( q * vec2( 0.5, 2.0 ) + 7.0 ) ) * fine;
+		vec2 b = vec2( wp.x * 9.0 + wp.y * 4.0, wp.z * 9.0 - wp.y * 3.0 );
+		float bead = step( 0.86, wetH( floor( b ) ) ) * smoothstep( 0.42, 0.22, length( fract( b ) - 0.5 ) ) * ( 1.0 - smoothstep( 0.15, 0.35, max( fwidth( b.x ), fwidth( b.y ) ) ) );
+		float wetK = clamp( smoothstep( 0.0, 0.6, shipWet ) * 0.5 + riv * smoothstep( 0.0, 0.35, shipWet ) + bead * smoothstep( 0.0, 0.5, shipWet ) * 0.8, 0.0, 1.0 );
+		roughnessFactor = mix( roughnessFactor, 0.06, wetK );
+		diffuseColor.rgb *= 1.0 - 0.12 * wetK - 0.22 * riv * smoothstep( 0.0, 0.35, shipWet );
+	}
+`;
 
 // The hull's baked occlusion on the sun too (micro-shadowing - Chan 2018, as Filament has it). three applies an AO map
 // to the sky's light only, so the panel seams, vents, hatches and the corners where parts meet were as bright as open
@@ -927,7 +958,9 @@ export class Ship {
     this.root.add(this.visual);
     // the deck's light on this ship's materials (setDeckLight)
     this.deckU = { deckUp: { value: new THREE.Vector3(0, 1, 0) }, deckAlbedo: { value: new THREE.Color(0.25, 0.25, 0.25) },
-      deckDirect: { value: new THREE.Color(0, 0, 0) }, deckSky: { value: 1 }, deckK: { value: 0 } };
+      deckDirect: { value: new THREE.Color(0, 0, 0) }, deckSky: { value: 1 }, deckK: { value: 0 },
+      // how wet it is out of the sea (1 just out .. 0 dry) and the clock (WET_PARS: the ocean sets them)
+      shipWet: { value: 0 }, shipWetT: { value: 0 } };
     // the accent lights' colour (this ship's engines) and how lit they are (finishPatch)
     this.lookU = { accentCol: { value: new THREE.Color(0, 0, 0) }, accentOn: { value: 0 } };
     const base = opts.cloneOf;
