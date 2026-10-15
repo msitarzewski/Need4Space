@@ -351,7 +351,13 @@ export class Ocean {
     this.U = { seCenter: { value: new THREE.Vector3() }, seTime: { value: 0 }, seWaveA: { value: wa }, seWaveB: { value: wb },
       seSky: { value: skyCube }, seDetail: { value: rippleTexture(renderer) }, seBio: { value: 1 },
       seRings: { value: Array.from({ length: 16 }, () => new THREE.Vector4(0, 0, -1e6, 0)) },
-      seLP: { value: Array.from({ length: 12 }, () => new THREE.Vector4(0, -1e5, 0, 0)) }, seLC: { value: Array.from({ length: 12 }, () => new THREE.Vector3()) } };
+      seLP: { value: Array.from({ length: 12 }, () => new THREE.Vector4(0, -1e5, 0, 0)) }, seLC: { value: Array.from({ length: 12 }, () => new THREE.Vector3()) },
+      seRefl: { value: null }, seReflM: { value: new THREE.Matrix4() }, seReflOn: { value: 0 } };
+    // the mirror: the scene drawn from the camera reflected in the sea's mean level, at half size (Ocean.reflect)
+    this.rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
+    this.U.seRefl.value = this.rt.texture;
+    this.mcam = new THREE.PerspectiveCamera();
+    this.mskyCam = new THREE.PerspectiveCamera();
     const mat = new THREE.ShaderMaterial({
       uniforms: this.U, side: THREE.DoubleSide, transparent: true, depthWrite: true,
       blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
@@ -379,6 +385,7 @@ export class Ocean {
         }`,
       fragmentShader: /* glsl */`
         uniform samplerCube seSky; uniform sampler2D seDetail; uniform float seTime, seBio; uniform vec4 seRings[16]; uniform vec4 seLP[12]; uniform vec3 seLC[12];
+        uniform sampler2D seRefl; uniform mat4 seReflM; uniform float seReflOn;
         varying vec3 vW; varying vec3 vN0; varying float vJac; varying float vCrest;
         ${SEA_GLSL}
         void main() {
@@ -414,6 +421,13 @@ export class Ocean {
             float nv = max(dot(N, V), 0.0), F = 0.02 + 0.98 * pow(1.0 - nv, 5.0);
             vec3 R = reflect(-V, N); R.y = abs(R.y);
             vec3 refl = textureLod(seSky, R, far * 3.0).rgb;
+            // the mirror: what stands over the sea and the sky, broken up by the waves (the slope shifts where it is read)
+            if (seReflOn > 0.5) {
+              vec4 rp = seReflM * vec4(vW.x, ${f(SEA_Y)}, vW.z, 1.0);
+              vec2 ruv = rp.xy / rp.w + vec2(N.x, N.z) * 0.07 * (1.0 - 0.6 * far);
+              float inScr = smoothstep(0.0, 0.02, min(min(ruv.x, 1.0 - ruv.x), min(ruv.y, 1.0 - ruv.y)));
+              refl = mix(refl, texture2D(seRefl, clamp(ruv, 0.001, 0.999)).rgb, inScr);
+            }
             float rough = mix(0.13, 0.3, far), a2 = rough * rough * rough * rough;
             vec3 H = normalize(SE_SUN + V);
             float nh = max(dot(N, H), 0.0), dd = nh * nh * (a2 - 1.0) + 1.0;
@@ -460,6 +474,58 @@ export class Ocean {
     this.mesh.name = 'ocean';
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = -10;                 // (the first of the see-through things: what is drawn after it tests its depth)
+  }
+
+  // Draw the mirror: the camera reflected in the sea's mean level, the sea's floor clipped away by an oblique near plane
+  // (no shader variants), the sky first; the fog told the sea is far below (all of it air); no shadow maps redrawn.
+  // hide: what is under the sea (it is not in the mirror), shown again after
+  reflect(renderer, scene, camera, sky, skyCam, fog, hide) {
+    const U = this.U;
+    if (camera.position.y < SEA_Y + 0.5) { U.seReflOn.value = 0; return; }
+    const sz = renderer.getDrawingBufferSize(new THREE.Vector2()), w = Math.max(2, Math.round(sz.x / 2)), h = Math.max(2, Math.round(sz.y / 2));
+    if (this.rt.width !== w || this.rt.height !== h) this.rt.setSize(w, h);
+    const m = this.mcam, cp = camera.getWorldPosition(new THREE.Vector3());
+    m.copy(camera, false);
+    m.position.set(cp.x, 2 * SEA_Y - cp.y, cp.z);
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion), up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+    fwd.y = -fwd.y; up.y = -up.y;
+    m.up.copy(up);
+    m.lookAt(m.position.clone().add(fwd));
+    m.updateMatrixWorld();
+    m.projectionMatrix.copy(camera.projectionMatrix);
+    // the oblique near plane: the sea's plane in the mirror camera's space
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, SEA_Y, 0)).applyMatrix4(m.matrixWorldInverse);
+    const c = new THREE.Vector4(plane.normal.x, plane.normal.y, plane.normal.z, plane.constant), e = m.projectionMatrix.elements;
+    const q = new THREE.Vector4((Math.sign(c.x) + e[8]) / e[0], (Math.sign(c.y) + e[9]) / e[5], -1, (1 + e[10]) / e[14]);
+    c.multiplyScalar(2 / c.dot(q));
+    e[2] = c.x; e[6] = c.y; e[10] = c.z + 1 - 0.003; e[14] = c.w;
+    m.projectionMatrixInverse.copy(m.projectionMatrix).invert();
+    U.seReflM.value.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1).multiply(camera.projectionMatrix).multiply(m.matrixWorldInverse);
+    const sc = this.mskyCam;
+    sc.copy(skyCam, false); sc.position.set(0, 0, 0); sc.quaternion.copy(m.quaternion); sc.updateMatrixWorld();
+    const keepRT = renderer.getRenderTarget(), ac = renderer.autoClear, su = renderer.shadowMap.autoUpdate, lvl = fog.color.b;
+    const vis = hide.map((o) => o.visible);
+    try {
+      hide.forEach((o) => (o.visible = false));
+      this.mesh.visible = false;
+      renderer.shadowMap.autoUpdate = false; renderer.shadowMap.needsUpdate = false;
+      renderer.autoClear = false;
+      renderer.setRenderTarget(this.rt);
+      renderer.setClearColor(0x000000, 1);
+      renderer.clear(true, true, true);
+      if (sky) renderer.render(sky, sc);
+      renderer.clearDepth();
+      fog.color.b = -1e5;
+      renderer.render(scene, m);
+    } finally {
+      fog.color.b = lvl;
+      hide.forEach((o, i) => (o.visible = vis[i]));
+      this.mesh.visible = true;
+      renderer.shadowMap.autoUpdate = su;
+      renderer.autoClear = ac;
+      renderer.setRenderTarget(keepRT);
+    }
+    U.seReflOn.value = 1;
   }
 
   update(t, camera) {

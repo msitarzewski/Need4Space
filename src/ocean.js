@@ -477,6 +477,8 @@ export class OceanWorld {
 
   setOptions(v) {
     this.life.setOn(v.seaLife !== false);
+    this.mirrorOn = v.seaReflect !== false;
+    if (!this.mirrorOn) this.ocean.U.seReflOn.value = 0;
   }
 
   castStatics(on) {
@@ -565,6 +567,14 @@ export class OceanWorld {
     }
   }
 
+  // before each frame's draw: the sea's mirror (main.js), with what lies under the sea left out of it
+  preRender(renderer) {
+    if (!this.mirrorOn || !this.cam) return;
+    const under = (this._under ||= [...this.city.parts, this.cityMeshes.halo, this.cityMeshes.street, this.cityMeshes.glow, this.shafts.mesh,
+      this.life.shoal, this.life.jelly, this.life.snow, this.life.giant.mesh, ...this.scene.children.filter((o) => o.name === 'abyss')]);
+    this.ocean.reflect(renderer, this.scene, this.cam, this.sky, this.skyCam, this.fog, under);
+  }
+
   // the camera coming up out of the sea: water on the lens (main.js)
   wetCheck(p) {
     const under = p.y < this.level, hit = this.camUnder === true && !under;
@@ -603,6 +613,7 @@ export class OceanWorld {
     this.lastT = t;
     // the sea's level at the camera (the swell there): the fog's split, the dome's deep below it
     const cp = camera.position;
+    this.cam = camera;
     this.level = waveHeight(cp.x, cp.z, t);
     this.fog.color.setRGB(1, t % 1000, this.level);
     this.dome.material.uniforms.under.value = Math.max(0, this.level - cp.y);

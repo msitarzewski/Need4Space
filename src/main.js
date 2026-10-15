@@ -428,7 +428,7 @@ async function boot() {
         composer.setPixelRatio(pixelRatio * renderScale / 8);
         composer.setSize(innerWidth, innerHeight);
         composer.renderToScreen = false;
-        scene.updateMatrixWorld(); shipLook(); composer.render();
+        scene.updateMatrixWorld(); shipLook(); world.preRender?.(renderer); composer.render();
         composer.renderToScreen = true;
         restore();
         resize();
@@ -580,7 +580,7 @@ async function boot() {
     lens.enabled = true;                               // (its shader too: else compiled at the first splash)
     for (const level of [0, 1]) {
       for (const [m, , levels] of lods) if (levels[level]) m.geometry = levels[level];
-      scene.updateMatrixWorld(); shipLook(); composer.render();
+      scene.updateMatrixWorld(); shipLook(); world.preRender?.(renderer); composer.render();
     }
     lens.enabled = false;
     for (const [m, g] of lods) m.geometry = g;
@@ -600,7 +600,7 @@ async function boot() {
   const _sprayV = new THREE.Vector3();
   const _sunP = new THREE.Vector3(), _camF = new THREE.Vector3();
   let acc = 0, last = performance.now();
-  const render = () => { scene.updateMatrixWorld(); shipLook(); composer.render(); };
+  const render = () => { scene.updateMatrixWorld(); shipLook(); world.preRender?.(renderer); composer.render(); };
   // drawn between the last two physics steps: at 144 Hz a frame got 0, 1 or 2 steps of 8.3 ms, and everything that
   // moves juddered against the camera
   const keep = (m) => {
