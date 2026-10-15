@@ -537,6 +537,42 @@ function bakeLamps(g, lamps) {
   g.setAttribute('lit', new THREE.BufferAttribute(out, 3));
 }
 
+export function bakedGeometry(builders, lamps) {
+  const B = new Builder();
+  for (const b of builders) { const o = B.n; B.pos.push(...b.pos); B.fac.push(...b.fac); for (const i of b.idx) B.idx.push(i + o); }
+  const g = B.geometry();
+  bakeLamps(g, lamps);
+  return g;
+}
+
+// ---------------------------------------------------------------- the castles on the sea stacks
+// A stack's crown built on: a stone platform over the rock, a wall round it with braziers at its corners, a tower (its
+// windows lit), a house or two against the wall. x, y (the platform's top), z; r: room on the rock; rnd
+export function castleGeometry(x, y, z, r, rnd) {
+  const B = new Builder(), lamps = [], rot = rnd() * TAU, M = at(x, y, z, rot), w = r * 1.5;
+  B.place(M, (q) => {
+    q.place(at(0, -30, 0), (p) => p.box(w + 4, 32, w + 4, ASHLAR, { step: 4, kTop: TRIM }));
+    for (const [sx, sz, a, b] of [[0, w / 2, w, 1.4], [0, -w / 2, w, 1.4], [w / 2, 0, 1.4, w], [-w / 2, 0, 1.4, w]]) {
+      q.place(at(sx, 2, sz), (p) => p.box(a, 6, b, ASHLAR, { step: 3 }));
+      q.place(at(sx, 7.6, sz), (p) => p.box(a + 0.6, 0.35, b + 0.6, GLOW, { step: 4, top: false }));
+    }
+    for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      q.place(at(sx * w / 2, 2, sz * w / 2), (p) => {
+        p.lathe([[2.6, 0, TRIM], [2.6, 9, ASHLAR], [3.1, 9.5, TRIM], [3.1, 10.4, TRIM], [2.2, 10.4, DARK], [0, 10, DARK]], 8);
+      });
+      lamps.push({ p: V(sx * w / 2, 13.5, sz * w / 2).applyMatrix4(M), col: [1.0, 0.55, 0.2], I: 3200, reach: 70, size: 1.6, kind: 'brazier' });
+    }
+    for (let k = 0; k < 2; k++) {
+      const hw = 7 + rnd() * 6, hd = 6 + rnd() * 5, sd = k ? 1 : -1;
+      q.place(at(sd * (w / 2 - hw / 2 - 1.5), 2, -sd * (w / 2 - hd / 2 - 1.5)), (p) => house(p, hw, hd, 1 + Math.floor(rnd() * 2), new THREE.Matrix4(), rnd));
+    }
+  });
+  // the tower (placed by its own matrix: its crown's lamp lands where it is)
+  const th = 26 + rnd() * 34, tr = 3.5 + rnd() * 2.5;
+  tower(B, tr, th, lamps, M.clone().multiply(at((rnd() - 0.5) * w * 0.3, 2, (rnd() - 0.5) * w * 0.3)), rnd);
+  return { B, lamps };
+}
+
 // ---------------------------------------------------------------- the lighthouse
 // the old lighthouse on its rock out at sea: a stepped plinth, a tapering shaft in three stages ringed with cornices and
 // lit slit windows, a gallery of columns round the lantern, a cone of green tiles over it. y0: the rock's top

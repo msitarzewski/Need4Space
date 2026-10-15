@@ -536,6 +536,13 @@ export class GameAudio {
     this.burst(t, 0.6, o, { type: 'lowpass', f: 400, f1: 120, v: 0.8, buf: this.brown });
     this.tone(t, 0.3, o, { f: 90, f1: 40, v: 0.4, tau: 0.08 });
   }
+  // thunder far off: a crack's rumble rolling on (k: how loud, 0..1)
+  thunder(k = 1) {
+    if (!this.ctx || !this.gate('thunder', 2)) return;
+    const t = this.ctx.currentTime, o = this.out(null, 0, 0.55 * k);
+    this.burst(t, 4.5, o, { type: 'lowpass', f: 260, f1: 70, q: 0.6, v: 0.9, buf: this.brown });
+    this.burst(t + 0.25, 2.5, o, { type: 'lowpass', f: 900, f1: 120, q: 0.5, v: 0.35, buf: this.pink });
+  }
   // a bird: a run of 2-6 quick whistled notes, each a little bend, from somewhere round you
   bird(pos, v) {
     const t = this.ctx.currentTime, o = this.out(pos, 40, 0.16 * v), n = 2 + Math.floor(Math.random() * 5);

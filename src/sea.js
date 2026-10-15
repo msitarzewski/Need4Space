@@ -263,15 +263,20 @@ export function seaSkyDome(renderer, size = 768) {
     side: THREE.BackSide, depthWrite: false, depthTest: false, transparent: true,
     blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
     blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
-    uniforms: { sky: { value: rt.texture }, under: { value: 0 } },
+    uniforms: { sky: { value: rt.texture }, under: { value: 0 }, flashDir: { value: new THREE.Vector3(0, 0.1, 1) }, flashK: { value: 0 } },
     vertexShader: /* glsl */`varying vec3 vDir; void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: /* glsl */`
-      uniform samplerCube sky; uniform float under; varying vec3 vDir;
+      uniform samplerCube sky; uniform float under, flashK; uniform vec3 flashDir; varying vec3 vDir;
       ${SEA_GLSL}
       void main() {
         vec3 d = normalize(vDir);
         vec4 a = textureCube(sky, d);
         if (under > 0.0 && d.y < under / 24000.0) { gl_FragColor = vec4(SE_MURK * 0.5 * exp(-SE_KD * under), 1.0); return; }
+        // a lightning flash: the cloud round it lit from inside, the sky round it a little
+        if (flashK > 0.0) {
+          float m = max(dot(d, normalize(flashDir)), 0.0);
+          a.rgb += vec3(0.55, 0.6, 0.9) * flashK * (pow(m, 40.0) * 1.6 + pow(m, 10.0) * 0.35) * a.a;
+        }
         gl_FragColor = a;
       }`,
   });
@@ -414,7 +419,9 @@ export class Ocean {
           foam = max(foam, clamp(ringK * 0.7, 0.0, 0.8) * smoothstep(0.4, 0.62, foamN + 0.1));
           // plankton: points of cyan where the foam churns, flaring and fading
           float spark = smoothstep(0.78, 0.98, fract(r2.b * 7.0 + r1.a * 3.0 + seTime * 0.35)) * smoothstep(0.55, 0.85, foamN);
-          vec3 bio = vec3(0.05, 0.9, 1.25) * (spark * (foam * 5.0 + 0.06) + clamp(ringK, 0.0, 1.0) * 0.3 * smoothstep(0.5, 0.85, foamN)) * seBio * (1.0 - far);
+          float bloom = smoothstep(0.58, 0.82, texture2D(seDetail, vW.xz / 1900.0 + seTime * 0.0008).b * 0.6 + texture2D(seDetail, vW.xz / 700.0 - seTime * 0.0011).a * 0.4);
+          float crestGlow = bloom * smoothstep(0.4, 2.2, vCrest) * smoothstep(0.35, 0.75, foamN) * (0.6 + 0.4 * sin(seTime * 1.3 + foamN * 9.0));
+          vec3 bio = vec3(0.05, 0.9, 1.25) * crestGlow * 1.6 * seBio * (1.0 - far * 0.7) + vec3(0.05, 0.9, 1.25) * (spark * (foam * 5.0 + 0.06) + clamp(ringK, 0.0, 1.0) * 0.3 * smoothstep(0.5, 0.85, foamN)) * seBio * (1.0 - far);
           vec3 T, L;
           if (dot(V, Ng) >= 0.0) {
             // from above: the sky mirrored, the moon's glade, light through the thin crests, foam
@@ -619,4 +626,63 @@ export class Shafts {
     this.mesh.name = 'moon-shafts';
   }
   update(t, lvl) { const u = this.mesh.material.uniforms; u.time.value = t; u.lvl.value = lvl; }
+}
+
+// A lightning storm out to sea: now and then a bolt (a jagged ribbon from the cloud down to the water, a branch or two),
+// its flash lighting the cloud round it and the whole scene, thunder after it
+export class Lightning {
+  constructor(dir = new THREE.Vector3(0.75, 0.06, 0.66).normalize(), dist = 6000) {
+    this.dir = dir; this.dist = dist; this.next = 6; this.t0 = -99;
+    this.geo = new THREE.BufferGeometry();
+    this.geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(240 * 3), 3));
+    this.geo.setAttribute('w', new THREE.BufferAttribute(new Float32Array(240), 1));
+    this.mesh = new THREE.Mesh(this.geo, new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, uniforms: { k: { value: 0 } },
+      vertexShader: 'attribute float w; varying float vW; void main() { vW = w; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: 'uniform float k; varying float vW; void main() { gl_FragColor = vec4(vec3(0.8, 0.85, 1.0) * k * 30.0 * (1.0 - abs(vW)), 1.0); }',
+    }));
+    this.mesh.frustumCulled = false;
+    this.mesh.visible = false;
+    this.mesh.name = 'lightning';
+  }
+  // a bolt's ribbon: down from the cloud (a random walk), facing the camera
+  build(cam, rnd) {
+    const P = this.geo.attributes.position.array, W = this.geo.attributes.w.array;
+    const right = new THREE.Vector3().crossVectors(this.dir, new THREE.Vector3(0, 1, 0)).normalize();
+    let n = 0;
+    const strand = (p, steps, width) => {
+      const q = p.clone();
+      for (let i = 0; i < steps && n < 236; i++) {
+        const nq = q.clone().add(new THREE.Vector3((rnd() - 0.5) * 120, -(25 + rnd() * 45), (rnd() - 0.5) * 120));
+        for (const [a, b] of [[q, nq]]) {
+          const off = right.clone().multiplyScalar(width);
+          P.set([a.x - off.x, a.y, a.z - off.z, a.x + off.x, a.y, a.z + off.z, b.x - off.x, b.y, b.z - off.z, b.x + off.x, b.y, b.z + off.z], n * 3);
+          W.set([-1, 1, -1, 1], n);
+          n += 4;
+        }
+        q.copy(nq);
+        if (q.y < 0) break;
+      }
+      return q;
+    };
+    const top = cam.clone().addScaledVector(this.dir, this.dist).setY(700 + rnd() * 300);
+    strand(top, 40, 16);
+    strand(top.clone().add(new THREE.Vector3(0, -150 - rnd() * 200, 0)), 6, 7);
+    for (let i = n; i < 240; i++) P[i * 3 + 1] = -1e5;
+    this.count = n;
+    const idx = [];
+    for (let i = 0; i + 3 < n; i += 4) idx.push(i, i + 1, i + 2, i + 1, i + 3, i + 2);
+    this.geo.setIndex(idx);
+    this.geo.attributes.position.needsUpdate = this.geo.attributes.w.needsUpdate = true;
+  }
+  // every frame: the flash's strength now (0..1) - a bolt every 7-20 s, flickering in two or three strokes
+  update(t, cam, rnd) {
+    if (t > this.next) { this.t0 = t; this.next = t + 7 + rnd() * 13; this.build(cam, rnd); this.strokes = [0, 0.09 + rnd() * 0.06, 0.24 + rnd() * 0.1]; this.thunderAt = t + 1.2 + rnd() * 1.5; }
+    const dt = t - this.t0;
+    let k = 0;
+    for (const s of this.strokes || []) { const u = dt - s; if (u >= 0 && u < 0.12) k = Math.max(k, Math.exp(-u * 30)); }
+    this.mesh.visible = k > 0.01;
+    this.mesh.material.uniforms.k.value = k;
+    return k;
+  }
 }

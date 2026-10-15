@@ -940,6 +940,7 @@ async function boot() {
       invert: input.invert, lapTime: lap.started ? lap.time : NaN, lastLap: lap.last, bestLap: lap.best, lap: lap.lap,
       x: ctl.pos.x, z: ctl.pos.z, fx: f.x, fz: f.z, race: race ? race.hud() : null, mode });
     audio.update(dt, { camera, ship, ctl, race, track, mode, inp, world });
+    if (world.thunder) { world.thunder = false; audio.thunder?.(world.underK ? 0.4 : 1); }
     touch.setMode(mode);
   }
   requestAnimationFrame(frame);

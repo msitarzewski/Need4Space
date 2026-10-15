@@ -10,10 +10,10 @@ import { hullMaps } from './hull.js';
 import { bakeLater } from './bake.js';
 import { Q } from './quality.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { SUN_DIR, SUN_E, SUN_COL, SEA_Y, seaSkyDome, seaLight, Ocean, waveHeight, UnderPass, Shafts } from './sea.js';
+import { SUN_DIR, SUN_E, SUN_COL, SEA_Y, seaSkyDome, seaLight, Ocean, waveHeight, UnderPass, Shafts, Lightning } from './sea.js';
 import { mesaGeometry, archGeometry } from './sandstone.js';
 import { sunOnly, setCave } from './look.js';
-import { City, lighthouseGeometry, stoneMaterial } from './atlantis.js';
+import { City, lighthouseGeometry, stoneMaterial, castleGeometry, bakedGeometry } from './atlantis.js';
 import { SeaLife } from './sealife.js';
 import { TrackGrid } from './spires.js';
 import { moonMesh } from './celestial.js';
@@ -242,6 +242,8 @@ export class OceanWorld {
     abyss.name = 'abyss';
     abyss.frustumCulled = false;
     scene.add(abyss);
+    this.lightning = new Lightning();
+    scene.add(this.lightning.mesh);
     this.shafts = new Shafts();
     scene.add(this.shafts.mesh);
     this.noAO.push(this.ocean.mesh, abyss, this.shafts.mesh);
@@ -328,7 +330,7 @@ export class OceanWorld {
       if (Math.hypot((x - C.x) / (R.x * 1.1), (z - C.z) / (R.z * 1.1)) < 1) return false;
       const g = stackGeometry({ x, z, r, h, seed });
       if (grid.geometryClear(g, 6, 7) < 0) return false;
-      placed.push({ x, z, r });
+      placed.push({ x, z, r, h });
       geos.push(g);
       return true;
     };
@@ -361,7 +363,34 @@ export class OceanWorld {
     m.layers.set(2); m.layers.enable(6);
     m.castShadow = m.receiveShadow = true;
     scene.add(m);
-    console.info(`stacks: ${geos.length - 1}`);
+    // the tallest stacks within sight of the track crowned with a lit castle each (clear of the track)
+    const builders = [], lamps = [], crnd = mulberry32(31);
+    for (const q of placed.filter((q) => q.h > 45 && q.r > 14).sort((a, b) => b.h - a.h)) {
+      if (builders.length >= Math.round(14 * Math.max(0.5, this.dens))) break;
+      const i = tr.nearestIndex(new THREE.Vector3(q.x, 0, q.z)), d = Math.hypot(tr.P[i].x - q.x, tr.P[i].z - q.z);
+      if (d > 1100) continue;
+      const c = castleGeometry(q.x, q.h * 0.86, q.z, Math.min(q.r * 0.75, 26), crnd);
+      const tg = new THREE.BufferGeometry(); tg.setAttribute('position', new THREE.Float32BufferAttribute(c.B.pos, 3));
+      if (grid.geometryClear(tg, 4, 5) < 0) continue;
+      builders.push(c.B); lamps.push(...c.lamps);
+    }
+    if (builders.length) {
+      const cm = new THREE.Mesh(bakedGeometry(builders, lamps), stoneMaterial({ key: 'castles' }));
+      cm.name = 'castles';
+      cm.layers.set(2); cm.castShadow = cm.receiveShadow = true;
+      scene.add(cm);
+      const orb = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 2), new THREE.MeshBasicMaterial({ color: 0xffffff }), lamps.length);
+      lamps.forEach((L, k) => {
+        const sz = L.kind === 'brazier' ? 1.8 : 1.2;
+        orb.setMatrixAt(k, new THREE.Matrix4().compose(L.p, new THREE.Quaternion(), new THREE.Vector3(sz, sz * 0.7, sz)));
+        orb.setColorAt(k, new THREE.Color(L.col[0] * 12, L.col[1] * 12, L.col[2] * 12));
+      });
+      orb.name = 'castle-lamps';
+      scene.add(orb);
+      this.noAO.push(orb);
+      this.castleLamps = lamps;
+    }
+    console.info(`stacks: ${geos.length - 1}, castles: ${builders.length}`);
   }
 
   // The old lighthouse out on its rock beside the far turn: its lantern's light swept round by a beam over the sea and
@@ -514,6 +543,7 @@ export class OceanWorld {
   setOptions(v) {
     this.life.setOn(v.seaLife !== false);
     this.mirrorOn = v.seaReflect !== false;
+    this.stormOn = v.oceanStorm !== false;
     if (!this.mirrorOn) this.ocean.U.seReflOn.value = 0;
   }
 
@@ -539,6 +569,7 @@ export class OceanWorld {
     for (const l of this.lamps) if (l.intensity > 0) add(l.position, [l.color.r, l.color.g, l.color.b], l.intensity * 4);
     if (this.lightLamp) add(this.lightLamp.p, [1.0, 0.86, 0.62], 30000);
     if (this.keeper) add(this.keeper.top, [1.0, 0.8, 0.55], 120000);
+    for (const L of this.castleLamps || []) add(L.p, L.col, L.I * 0.8);
     for (const L of this.city.lamps) if (L.p.y > SEA_Y) add(L.p, L.col, Math.min(L.I, 20000));
     // down the track near the camera: the lamp posts' lenses (every 60 m, sides alternating) and the barriers' glow
     const i0 = tr.nearestIndex(cp), every = Math.round(60 / tr.step), th = OCEAN_LAYOUT.theme;
@@ -563,8 +594,8 @@ export class OceanWorld {
   set race(r) { this._race = r; if (r) this.shipBeams(null); }
   get race() { return this._race; }
 
-  // Every ship's headlight seen: a lens glowing at its nose, and its beam - a soft cone ahead and down along the
-  // light's aim, faint in the night air, plain to see in the water (the light coming from the ship, not out of nowhere)
+  // Every ship's headlight seen in the water: its beam, a soft cone ahead and down along the light's aim (no glow on
+  // the hull itself - a lit ball on the nose looked wrong)
   shipBeams(cp) {
     if (!this.race) return;
     if (!this.beams) {
@@ -572,7 +603,6 @@ export class OceanWorld {
       const dir = to.clone().sub(from).normalize();
       const cone = new THREE.ConeGeometry(Math.tan(h.angle * 0.62) * len, len, 24, 1, true).translate(0, -len / 2, 0)
         .applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir)).translate(from.x, from.y, from.z);
-      const lens = new THREE.PlaneGeometry(1, 1);
       this.beams = this.race.entries.map((e) => {
         const mat = new THREE.ShaderMaterial({
           transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
@@ -587,25 +617,15 @@ export class OceanWorld {
         });
         const beam = new THREE.Mesh(cone, mat);
         beam.frustumCulled = false;
-        const glow = new THREE.Mesh(lens, new THREE.ShaderMaterial({
-          transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-          uniforms: { k: mat.uniforms.k },
-          vertexShader: /* glsl */`varying vec2 vQ;
-            void main() { vQ = position.xy * 2.0; vec4 c = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0); c.xy += position.xy * 1.6; gl_Position = projectionMatrix * c; }`,
-          fragmentShader: /* glsl */`uniform float k; varying vec2 vQ;
-            void main() { float r2 = dot(vQ, vQ); if (r2 > 1.0) discard; gl_FragColor = vec4(vec3(0.85, 0.92, 1.0) * (exp(-r2 * 9.0) * 6.0 + exp(-r2 * 2.5) * 0.6) * min(1.0, k * 20.0 + 0.4), 1.0); }`,
-        }));
-        glow.position.copy(from);
-        glow.frustumCulled = false;
-        e.ship.root.add(beam, glow);
-        this.noAO.push(beam, glow);
+        e.ship.root.add(beam);
+        this.noAO.push(beam);
         return { e, mat };
       });
     }
     if (!cp) return;
     for (const b of this.beams) {
       const p = b.e.ship.root.position, under = p.y < this.level;
-      b.mat.uniforms.k.value = (b.e.ship.power ?? 1) * (under ? 0.05 : 0.012);
+      b.mat.uniforms.k.value = (b.e.ship.power ?? 1) * (under ? 0.05 : 0);
     }
   }
 
@@ -682,6 +702,13 @@ export class OceanWorld {
     this.city.haloMat && (this.cityMeshes.halo.material.uniforms.lvl.value = this.level);
     this.ocean.update(t, camera);
     this.shafts.update(t, this.level);
+    // the storm out to sea: the flash on the cloud, on everything (the moon's light and the sky's, a moment), thunder
+    const fk = this.stormOn !== false ? this.lightning.update(t, cp, this.life.rnd) : 0;
+    this.dome.material.uniforms.flashK.value = fk;
+    this.dome.material.uniforms.flashDir.value.copy(this.lightning.dir);
+    this.sun.intensity = SUN_E * (1 + 1.2 * fk * (cp.y > this.level ? 1 : 0.2));
+    this.scene.environmentIntensity = 1.8 * (1 + 0.8 * fk);
+    if (this.lightning.thunderAt && t > this.lightning.thunderAt) { this.lightning.thunderAt = 0; this.thunder = true; }
     if (this.beam) this.beam.rotation.y = -t * (Math.PI * 2 / 10);
     // the city's nearest big lamps as real lights (only under the sea, and only near)
     {
