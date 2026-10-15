@@ -437,6 +437,8 @@ function polarGrid(NR = 170, NA = 256) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('aSpace', new THREE.Float32BufferAttribute(sp, 1));
+  // (the AO's occluder mask: open everywhere - the sea takes no AO, main.js)
+  g.setAttribute('canyonAO', new THREE.Float32BufferAttribute(new Float32Array(sp.length).fill(1), 1));
   g.setIndex(idx);
   return g;
 }
@@ -570,11 +572,17 @@ export class Ocean {
               float lod = 0.8 + 1.6 * smoothstep(30.0, 500.0, dist) + 1.2 * far;
               vec2 dy = vec2(0.0, exp2(lod) * seReflPx);
               vec2 rc = clamp(ruv, 0.001, 0.999);
-              vec3 rm = textureLod(seRefl, rc, lod).rgb * 0.4 + (textureLod(seRefl, rc + dy, lod).rgb + textureLod(seRefl, rc - dy, lod).rgb) * 0.3;
               // far off the sea mirrors the sky alone (and the lights' own streaks, worked out exactly below): the mirror's
               // far things - stacks, castles, causeways, their lights - a pixel or two each in it, came and went as the
-              // camera moved, the far reflections flickering
-              refl = mix(refl, rm, inScr * (1.0 - smoothstep(220.0, 650.0, dist)));
+              // camera moved, the far reflections flickering. (Read only where it shows, and an infinite texel thrown
+              // away: one - a light's highlight too bright for half floats - spread through the mips over whole blocks,
+              // and even weighted by nothing it made the sea black there: 0 x inf is no number - the black slabs)
+              float mw = inScr * (1.0 - smoothstep(220.0, 650.0, dist));
+              if (mw > 0.0) {
+                vec3 rm = textureLod(seRefl, rc, lod).rgb * 0.4 + (textureLod(seRefl, rc + dy, lod).rgb + textureLod(seRefl, rc - dy, lod).rgb) * 0.3;
+                if (!(rm.r < 1e4 && rm.g < 1e4 && rm.b < 1e4)) rm = refl;
+                refl = mix(refl, rm, mw);
+              }
             }
             // (the ripples finer than the pixels are left out of the glade, not turned into roughness: so widened it lay
             // over the whole sea as a white sheet, the dark reflections showing through it in black bands)

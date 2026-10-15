@@ -278,7 +278,11 @@ export class OceanWorld {
     scene.add(this.lightning.mesh);
     this.shafts = new Shafts();
     scene.add(this.shafts.mesh);
-    this.noAO.push(this.ocean.mesh, abyss, this.shafts.mesh);
+    this.noAO.push(abyss, this.shafts.mesh);
+    // the sea's surface is the AO's ground, not hidden from it: left out of its depth, the AO was worked out on what lies
+    // under the sea and painted onto the surface over it - the drowned deck, rocks and pylons seen through the water as
+    // dark shapes. In it as an occluder it hides them, and takes no AO itself (its canyonAO 1: main.js)
+    this.aoOccluders = [this.ocean.mesh];
     lap('sea');
     // the drowned city
     this.city = new City(this.track, this.grid, { dens: this.dens, avoid: [{ x: KEEPER.x, z: KEEPER.z, r: 300 }] });
