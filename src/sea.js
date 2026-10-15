@@ -578,7 +578,7 @@ export class Ocean {
             }
             // (the ripples finer than the pixels are left out of the glade, not turned into roughness: so widened it lay
             // over the whole sea as a white sheet, the dark reflections showing through it in black bands)
-            float rough = mix(0.17, 0.3, far), a2 = rough * rough * rough * rough;
+            float rough = mix(0.17, 0.32, smoothstep(60.0, 900.0, dist)), a2 = rough * rough * rough * rough;
             // the highlights ride the waves big on the screen and, near, the ripples: past ~100 m every finer slope put
             // the glints somewhere new with each step of the camera - the moon's glade and the lamps' streaks boiled
             vec3 Nh = normalize(vec3(sNC.x, 1.0, sNC.y) + vec3(sl.x, 0.0, sl.y) * (1.0 - smoothstep(40.0, 160.0, dist)));
@@ -604,7 +604,12 @@ export class Ocean {
               float Fl = 0.02 + 0.98 * pow(1.0 - max(dot(hh, V), 0.0), 5.0);
               c += seLC[i] * lp.w * (ar / (3.14159 * dl * dl)) * Fl * max(dot(Ns, l), 0.0) / max(4.0 * nv, 0.12) / d2;
             }
-            float a = F;
+            // (how much of the sea's own light comes up through the surface: never more than a flat sea would let in at this
+            // angle - at a grazing view the waves' facets turned toward the eye let it see in sideways, straight to the
+            // drowned feet of a far sea stack, black bands under it; no ray goes in so shallow: the water's own colour)
+            float Ff = 0.02 + 0.98 * pow(1.0 - clamp(V.y, 0.0, 1.0), 5.0);
+            float a = max(F, Ff);
+            c += SE_MURK * 0.6 * (a - F);
             c = mix(c, foamC, foam); a = mix(a, 1.0, foam * 0.92);
             c += bio;
             seAir(cameraPosition, -V, dist, T, L);

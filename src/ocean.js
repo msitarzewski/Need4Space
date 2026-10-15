@@ -578,6 +578,7 @@ export class OceanWorld {
     g.computeVertexNormals();
     const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x2a3036, roughness: 0.55, metalness: 0.5 }));
     m.name = 'pylons';
+    this.pylons = m;
     m.layers.set(2); m.layers.enable(6);
     m.castShadow = m.receiveShadow = true;
     scene.add(m);
@@ -736,11 +737,15 @@ export class OceanWorld {
     }
   }
 
-  // before each frame's draw: the sea's mirror (main.js), with what lies under the sea left out of it
+  // before each frame's draw: the sea's mirror (main.js), with what lies under the sea left out of it - and the dark
+  // bulk of the track over it (its belly, girders, walls, the pylons): backlit by the moon they are black, and mirrored
+  // in its glade the waves cut them into black slabs ("the black bug"). Its lights - strips, lamps, gantries - stay in
   preRender(renderer) {
     if (!this.mirrorOn || !this.cam) return;
+    const tp = this.track.parts;
     const under = (this._under ||= [...this.city.parts, this.cityMeshes.halo, this.cityMeshes.street, this.cityMeshes.glow, this.shafts.mesh,
-      this.life.shoal, this.life.jelly, this.life.snow, this.life.giant.mesh, ...this.scene.children.filter((o) => o.name === 'abyss')]);
+      this.life.shoal, this.life.jelly, this.life.snow, this.life.giant.mesh, ...this.scene.children.filter((o) => o.name === 'abyss'),
+      tp.under, ...tp.girders, ...tp.walls, this.pylons].filter(Boolean));
     this.ocean.reflect(renderer, this.scene, this.cam, this.sky, this.skyCam, this.fog, under);
   }
 
