@@ -64,8 +64,8 @@ class Zones {
   }
 
   // the inner surface (in from the skin by the frames' depth) on a piece's floor or roof at x (y; sign -1 the floor)
-  innerY(H, x, z, sign = -1) {
-    const q = H.inset(H.k(z), H.SKIN + H.RIBD + 1);
+  innerY(H, x, z, sign = -1, depth = H.SKIN + H.RIBD + 1) {
+    const q = H.inset(H.k(z), depth);
     let best = sign * -1e9;
     for (let i = 0; i < 8; i++) {
       const [ax, ay] = q[i], [bx, by] = q[(i + 1) % 8];
@@ -149,34 +149,77 @@ class Zones {
 
   // emergency lamps on the frames down both walls of a stretch, every other frame, at height y (skipping holes)
   wallLamps(H, z0, z1, y, every = 2, cols = ['red', 'red', 'amber']) {
-    const q = H.inset(1, H.SKIN + H.RIBD + 0.9);
     let k = 0;
     for (let z = Math.ceil((z0 - H.ribFrom) / H.RIB) * H.RIB + H.ribFrom; z < z1; z += H.RIB * every) for (const sd of [-1, 1]) {
-      const x = sd * this.halfWidth(q, y);
-      if (H.field(z, Math.atan2(y, x)) < 20 * H.scale) continue;
+      const q = H.inset(H.k(z), H.SKIN + H.RIBD + 0.9), x = sd * this.halfWidth(q, y);
+      if (H.field(z, Math.atan2(y, x)) < 20 * H.scale || !this.onFrame(H, q, z, x, y, 1.7)) continue;
       this.w.lamp(H, V(x, y, z), V(-sd, 0, 0), cols[k++ % cols.length], 1.2);
     }
   }
   // rings of small marker lights round the frames' flanges (every `every`-th frame), a light every ~22 m round: in the
   // dark the hall's shape is drawn by them, receding (no light of their own: only lit lenses, each failing its own way)
   markerRings(H, z0, z1, every = 4, col = 'red') {
-    const w = this.w, q = H.inset(1, H.SKIN + H.RIBD + 0.6 + 0.3), c = (LAMP[col] || col).map((x) => x * 0.4);
+    const w = this.w, c = (LAMP[col] || col).map((x) => x * 0.4);
     for (let z = Math.ceil((z0 - H.ribFrom) / (H.RIB * every)) * H.RIB * every + H.ribFrom; z < z1; z += H.RIB * every) {
+      const q = H.inset(H.k(z), H.SKIN + H.RIBD + 0.6 + 0.3);
       for (let i = 0; i < 8; i++) {
         const [ax, ay] = q[i], [bx, by] = q[(i + 1) % 8], L = Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.round(L / 22));
         const nIn = V(-H.OCTN[i][0], -H.OCTN[i][1], 0), tA = V(bx - ax, by - ay, 0).normalize();
         for (let k = 0; k < n; k++) {
           const t = (k + 0.5) / n, x = ax + (bx - ax) * t, y = ay + (by - ay) * t;
           if (H.inRibCut(z, Math.atan2(y, x)) || H.field(z, Math.atan2(y, x)) < -40 * H.scale) continue;
+          const bent = w.frameAt(H, z, i, t, 0.8 / L);           // (on a piece of frame still standing, not bent away)
+          if (bent === null || bent > 0.15) continue;
           w.box(H, F(V(x, y, z), tA, nIn, V(0, 0, 1)), 0.7, 0.18, 0.28, { kind: K_LAMP, paint: c, seed: 20000 + (w.markers = (w.markers || 0) + 1), b: 0, layer: 'main' });
         }
       }
     }
   }
 
-  // a flood: a big lamp (reaching ~280 m, lighting a hall) in a housing on a bracket, aimed along `out`
-  flood(H, p, out, col = 'amber', reach = 650, I = 1.2e6) {
-    this.w.lamp(H, p, out, col, 2.6, { reach, I, area: 90, layer: 'main' });
+  // how far the plating at local point p (on it, or just off it) is bent outward near a hole's edge (Wreck.peel), as a
+  // vector: what something set on the plate there must move by
+  curl(H, p) {
+    const ft = this.faceAt(H, p);
+    if (!ft) return V(0, 0, 0);
+    const info = {}, f = H.field(p.z, Math.atan2(p.y, p.x), info);
+    return this.faceN(H, ft[0], p.z).multiplyScalar(this.w.peel(H, p.z, ft[1], f, info.which, ft[0]));
+  }
+  // the face of the octagon the line from the axis through local p crosses, and where along it (0..1): [face, t]
+  faceAt(H, p) {
+    const q = H.inset(H.k(p.z), 0);
+    for (let face = 0; face < 8; face++) {
+      const [ax, ay] = q[face], [bx, by] = q[(face + 1) % 8], ex = bx - ax, ey = by - ay;
+      if (H.OCTN[face][0] * p.x + H.OCTN[face][1] * p.y <= 0) continue;
+      const den = ex * p.y - ey * p.x;
+      if (Math.abs(den) < 1e-9) continue;
+      const t = (p.x * ay - p.y * ax) / den;
+      if (t >= 0 && t <= 1) return [face, t];
+    }
+    return null;
+  }
+  // a face's outward normal at z (the tapered nose's own)
+  faceN(H, face, z) { return (H.taper > 0 && z < H.taper ? H.planes[8 + face].n : H.planes[face].n).clone(); }
+  // a hanger's mount on the plating's inner face straight above (sign 1) or below (-1) local point b: [point, normal]
+  plateMount(H, b, sign) {
+    const m = V(b.x, this.innerY(H, b.x, b.z, sign, H.SKIN - 0.1), b.z), ft = this.faceAt(H, m);
+    return [m.add(this.curl(H, m)), ft ? this.faceN(H, ft[0], m.z).negate() : V(0, -sign, 0)];
+  }
+
+  // the frame standing at (x, y) of inset octagon q at z (+-half m of it): not torn out, not bent away
+  onFrame(H, q, z, x, y, half = 0) {
+    for (let i = 0; i < 8; i++) {
+      const [ax, ay] = q[i], [bx, by] = q[(i + 1) % 8], L2 = (bx - ax) ** 2 + (by - ay) ** 2, t = ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / L2;
+      if (t < 0 || t > 1 || Math.hypot(ax + (bx - ax) * t - x, ay + (by - ay) * t - y) > 0.05) continue;
+      const bent = this.w.frameAt(H, z, i, t, half / Math.sqrt(L2));
+      return bent !== null && bent <= 0.15;
+    }
+    return false;
+  }
+
+  // a flood: a big lamp (reaching ~280 m, lighting a hall) in a housing on a hanger, aimed along `out`; mount(back) is
+  // where the hanger meets what holds it (default: straight up to the plating overhead)
+  flood(H, p, out, col = 'amber', reach = 650, I = 1.2e6, mount = (b) => this.plateMount(H, b, 1)) {
+    this.w.lamp(H, p, out, col, 2.6, { reach, I, area: 90, layer: 'main', mount });
   }
 
   halfWidth(q, y) {
@@ -242,11 +285,14 @@ class Zones {
     }
     for (const sx of [-1, 1]) w.lamp(H, V(h.x + sx * (h.r + 22), h.y + 24, zw - 1), V(0, 0, -1), 'amber', 2.2, { reach: 160, I: 5200 });
     // floods on the stern, between the bells, aimed at the main bell's mouth (what power is left); red lights on its rim
-    for (const sx of [-1, 1]) this.flood(H, V(sx * 120, 150, L + 4), V(-sx * 0.3, -0.5, 0.8).normalize(), 'amber');
+    for (const sx of [-1, 1]) this.flood(H, V(sx * 120, 150, L + 4), V(-sx * 0.3, -0.5, 0.8).normalize(), 'amber', 650, 1.2e6, (b) => [V(b.x, b.y, L - 0.1), V(0, 0, 1)]);
     for (let k = 0; k < 16; k++) {
       const a = (k / 16) * TAU;
       if (a > crack0 - 0.1 && a < crack1 + 0.1) continue;
-      w.lamp(H, V(h.x + Math.cos(a) * 155, h.y - Math.sin(a) * 155, L + len + 7), V(Math.cos(a), -Math.sin(a), 0.4).normalize(), 'red', 0.9, { sky: 1 });
+      // (on the rim's flat facet there: 48 round from crack1)
+      const seg = (crack0 + TAU - crack1) / 48, am = crack1 + (Math.floor((((a - crack1) % TAU) + TAU) % TAU / seg) + 0.5) * seg;
+      const rf = 154 * Math.cos(seg / 2) / Math.cos(a - am) + (0.45 * 0.9 - 0.03) / Math.cos(a - am);
+      w.lamp(H, V(h.x + Math.cos(a) * rf, h.y - Math.sin(a) * rf, L + len + 7), V(Math.cos(am), -Math.sin(am), 0), 'red', 0.9, { sky: 1, along: V(Math.sin(am), Math.cos(am), 0) });
     }
     // the bore's mouth inside: a collar of heavy brackets, torn
     for (let k = 0; k < 8; k++) {
@@ -556,7 +602,9 @@ class Zones {
         w.place('cradle', H, F(pc.clone().add(V(0, 1.1, 0)), ax, V(0, 1, 0), out), 1.6);
         w.place(R() < 0.15 ? 'fighterW' : 'fighter', H, F(pc.clone().add(V(0, 5.0, 0)), ax, V(0, 1, 0), out), 1.6, R() > 0.8 ? [0.9, 0.85, 0.8] : null);
       }
-      w.lamp(H, c.clone().add(V(0, n * 22 + 5, 0)).addScaledVector(out, 14), out.clone().add(V(0, -0.4, 0)).normalize(), 'cold', 1.6, { reach: 120, I: 6000 });
+      // its lamp on the top of a front corner post (clear of the fighter parked on the top deck), aimed out and down
+      const post = c.clone().addScaledVector(ax, 17).addScaledVector(out, 17), postTop = -150 + n * 22 + 3;
+      w.lamp(H, V(post.x, postTop + 1.4, post.z).addScaledVector(out, 0.5), out.clone().add(V(0, -0.4, 0)).normalize(), 'cold', 1.6, { reach: 120, I: 6000, mount: (b) => [V(b.x, postTop - 0.1, b.z), V(0, 1, 0)] });
     }
     // dropships on the deck in rows, on their rails; one knocked off its rail
     for (const sx of [-1, 1]) {
@@ -669,7 +717,10 @@ class Zones {
           if (lit) for (let zz = z; zz < Math.min(z + run, H.len - 10); zz += big ? 7 : 5) {
             if (!this.solid(H, face, u, zz, 0.01, 2, 3) || this.taken(H, face, u - 0.02, u + 0.02, zz - 2, zz + 2)) continue;
             const Fw = this.onHull(H, face, u, zz, 0.06);
-            w.box(H, Fw, big ? 1.6 : 1.0, 0.08, big ? 1.1 : 0.7, { kind: K_LAMP, paint: col.map((c) => c * (0.25 + R() * 0.2)), seed: R() < 0.3 ? id : 60002, b: 0, layer: 'main' });
+            // (its tint drawn first either way: the rest of the derelict's random stream stays as it was)
+            const paint = col.map((c) => c * (0.25 + R() * 0.2)), seed = R() < 0.3 ? id : 60002;
+            if (this.curl(H, Fw.o).lengthSq() > 0.3 * 0.3) continue;      // (not where the plate bends well out near a hole)
+            w.box(H, Fw, big ? 1.6 : 1.0, 0.08, big ? 1.1 : 0.7, { kind: K_LAMP, paint, seed, b: 0, layer: 'main' });
           }
           z += run + 20 + R() * 120;
         }
@@ -817,7 +868,7 @@ class Zones {
       w.cyl(B, a, b, 1.6, { kind: K_FRAME, paint: PAINT_FRAME, sky: 1, segs: 8 });
       if (snapped) w.cyl(B, b, b.clone().add(V(16, 6, 5)), 1.4, { kind: K_TORN, paint: PAINT_TORN, sky: 1, segs: 8, soot: 0.5 });
       else for (const y of [0.6, 0.85]) w.beam(B, V(dx - 9, 346 + h * y, dz), V(dx + 9, 346 + h * y, dz), 0.8, 0.8, V(0, 0, 1), { kind: K_FRAME, paint: PAINT_FRAME, sky: 1, layer: 'detail' });
-      if (!snapped) w.lamp(B, b.clone().add(V(0, 1.2, 0)), V(0, 1, 0), 'red', 1.4, { sky: 1, layer: 'main' });
+      if (!snapped) w.lamp(B, b.clone().add(V(0, 0.45 * 1.4 - 0.05, 0)), V(0, 1, 0), 'red', 1.4, { sky: 1, layer: 'main' });
     }
     const dp = V(40, 372, 930), dax = V(0.3, 1, -0.4).normalize(), dbx = new THREE.Vector3().crossVectors(dax, V(0, 0, 1)).normalize(), dbz = new THREE.Vector3().crossVectors(dbx, dax);
     w.cyl(B, V(40, 346, 930), dp, 2.6, { kind: K_MACH, paint: PAINT_MACH, sky: 1 });
@@ -981,7 +1032,8 @@ class Zones {
       if (H.hulk.how !== 'far') for (const [face, z] of [[0, H.len * 0.2], [4, H.len * 0.5], [0, H.len * 0.85]]) {
         if (!this.solid(H, face, 0.5, z, 0.1, 4, 3)) continue;
         const Fl = this.onHull(H, face, 0.5, z, 1.5);
-        w.lamp(H, Fl.o, Fl.ay.clone().multiplyScalar(0.35).addScaledVector(Fl.az, z > H.len / 2 ? -1 : 1).normalize(), R() < 0.5 ? 'amber' : 'cold', 1.6, { sky: 1, reach: 420, I: 2.6e5, area: 30, layer: 'main' });
+        const onPlate = (b) => { const m = b.clone().addScaledVector(Fl.ay, -b.clone().sub(Fl.o).dot(Fl.ay) - 1.5 - 0.1); return [m.add(this.curl(H, m)), Fl.ay.clone()]; };
+        w.lamp(H, Fl.o, Fl.ay.clone().multiplyScalar(0.35).addScaledVector(Fl.az, z > H.len / 2 ? -1 : 1).normalize(), R() < 0.5 ? 'amber' : 'cold', 1.6, { sky: 1, reach: 420, I: 2.6e5, area: 30, layer: 'main', mount: onPlate });
       }
     }
     // debris: shapes built once, adrift, round the way from the breach to the trench
@@ -1063,7 +1115,8 @@ class Zones {
     this.wallLamps(H, 380, 600, -80, 2, ['red']);
     this.wallLamps(H, 120, 600, 40, 3, ['red', 'amber']);
     this.markerRings(H, 60, 590, 3, 'red');
-    for (const [x, z] of [[-170, 420], [150, 200]]) this.flood(H, V(x, -this.innerY(H, x, z, 1) + 30, z), V(-x * 0.004, 0.6, 0.4).normalize(), 'amber', 520, 7e5);
+    for (const [x, z] of [[-170, 420], [150, 200]]) this.flood(H, V(x, -this.innerY(H, x, z, 1) + 30, z), V(-x * 0.004, 0.6, 0.4).normalize(), 'amber', 520, 7e5,
+      (b) => { const fl = this.floorAt(H, b.x, b.z); return fl !== undefined ? [V(b.x, fl - 0.1, b.z), V(0, 1, 0)] : this.plateMount(H, b, -1); });
   }
 }
 

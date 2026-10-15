@@ -2,6 +2,14 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.2.4', date: '16 Oct 2026', name: 'Lamps fixed in place',
+    notes: [
+      'No more lights floating in the space derelict: floodlights hang from the ceiling on rods',
+      'Marker lights only where their frame still stands; the red lights sit on the engine bell rim',
+      'Hangar tower lamps stand on the towers, out of the parked fighters',
+    ],
+  },
+  {
     version: '1.2.3', date: '15 Oct 2026', name: 'Derelict lights from afar',
     notes: [
       'The lamps in the space derelict light it from any distance, no more lights popping in as you come close',

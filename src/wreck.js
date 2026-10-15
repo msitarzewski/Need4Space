@@ -976,6 +976,8 @@ export class Wreck {
     const g = this.geo(H, z, layer), k = H.k(z), F0 = Wreck.F(new THREE.Vector3());
     const cutAt = (x, y) => H.inRibCut(z, Math.atan2(y, x)) || (tear && tear(Math.atan2(y, x)));
     const qs = prof.map(([d]) => H.inset(k, H.SKIN + d)), outerQ = H.inset(k, 0), piece = 4 * H.scale;
+    const runs = Array.from({ length: 8 }, () => []);                // (what frameAt reads)
+    (H.frameRuns ||= new Map()).set(Math.round(z * 100), runs);
     for (let i = 0; i < 8; i++) {
       const j = (i + 1) % 8, segL = Math.hypot(outerQ[j][0] - outerQ[i][0], outerQ[j][1] - outerQ[i][1]);
       const m = Math.max(1, Math.ceil(segL / piece)), gone = [];
@@ -987,9 +989,11 @@ export class Wreck {
         let q1 = q;
         while (q1 + 1 < m && !gone[q1 + 1]) q1++;
         const t0 = q / m, t1 = (q1 + 1) / m, bend0 = q > 0, bend1 = q1 < m - 1;
+        const bendAt = (t) => (3 + 2 * noise2(z * 0.3 + i, t * 9)) * H.scale;
+        runs[i].push([t0, t1, bend0 ? bendAt(t0) : 0, bend1 ? bendAt(t1) : 0]);
         const at = (e, t) => {
           const Q = qs[e], P = new THREE.Vector3(Q[i][0] + (Q[j][0] - Q[i][0]) * t, Q[i][1] + (Q[j][1] - Q[i][1]) * t, z + prof[e][1]);
-          const bend = (t === t0 && bend0) || (t === t1 && bend1) ? (3 + 2 * noise2(z * 0.3 + i, t * 9)) * H.scale : 0;
+          const bend = (t === t0 && bend0) || (t === t1 && bend1) ? bendAt(t) : 0;
           return P.addScaledVector(nOut, bend);
         };
         for (let e = 0; e < prof.length - 1; e++) {
@@ -1218,19 +1222,47 @@ export class Wreck {
   lamp(H, p, out, col, size = 1, o = {}) {
     const i = this.lamps.length;
     const ay0 = Math.abs(out.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
-    const az = out.clone().normalize(), ax = new THREE.Vector3().crossVectors(ay0, az).normalize();
+    // (its long side across ay0, or along o.along: a lamp on a narrow rim lies along it)
+    const az = out.clone().normalize(), ax = o.along ? o.along.clone().addScaledVector(az, -o.along.dot(az)).normalize() : new THREE.Vector3().crossVectors(ay0, az).normalize();
     const F = Wreck.F(p.clone(), ax, new THREE.Vector3().crossVectors(az, ax), az), c = LAMP[col] || col;
-    const layer = o.layer ?? (size >= 1.4 ? 'main' : 'detail');
+    const layer = o.layer ?? (size >= 1.4 ? 'main' : 'detail'), n0 = new Map([...this.chunks].map(([k, g]) => [k, g.n]));
     this.box(H, F, 1.4 * size, 0.5 * size, 0.45 * size, { kind: K_MACH, paint: PAINT_MACH, layer, sky: o.sky ?? 0 });
     // (its lit lens drawn as far as the plating it hangs on: in the detail layer it lit up only within 500 m)
     this.box(H, Wreck.F(p.clone().addScaledVector(az, 0.5 * size), F.ax, F.ay, F.az), 1.15 * size, 0.3 * size, 0.1 * size,
       { kind: K_LAMP, paint: c, seed: i, b: 0.03, layer: layer === 'detail' ? 'main' : layer });
     if (size >= 0.8) for (const k of [-1, 0, 1]) this.box(H, Wreck.F(p.clone().addScaledVector(az, 0.62 * size).addScaledVector(F.ax, k * 0.55 * size), F.ax, F.ay, F.az), 0.05 * size, 0.42 * size, 0.06 * size, { kind: K_FRAME, paint: PAINT_FRAME, layer: 'detail' });
+    // its hanger, when it stands off what holds it: a strut from the housing's back to o.mount(back) -> [a point just
+    // inside that surface, the surface's normal], a foot plate there flat on the surface
+    let foot = null;
+    if (o.mount) {
+      const back = p.clone().addScaledVector(az, -0.45 * size), [m, sn] = o.mount(back.clone());
+      if (m.distanceTo(back) > 0.05) {
+        const d = back.clone().sub(m).normalize(), up = Math.abs(d.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+        const ho = { kind: K_FRAME, paint: PAINT_FRAME, layer, sky: o.sky ?? 0 };
+        this.beam(H, m, back.clone().addScaledVector(az, 0.2 * size), 0.35 * size, 0.35 * size, up, ho);
+        const fn = (sn || d).clone().normalize(), fr = Math.abs(fn.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+        const fx = new THREE.Vector3().crossVectors(fr, fn).normalize();
+        this.box(H, Wreck.F(m.clone(), fx, new THREE.Vector3().crossVectors(fn, fx), fn), 0.6 * size, 0.6 * size, 0.12 * size, ho);
+        foot = H.toWorld(m.clone());
+      }
+    }
+    // (its own vertices, per chunk: what a check of what it rests on leaves out)
+    const own = [...this.chunks].filter(([k, g]) => g.n > (n0.get(k) || 0)).map(([k, g]) => [k, n0.get(k) || 0, g.n]);
     const w = H.toWorld(p.clone().addScaledVector(az, 1.5 * size), new THREE.Vector3());
     // its light: how far it reaches (m) and how bright; inside a hull it lights only what is inside
     const reach = o.reach ?? (size > 1.4 ? 110 : size < 1 ? 50 : 75), I = o.I ?? (size > 1.4 ? 2600 : size < 1 ? 380 : 900);
-    this.lamps.push({ p: w, col: c, i, reach, I, f: 1, size: o.area ?? 2, inside: o.sky !== 1 && this.within(w, -4) });
+    this.lamps.push({ p: w, col: c, i, reach, I, f: 1, size: o.area ?? 2, inside: o.sky !== 1 && this.within(w, -4),
+      at: H.toWorld(p.clone()), dir: H.dirWorld(az, new THREE.Vector3()), s: size, layer, foot, own });   // (the housing, its hanger's foot)
     return i;
+  }
+
+  // the frame at z on side i of the octagon, at t along it (0..1, from corner i), +-h of it: how far it is bent out
+  // there (0 on a straight stretch), or null where none stands (torn out, cut for a breach, no frame at z)
+  frameAt(H, z, i, t, h = 0) {
+    for (const [t0, t1, b0, b1] of H.frameRuns?.get(Math.round(z * 100))?.[i] || []) {
+      if (t - h >= t0 && t + h <= t1) return b0 + (b1 - b0) * (t - t0) / (t1 - t0);     // (a stretch is bent linearly between its ends)
+    }
+    return null;
   }
 
   // a world point inside a piece's hull (by margin m; negative: that far in)

@@ -523,3 +523,106 @@ export function blockCollect(q = 0.5) {
   if (!pending) { for (const [, q] of BL.plan) gl.deleteQuery(q); BL.plan = []; }
   return { pending, out };
 }
+
+// Lights that float: every lit lens of the derelict (lamp lenses, marker lights, lit windows, glowing bands) must rest
+// on something solid - one of its vertices within `near` m of other geometry - and on something drawn as far as the
+// lens is (a lens in 'main' on a 'detail' strut floats from 500 m on: within `far` m); every lamp's housing (or its
+// hanger's foot) must touch what holds it (`touch` m), its own parts left out. Before trusting it, breaks on purpose
+// (a lens in empty space, lamps lifted 1 m off their mounts) that it must report, or selfTest says FAILED.
+// Space only (the derelict).   P.floaters()  ->  { lenses, housings, selfTest, floating, farOnly, loose }
+export function floaters({ near = 0.3, far = 2.0, touch = 0.2 } = {}) {
+  const F = window.__feather, W = F.world.wreck, THREE = F.THREE;
+  if (!W) return { error: 'no derelict on this map' };
+  const K_LAMP = 6, RANGE = { detail: 500, main: 1800, relief: 2600, shell: 1e9, cast: 1e9 };
+  const pts = [], groups = [];
+  // the lenses: K_LAMP vertices joined by their triangles and shared corners, one piece each (any shape: boxes, bands)
+  for (const m of W.meshes) {
+    const [hull, , layer] = m.name.replace('wreck-', '').split('|'), P = m.geometry.attributes.position.array, A = m.geometry.attributes.wA.array;
+    const I = m.geometry.index.array, up = new Map(), at = new Map();
+    const root = (i) => { while (up.get(i) !== i) { up.set(i, up.get(up.get(i))); i = up.get(i); } return i; };
+    const join = (i, j) => { const a = root(i), b = root(j); if (a !== b) up.set(a, b); };
+    for (let t = 0; t < I.length; t += 3) {
+      if (A[I[t] * 4] !== K_LAMP) continue;
+      for (const i of [I[t], I[t + 1], I[t + 2]]) if (!up.has(i)) {
+        up.set(i, i);
+        const k = `${P[i * 3].toFixed(3)},${P[i * 3 + 1].toFixed(3)},${P[i * 3 + 2].toFixed(3)}`;
+        if (at.has(k)) join(i, at.get(k)); else { at.set(k, i); pts.push({ c: new THREE.Vector3().fromArray(P, i * 3), i }); }
+      }
+      join(I[t], I[t + 1]); join(I[t], I[t + 2]);
+    }
+    const byRoot = new Map();
+    for (const p of pts) if (p.i !== undefined && !p.g) {
+      const r = root(p.i);
+      if (!byRoot.has(r)) groups.push(byRoot.set(r, { kind: 'lens', range: RANGE[layer], hull, c: new THREE.Vector3(), n: 0, d: 1e9, dFar: 1e9 }).get(r));
+      const g = byRoot.get(r); p.g = g; g.c.add(p.c); g.n++;
+    }
+  }
+  // the housings: points down the middle from the centre to the back face (one of them on the mount's surface if it is
+  // set into it); a lamp on a hanger: its foot. lift: moved that far off what holds it (the breaks)
+  const lampGroup = (L, lift = 0) => {
+    const back = L.at.clone().addScaledVector(L.dir, -0.45 * L.s), up = L.foot ? back.clone().sub(L.foot).normalize() : L.dir;
+    const g = { kind: 'housing', lamp: L, d: 1e9, own: new Map(L.own.map(([k, a, b]) => ['wreck-' + k, [a, b]])) };
+    const cs = L.foot ? [L.foot.clone()] : [0, 0.25, 0.5, 0.75, 1].map((f) => L.at.clone().addScaledVector(L.dir, -f * 0.45 * L.s));
+    for (const c of cs) pts.push({ c: c.addScaledVector(up, lift), g });
+    return g;
+  };
+  const lamps = W.lamps.filter((L) => L.at && L.own);
+  for (const L of lamps) groups.push(lampGroup(L));
+  // the breaks on purpose
+  const box = new THREE.Box3(); for (const m of W.meshes) { if (!m.geometry.boundingBox) m.geometry.computeBoundingBox(); box.union(m.geometry.boundingBox); }
+  const brkLens = { kind: 'lens', range: 1800, hull: 'break', c: new THREE.Vector3(), n: 1, d: 1e9, dFar: 1e9 };
+  pts.push({ c: new THREE.Vector3(box.min.x, box.max.y + 3000, box.min.z), g: brkLens });
+  const lifted = lamps.filter((_, k) => k % 29 === 0).map((L) => [L, lampGroup(L, 0.45 * L.s + 1.0)]);
+  // a grid of the points (8 m); each triangle against the points near it
+  const G = 8, R = Math.max(far, near, touch) + 0.5, grid = new Map(), key = (x, y, z) => `${x},${y},${z}`;
+  pts.forEach((p, i) => { const k = key(Math.floor(p.c.x / G), Math.floor(p.c.y / G), Math.floor(p.c.z / G)); (grid.get(k) || grid.set(k, []).get(k)).push(i); });
+  const tri = new THREE.Triangle(), q = new THREE.Vector3(), cand = [];
+  const test = (a, b, c, isLens, range, mesh, i0) => {
+    const x0 = Math.min(a.x, b.x, c.x) - R, x1 = Math.max(a.x, b.x, c.x) + R, y0 = Math.min(a.y, b.y, c.y) - R, y1 = Math.max(a.y, b.y, c.y) + R, z0 = Math.min(a.z, b.z, c.z) - R, z1 = Math.max(a.z, b.z, c.z) + R;
+    const gx0 = Math.floor(x0 / G), gx1 = Math.floor(x1 / G), gy0 = Math.floor(y0 / G), gy1 = Math.floor(y1 / G), gz0 = Math.floor(z0 / G), gz1 = Math.floor(z1 / G);
+    cand.length = 0;
+    if ((gx1 - gx0 + 1) * (gy1 - gy0 + 1) * (gz1 - gz0 + 1) > 400) { pts.forEach((p, i) => { if (p.c.x > x0 && p.c.x < x1 && p.c.y > y0 && p.c.y < y1 && p.c.z > z0 && p.c.z < z1) cand.push(i); }); }
+    else for (let x = gx0; x <= gx1; x++) for (let y = gy0; y <= gy1; y++) for (let z = gz0; z <= gz1; z++) { const l = grid.get(key(x, y, z)); if (l) cand.push(...l); }
+    if (!cand.length) return;
+    tri.set(a, b, c);
+    for (const i of cand) {
+      const p = pts[i], g = p.g;
+      if (g.kind === 'lens') { if (isLens || (g.d <= near && g.dFar <= far)) continue; }
+      else { const o = mesh && g.own.get(mesh); if (o && i0 >= o[0] && i0 < o[1]) continue; }
+      tri.closestPointToPoint(p.c, q); const d = q.distanceTo(p.c);
+      if (d < g.d) g.d = d;
+      if (g.kind === 'lens' && range >= g.range && d < g.dFar) g.dFar = d;
+    }
+  };
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), M = new THREE.Matrix4(), s = new THREE.Sphere();
+  for (const m of W.meshes) {
+    const range = RANGE[m.name.split('|')[2]], g = m.geometry, P = g.attributes.position.array, A = g.attributes.wA.array, I = g.index?.array, nt = I ? I.length / 3 : P.length / 9;
+    for (let t = 0; t < nt; t++) {
+      const i0 = I ? I[t * 3] : t * 3, i1 = I ? I[t * 3 + 1] : t * 3 + 1, i2 = I ? I[t * 3 + 2] : t * 3 + 2;
+      test(a.fromArray(P, i0 * 3), b.fromArray(P, i1 * 3), c.fromArray(P, i2 * 3), A[i0 * 4] === K_LAMP, range, m.name, i0);
+    }
+  }
+  for (const m of W.instMeshes) {
+    const g = m.geometry; if (!g.boundingSphere) g.computeBoundingSphere();
+    const range = m.userData.range ?? 0, P = g.attributes.position.array, I = g.index?.array, nt = I ? I.length / 3 : P.length / 9;
+    for (let k = 0; k < m.count; k++) {
+      m.getMatrixAt(k, M); s.copy(g.boundingSphere).applyMatrix4(M); s.radius += R;
+      if (!pts.some((p) => s.containsPoint(p.c))) continue;
+      for (let t = 0; t < nt; t++) {
+        const i0 = I ? I[t * 3] : t * 3, i1 = I ? I[t * 3 + 1] : t * 3 + 1, i2 = I ? I[t * 3 + 2] : t * 3 + 2;
+        test(a.fromArray(P, i0 * 3).applyMatrix4(M), b.fromArray(P, i1 * 3).applyMatrix4(M), c.fromArray(P, i2 * 3).applyMatrix4(M), false, range, null, 0);
+      }
+    }
+  }
+  const fmt = (x) => (x >= 1e8 ? 'none' : +x.toFixed(2));
+  const where = (g) => { const c = g.c.clone().divideScalar(g.n), H = W.hulls.find((h) => h.name === g.hull); return { at: c.toArray().map(Math.round), hull: g.hull, local: H ? H.toLocal(c.clone()).toArray().map((x) => +x.toFixed(1)) : null }; };
+  const held = lifted.filter(([L]) => groups.find((g) => g.lamp === L).d <= touch);
+  const selfTest = brkLens.d > near && held.length > 0 && held.every(([, g]) => g.d > touch) ? 'ok' : 'FAILED: a break on purpose was not reported';
+  const lens = groups.filter((g) => g.kind === 'lens'), hs = groups.filter((g) => g.kind === 'housing');
+  return {
+    lenses: lens.length, housings: hs.length, selfTest,
+    floating: lens.filter((g) => g.d > near).map((g) => ({ ...where(g), gap: fmt(g.d) })),
+    farOnly: lens.filter((g) => g.d <= near && g.dFar > far).map((g) => ({ ...where(g), gapFar: fmt(g.dFar) })),
+    loose: hs.filter((g) => g.d > touch).map((g) => ({ lamp: g.lamp.i, at: g.lamp.at.toArray().map(Math.round), size: g.lamp.s, layer: g.lamp.layer, hanger: !!g.lamp.foot, gap: fmt(g.d) })),
+  };
+}
