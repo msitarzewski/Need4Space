@@ -880,3 +880,95 @@ export class LensWaterPass extends Pass {
     this.quad.render(renderer);
   }
 }
+
+// The engines' heat: the air behind every nozzle bends what is seen through it, rippling back with the gas - harder
+// with more thrust and on boost. Each source is a cone in the world from its nozzle along its flame and on past it,
+// widening; a pixel's ray is bent as much as it passes close to a cone's axis, less towards the cone's far end, and the
+// bend is capped by how big the cone looks (a far rival's exhaust shimmers a pixel, not ten). Up to 16 sources, the
+// nearest (ship.js heatSources).
+const HEAT_NOISE = /* glsl */`
+float hH(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float hN(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hH(i), hH(i + vec3(1, 0, 0)), f.x), mix(hH(i + vec3(0, 1, 0)), hH(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(hH(i + vec3(0, 0, 1)), hH(i + vec3(1, 0, 1)), f.x), mix(hH(i + vec3(0, 1, 1)), hH(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}`;
+export class EngineHeatPass extends Pass {
+  constructor(max = 16) {
+    super();
+    this.needsSwap = true;
+    this.camera = null;
+    this.max = max;
+    this.list = [];
+    this.amount = 8;                                   // the bend at its strongest, in pixels at 1080p (each way: half)
+    this.quad = new FullScreenQuad(new THREE.ShaderMaterial({
+      uniforms: { tDiffuse: { value: null }, time: { value: 0 }, n: { value: 0 }, amount: { value: this.amount }, focal: { value: 1 },
+        hA: { value: Array.from({ length: max }, () => new THREE.Vector4()) }, hB: { value: Array.from({ length: max }, () => new THREE.Vector4()) },
+        camPos: { value: new THREE.Vector3() }, invProj: { value: new THREE.Matrix4() }, camRot: { value: new THREE.Matrix4() }, px: { value: new THREE.Vector2(1, 1) } },
+      vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+      fragmentShader: /* glsl */`
+        uniform sampler2D tDiffuse; uniform float time, amount, focal; uniform int n; uniform vec4 hA[${max}], hB[${max}];
+        uniform vec3 camPos; uniform mat4 invProj, camRot; uniform vec2 px; varying vec2 vUv;
+        ${HEAT_NOISE}
+        void main() {
+          vec2 uv = vUv;
+          if (n > 0) {
+            vec4 v = invProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
+            vec3 d = normalize((camRot * vec4(normalize(v.xyz / v.w), 0.0)).xyz);
+            vec2 off = vec2(0.0);
+            for (int i = 0; i < ${max}; i++) {
+              if (i >= n) break;
+              // the cone: from the nozzle A along the flame (to hB.xyz) and a little past it; ra its radius at the nozzle
+              vec3 A = hA[i].xyz, U = hB[i].xyz - A;
+              float ra = hA[i].w, k = hB[i].w, Lf = length(U), L = Lf + 2.0 * ra;
+              vec3 ud = U / max(Lf, 1e-3), w0 = camPos - A;
+              float b = dot(d, ud), dd = dot(d, w0), e = dot(ud, w0);
+              float t = clamp((e - b * dd) / max(1.0 - b * b, 1e-4), 0.0, L);     // (where the ray passes closest)
+              float s = dot(A + ud * t - camPos, d);
+              if (s <= 0.0) continue;
+              vec3 P = camPos + d * s;
+              float r = ra * (1.3 + 1.7 * t / L), dist = length(P - A - ud * t);
+              if (dist >= r) continue;
+              float f = smoothstep(0.0, 1.0, 1.0 - dist / r);
+              float w = k * f * (1.0 - t / L) * smoothstep(2.0, 6.0, s) * min(1.0, ra * focal / s / 20.0);
+              w *= 1.0 - 0.6 * smoothstep(0.75, 0.97, abs(b));        // (down the exhaust from behind: the nozzle stays readable)
+              vec3 q = (P - A - ud * time * 5.0) / (ra * 0.7) + vec3(0.0, 0.0, time * 1.6);    // (rippling back with the gas)
+              off += vec2(hN(q) - 0.5, hN(q * 1.7 + 11.0) - 0.5) * w;
+            }
+            uv += clamp(off, -0.6, 0.6) * px * amount * (1.0 / px.y) / 1080.0;   // (several plumes over each other: no more than one's worth)
+          }
+          gl_FragColor = texture2D(tDiffuse, uv);
+        }`,
+    }));
+  }
+
+  // the sources this frame: each ship's (ship.heatSources), the nearest first
+  gather(camera, ships) {
+    const list = this.list, cp = camera.getWorldPosition(this._cp || (this._cp = new THREE.Vector3()));
+    list.length = 0;
+    for (const s of ships) s.heatSources((a, b, r, k) => {
+      const d = a.distanceTo(cp);
+      if (d < 400) list.push([d, a.x, a.y, a.z, r, b.x, b.y, b.z, k]);
+    });
+    list.sort((x, y) => x[0] - y[0]);
+    const u = this.quad.material.uniforms, n = Math.min(list.length, this.max);
+    for (let i = 0; i < n; i++) { const e = list[i]; u.hA.value[i].set(e[1], e[2], e[3], e[4]); u.hB.value[i].set(e[5], e[6], e[7], e[8]); }
+    u.n.value = n;
+  }
+
+  render(renderer, writeBuffer, readBuffer) {
+    const u = this.quad.material.uniforms, cam = this.camera;
+    u.tDiffuse.value = readBuffer.texture;
+    u.time.value = performance.now() / 1000;
+    u.amount.value = this.amount;
+    if (cam) {
+      u.invProj.value.copy(cam.projectionMatrixInverse);
+      u.camRot.value.extractRotation(cam.matrixWorld);
+      u.camPos.value.setFromMatrixPosition(cam.matrixWorld);
+      u.focal.value = readBuffer.height / (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2));
+    }
+    u.px.value.set(1 / readBuffer.width, 1 / readBuffer.height);
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    this.quad.render(renderer);
+  }
+}

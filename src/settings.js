@@ -6,21 +6,21 @@ export const DEFAULTS = { tonemap: 'aces', ao: true, bloom: true, shadows: 'high
   blur: true, reflections: true, streaks: true, ai: 'easy', music: 'high', sfx: 'high', aa: 'smaa', aoRes: 'auto',
   brakeLights: true, laptop: false, touch: 'auto', map: 'space', shafts: true, lensWater: true, iceSnow: true, iceDust: true, aurora: true,
   iceStorm: true, iceGeysers: true, wreckFx: true, wreckMist: true, drift: false, airPitch: true, sandFx: true, dustDevils: true, heatHaze: true,
-  sandstorm: true, caveFx: true, canyonAO: true };
+  sandstorm: true, caveFx: true, canyonAO: true, engineHeat: true, engineTrails: 'puffs', colossus: true };
 // Graphics quality presets ("low, which would be laptop, balanced in between, and high the actual default"): each sets
 // the rows below at once; a row changed by hand afterwards shows the preset as Custom. Low is Laptop mode (quality.js:
 // the lite shaders and fewer lights as well - tested on a Core Ultra 5 235U; the render scale stays at 100 %), High
 // the defaults. Balanced keeps every material and light and most of the look, and halves the costly parts: MSAA 2x,
 // AO at half resolution, medium shadows, no deck reflections, the heaviest weather left out.
 const PRESET_KEYS = ['laptop', 'scale', 'aa', 'ao', 'aoRes', 'reflections', 'shadows', 'streaks', 'blur', 'shafts', 'iceSnow', 'iceDust',
-  'iceGeysers', 'wreckFx', 'wreckMist', 'sandFx', 'dustDevils', 'heatHaze', 'caveFx'];
+  'iceGeysers', 'wreckFx', 'wreckMist', 'sandFx', 'dustDevils', 'heatHaze', 'caveFx', 'engineHeat', 'engineTrails'];
 export const PRESETS = {
   low: { laptop: true, scale: 1, aa: 'smaa1', ao: false, aoRes: 'auto', reflections: false, shadows: 'off', streaks: false, blur: false,
     shafts: false, iceSnow: false, iceDust: false, iceGeysers: false, wreckFx: false, wreckMist: false, sandFx: false, dustDevils: false,
-    heatHaze: false, caveFx: false },
+    heatHaze: false, caveFx: false, engineHeat: false, engineTrails: 'ribbon' },
   balanced: { laptop: false, scale: 1, aa: 'fast', ao: true, aoRes: 'half', reflections: false, shadows: 'medium', streaks: true, blur: true,
     shafts: true, iceSnow: true, iceDust: false, iceGeysers: true, wreckFx: true, wreckMist: false, sandFx: true, dustDevils: false,
-    heatHaze: false, caveFx: true },
+    heatHaze: false, caveFx: true, engineHeat: true, engineTrails: 'puffs' },
   high: Object.fromEntries(PRESET_KEYS.map((k) => [k, DEFAULTS[k]])),
 };
 // which preset the rows match now (or 'custom')
@@ -42,6 +42,8 @@ const ROWS = [
   ['canyonAO', 'Canyon shading (ice, desert; needs AO)', [[true, 'On'], [false, 'Off']]],
   ['bloom', 'Bloom', [[true, 'On'], [false, 'Off']]],
   ['reflections', 'Deck reflections (needs AO)', [[true, 'On'], [false, 'Off']]],
+  ['engineHeat', 'Engine heat shimmer', [[true, 'On'], [false, 'Off']]],
+  ['engineTrails', 'Engine trails', [['puffs', 'Glowing gas'], ['ribbon', 'Light ribbons']]],
   ['streaks', 'Light streaks', [[true, 'On'], [false, 'Off']]],
   ['blur', 'Speed blur', [[true, 'On'], [false, 'Off']]],
   ['shafts', 'Light shafts (forest moon, ice planet, desert)', [[true, 'On'], [false, 'Off']]],
@@ -80,6 +82,9 @@ export class Settings {
     let saved = null;
     try { saved = localStorage.getItem(KEY); Object.assign(this.v, JSON.parse(saved || '{}')); } catch { /* private window */ }
     if (!saved && integrated) Object.assign(this.v, PRESETS.low);
+    // a preset saved before a row joined it: that row as the preset has it (a Low player stays on Low, not Custom
+    // with a new effect on)
+    try { const sv = JSON.parse(saved || '{}'); if (PRESETS[sv.quality]) for (const k of PRESET_KEYS) if (!(k in sv)) this.v[k] = PRESETS[sv.quality][k]; } catch { /* as it is */ }
     delete this.v.beforeLaptop;                      // (what the old Laptop switch kept to restore: the presets do that now)
     this.v.quality = presetOf(this.v);
     // Normal is the default difficulty: a Hard saved before the player ever chose one goes back to it

@@ -24,7 +24,7 @@ import { TouchControls, isTouch } from './touch.js';
 import { FX } from './fx.js';
 import { HUD } from './hud.js';
 import { GameAudio } from './audio.js';
-import { agxPass, speedBlurPass, LayeredRenderPass, DeckSSRPass, StreakPass, BloomPass, ResamplePass, ShaftPass, LensWaterPass, GradePass } from './post.js';
+import { agxPass, speedBlurPass, LayeredRenderPass, DeckSSRPass, StreakPass, BloomPass, ResamplePass, ShaftPass, LensWaterPass, GradePass, EngineHeatPass } from './post.js';
 import { Settings, savedSettings } from './settings.js';
 import { Race, Driver } from './race.js';
 import { Menu } from './menu.js';
@@ -205,7 +205,8 @@ async function boot() {
   headlight.position.set(0, 0.9, -6.5);
   headlight.target.position.set(0, -4, -70);
   ship.root.add(headlight, headlight.target);
-  const rivalLights = [0, 1, 2].map(() => { const l = new THREE.PointLight(0xffffff, 0, 70, 1.6); scene.add(l); return l; });
+  const rivalLights = [0, 1, 2].map(() => { const l = new THREE.PointLight(0xffffff, 0, 70, 1.6); l.userData.rivalLight = true; scene.add(l); return l; });
+  const RIVAL_LIGHT = { y: 0.3, z: 9.5, cd: 320 };
   const input = new Input(canvas);
   const touch = new TouchControls(input);              // phones and tablets: sticks and buttons on screen (the setting)
   const fx = new FX(scene, camera);
@@ -344,6 +345,10 @@ async function boot() {
   // light shafts through the gaps of what stands in front of the sun (a map with air: the forest moon)
   const shafts = new ShaftPass();
   composer.addPass(shafts);
+  // the engines' heat shimmer - before the bloom, so the plumes' glow bends with the air behind them
+  const heat = new EngineHeatPass();
+  heat.camera = camera;
+  composer.addPass(heat);
   // only what is really bright, a tight halo (at 0.45 / threshold 1.1 every light strip hazed into white); the
   // dual-filter bloom (post.js): no squares round a glint
   const bloom = new BloomPass({ threshold: 2.6, knee: 1.0, strength: 0.9, radius: 0.62 });
@@ -375,6 +380,9 @@ async function boot() {
   // the render scale: the frame drawn at a fraction (or a multiple) of the screen's pixels, resampled to it here
   const resample = new ResamplePass();
   composer.addPass(resample);
+  // before each frame's draw (the world's matrices up to date): the engines' heat sources, every ship's
+  const fleet = () => (race ? race.entries.map((e) => e.ship) : [ship]);
+  const shipLook = () => { if (heat.enabled) heat.gather(camera, fleet()); };
   let pixelRatio = Math.min(devicePixelRatio, 2), renderScale = 1, blurOn = true, aoRes = 'auto';
   // half-size AO: asked for, or 'auto' with more than ~1440p of pixels to fill
   const applyAoRes = () => {
@@ -409,7 +417,7 @@ async function boot() {
         composer.setPixelRatio(pixelRatio * renderScale / 8);
         composer.setSize(innerWidth, innerHeight);
         composer.renderToScreen = false;
-        scene.updateMatrixWorld(); composer.render();
+        scene.updateMatrixWorld(); shipLook(); composer.render();
         composer.renderToScreen = true;
         restore();
         resize();
@@ -453,6 +461,8 @@ async function boot() {
     TrackRacer.drifting = v.drift !== false;
     TrackRacer.airPitch = v.airPitch !== false;
     bloom.enabled = v.bloom;
+    heat.enabled = v.engineHeat !== false;
+    Ship.trailStyle = v.engineTrails || 'puffs';
     blurOn = v.blur;
     Ship.brakeLights = v.brakeLights;
     const size = { high: 4096, medium: 2048 }[v.shadows];
@@ -557,7 +567,7 @@ async function boot() {
     lens.enabled = true;                               // (its shader too: else compiled at the first splash)
     for (const level of [0, 1]) {
       for (const [m, , levels] of lods) if (levels[level]) m.geometry = levels[level];
-      scene.updateMatrixWorld(); composer.render();
+      scene.updateMatrixWorld(); shipLook(); composer.render();
     }
     lens.enabled = false;
     for (const [m, g] of lods) m.geometry = g;
@@ -577,7 +587,7 @@ async function boot() {
   const _sprayV = new THREE.Vector3();
   const _sunP = new THREE.Vector3(), _camF = new THREE.Vector3();
   let acc = 0, last = performance.now();
-  const render = () => { scene.updateMatrixWorld(); composer.render(); };
+  const render = () => { scene.updateMatrixWorld(); shipLook(); composer.render(); };
   // drawn between the last two physics steps: at 144 Hz a frame got 0, 1 or 2 steps of 8.3 ms, and everything that
   // moves juddered against the camera
   const keep = (m) => {
@@ -592,7 +602,7 @@ async function boot() {
     (m.rCamQ ||= new THREE.Quaternion()).slerpQuaternions(m.pCamQ, m.camQ || m.q, a);
   };
   // test hooks: __feather.state(), __feather.advance(seconds) (ticks without frames), __feather.shot(name)
-  window.__feather = { ship, flight, racer, race, rig, world, track, input, lap, THREE, scene, renderer, composer, bloom, gtao, ssr, streaks,
+  window.__feather = { ship, flight, racer, race, rig, world, track, input, lap, THREE, scene, renderer, composer, bloom, gtao, ssr, streaks, heat, RIVAL_LIGHT,
     agx, camera, fx, settings, render, audio,
     get ctl() { return ctl; }, get mode() { return mode; }, setMode, get rewarming() { return warming; },
     state: () => ({ mode, x: ctl.pos.x, y: ctl.pos.y, z: ctl.pos.z, s: racer ? racer.s : 0, lat: racer ? racer.x : 0,
@@ -846,9 +856,11 @@ async function boot() {
       rivalLights.forEach((l, k) => {
         const e = inCave[k];
         if (!e) { l.intensity = 0; return; }
-        l.position.set(0, 0.8, 7).applyMatrix4(e.ship.root.matrixWorld);
+        // (behind the nozzles, the engines' light on the road and the ship's tail: at 0.8 m over the ship's middle and
+        // 900 cd it lit its own hull white, "a very bright colour ... coming from the top of the ship")
+        l.position.set(0, RIVAL_LIGHT.y, RIVAL_LIGHT.z).applyMatrix4(e.ship.root.matrixWorld);
         l.color.copy(e.ship.engineColor).lerp(new THREE.Color(1, 1, 1), 0.35);
-        l.intensity = 900 * e.ship.power * (1 - track.caveLight(e.ship.root.position));
+        l.intensity = RIVAL_LIGHT.cd * e.ship.power * (1 - track.caveLight(e.ship.root.position));
       });
     }
     rig.update(dt, view, inp, ctl.boosting);

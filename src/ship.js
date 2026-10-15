@@ -113,6 +113,8 @@ function glowSprite() {
   return new THREE.SpriteMaterial({ map: t, blending: THREE.AdditiveBlending, depthWrite: false, color: 0xffffff });
 }
 
+const _hA = new THREE.Vector3(), _hB = new THREE.Vector3(), _hE = new THREE.Vector3();
+
 class Plume {
   // eng: the engine's colour (each team's own); reverse: a retro-jet firing forward out of an inlet
   constructor(parent, at, r, scale, eng = new THREE.Color(0.12, 0.42, 1.0), reverse = false) {
@@ -141,6 +143,7 @@ class Plume {
 
   update(t, power, thrust, boost) {
     const L = this.r * this.scale * (1.4 + 8 * thrust + 5 * boost);
+    this.heat = power > 0.01 ? power * (0.3 + 0.45 * thrust + 0.6 * boost) : 0;     // (the heat shimmer behind it)
     const w = 1 + 0.2 * thrust + 0.15 * boost;
     this.outer.scale.set(w, w, L);
     this.inner.scale.set(1, 1, L * (0.42 + 0.15 * boost));
@@ -237,10 +240,14 @@ class EngineTrail {
     const g = new THREE.BufferGeometry();
     this.pos = new Float32Array(n * 2 * 3);
     this.alpha = new Float32Array(n * 2);
+    this.age = new Float32Array(n * 2);                // 0 at the nozzle .. 1 at the end of its life
+    this.dist = new Float32Array(n * 2);               // metres back from the nozzle
     const side = new Float32Array(n * 2);
     for (let i = 0; i < n; i++) { side[i * 2] = 1; side[i * 2 + 1] = -1; }
     g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
     g.setAttribute('alpha', new THREE.BufferAttribute(this.alpha, 1));
+    g.setAttribute('age', new THREE.BufferAttribute(this.age, 1));
+    g.setAttribute('dist', new THREE.BufferAttribute(this.dist, 1));
     g.setAttribute('side', new THREE.BufferAttribute(side, 1));
     const idx = [];
     for (let i = 0; i < n - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
@@ -249,13 +256,23 @@ class EngineTrail {
     this.mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, side: THREE.DoubleSide,
       blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
-      uniforms: { colour: { value: colour.clone() }, hot: { value: colour.clone().lerp(white, 0.75) } },
-      vertexShader: /* glsl */`attribute float alpha; attribute float side; varying float vA; varying float vS;
-        void main() { vA = alpha; vS = side; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-      fragmentShader: /* glsl */`uniform vec3 colour, hot; varying float vA; varying float vS;
+      uniforms: { colour: { value: colour.clone() }, hot: { value: colour.clone().lerp(white, 0.75) },
+        tail: { value: colour.clone().multiplyScalar(0.6).lerp(new THREE.Color(0.45, 0.18, 1.0), 0.35) }, time: { value: 0 }, boost: { value: 0 } },
+      vertexShader: /* glsl */`attribute float alpha; attribute float side; attribute float age; attribute float dist;
+        varying float vA; varying float vS; varying float vF; varying float vD;
+        void main() { vA = alpha; vS = side; vF = age; vD = dist; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      // ("those look a bit flat": one even stripe of one colour.) A thin white-hot core in a soft glow; hot at the
+      // nozzle, cooling through the engine's colour to violet as it ages; faint pulses of light running back along it,
+      // stronger on boost - about as bright as it was
+      fragmentShader: /* glsl */`uniform vec3 colour, hot, tail; uniform float time, boost;
+        varying float vA; varying float vS; varying float vF; varying float vD;
         void main() {
-          float x = vS * vS, sheath = max(1.0 - x, 0.0);
-          gl_FragColor = vec4((colour * sheath * sheath * 0.9 + hot * exp(-x * 14.0) * 1.6) * vA, 1.0);
+          float x = vS * vS;
+          float glow = exp(-x * 3.0), core = exp(-x * mix(30.0, 22.0, boost));
+          vec3 c = mix(hot, colour, smoothstep(0.0, 0.35, vF));
+          c = mix(c, tail, smoothstep(0.4, 1.0, vF));
+          float pulse = 0.85 + (0.15 + 0.35 * boost) * pow(0.5 + 0.5 * sin(vD * 0.55 - time * 38.0), 3.0);
+          gl_FragColor = vec4((c * glow * 0.8 + hot * core * (1.4 + 0.8 * boost) * (1.0 - 0.6 * vF)) * pulse * vA, 1.0);
         }`,
     }));
     this.mesh.renderOrder = 2;
@@ -263,7 +280,7 @@ class EngineTrail {
     this.tan = new THREE.Vector3(); this.to = new THREE.Vector3(); this.sd = new THREE.Vector3();
   }
 
-  update(p, t, strength, width, life, cam) {
+  update(p, t, strength, width, life, cam, boost = 0) {
     const head = this.pts[0];
     if (head && head.p.distanceToSquared(p) > 900) this.pts.length = 0;           // a respawn: no streak across the map
     if (!this.pts.length || this.pts[0].p.distanceToSquared(this.pts[1] ? this.pts[1].p : p) > 2.0) {
@@ -272,6 +289,9 @@ class EngineTrail {
     } else { this.pts[0].p.copy(p); this.pts[0].t = t; }
     while (this.pts.length > this.n || (this.pts.length > 2 && t - this.pts[this.pts.length - 1].t > life)) this.spare.push(this.pts.pop());
     const { tan, to, sd } = this, m = this.pts.length;
+    const u = this.mesh.material.uniforms;
+    u.time.value = t; u.boost.value = boost;
+    let along = 0;
     for (let i = 0; i < this.n; i++) {
       const q = this.pts[Math.min(i, m - 1)], nb = this.pts[Math.min(i + 1, m - 1)], pr = this.pts[Math.min(Math.max(i - 1, 0), m - 1)];
       tan.subVectors(pr.p, nb.p);
@@ -280,20 +300,156 @@ class EngineTrail {
       const camD = to.length();
       sd.crossVectors(tan, to).normalize();
       const f = Math.min(1, (t - q.t) / life), w = width * (1 - 0.55 * f);
+      if (i > 0 && i < m) along += q.p.distanceTo(pr.p);
       const a = i < m && m > 1 ? strength * (1 - f) * (1 - f) * smoothstep(12, 45, camD) : 0;
       for (let k = 0; k < 2; k++) {
         const o = (i * 2 + k) * 3, sg = k ? -w : w;
         this.pos[o] = q.p.x + sd.x * sg; this.pos[o + 1] = q.p.y + sd.y * sg; this.pos[o + 2] = q.p.z + sd.z * sg;
         this.alpha[i * 2 + k] = a;
+        this.age[i * 2 + k] = f;
+        this.dist[i * 2 + k] = along;
       }
     }
     this.mesh.visible = strength > 0.005 && m > 1;
     if (this.mesh.visible) ribbonBounds(this.mesh.geometry, this.pos);
     this.mesh.geometry.attributes.position.needsUpdate = true;
     this.mesh.geometry.attributes.alpha.needsUpdate = true;
+    this.mesh.geometry.attributes.age.needsUpdate = true;
+    this.mesh.geometry.attributes.dist.needsUpdate = true;
   }
 
   clear() { this.pts.length = 0; }
+}
+
+// The engines' trails as glowing gas ("more realistic particles for the trail"): soft wispy puffs laid every few tens
+// of centimetres along the path each nozzle really flew (at 250 m/s a frame is 4 m of it), left hanging in the world,
+// each growing and drifting a little as it ages and cooling from white-hot through the engine's colour to violet;
+// overlapping, they read as one trail breaking up into wisps at its end. One mesh a ship (all its engines), every
+// puff written once at its birth - the shader works out its age, size, drift, colour and fade. Same length and about
+// the same light as the ribbons (EngineTrail, still the choice in Settings and on Low).
+let WISP = null;
+function wispTexture() {
+  if (WISP) return WISP;
+  const N = 128, c = document.createElement('canvas');
+  c.width = c.height = N;
+  const g = c.getContext('2d'), im = g.createImageData(N, N);
+  const h = (x, y) => { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); };
+  const vn = (x, y) => {
+    const i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+    const a = h(i % 8, j % 8), b = h((i + 1) % 8, j % 8), cc = h(i % 8, (j + 1) % 8), d = h((i + 1) % 8, (j + 1) % 8);
+    return a + (b - a) * u + (cc - a) * v + (a - b - cc + d) * u * v;
+  };
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const dx = (x + 0.5) / N * 2 - 1, dy = (y + 0.5) / N * 2 - 1, r = Math.hypot(dx, dy);
+    const fall = Math.max(0, 1 - r);
+    const n = 0.55 * vn(x / 16, y / 16) + 0.3 * vn(x / 8 + 3, y / 8 + 7) + 0.15 * vn(x / 4 + 5, y / 4 + 1);
+    const a = Math.pow(fall, 1.6) * (0.35 + 0.95 * n) * (0.6 + 0.4 * Math.exp(-r * r * 6));
+    const o = (y * N + x) * 4;
+    im.data[o] = im.data[o + 1] = im.data[o + 2] = 255; im.data[o + 3] = Math.round(255 * Math.min(1, a));
+  }
+  g.putImageData(im, 0, 0);
+  WISP = new THREE.CanvasTexture(c);
+  return WISP;
+}
+
+class ExhaustTrail {
+  constructor(scene, colour, engines, per = 220) {
+    const n = this.n = engines * per;
+    this.next = 0;
+    this.lo = Infinity; this.hi = -1;                  // what was written this frame
+    this.last = Array.from({ length: engines }, () => ({ p: new THREE.Vector3(), t: 0, on: false, acc: 0 }));
+    const quad = new THREE.PlaneGeometry(1, 1), g = new THREE.InstancedBufferGeometry();
+    g.index = quad.index;
+    g.setAttribute('position', quad.attributes.position);
+    g.setAttribute('uv', quad.attributes.uv);
+    this.P = new Float32Array(n * 3); this.V = new Float32Array(n * 3); this.A = new Float32Array(n * 4).fill(-1e6); this.S = new Float32Array(n);
+    for (const [k, arr, w] of [['iPos', this.P, 3], ['iVel', this.V, 3], ['iA', this.A, 4], ['iSeed', this.S, 1]]) {
+      g.setAttribute(k, new THREE.InstancedBufferAttribute(arr, w).setUsage(THREE.DynamicDrawUsage));
+    }
+    g.instanceCount = n;
+    const white = new THREE.Color(1, 1, 1);
+    this.mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false,
+      blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+      uniforms: { time: { value: 0 }, map: { value: wispTexture() }, colour: { value: colour.clone() }, hot: { value: colour.clone().lerp(white, 0.7) },
+        tail: { value: colour.clone().multiplyScalar(0.6).lerp(new THREE.Color(0.45, 0.18, 1.0), 0.35) } },
+      vertexShader: /* glsl */`
+        uniform float time;
+        attribute vec3 iPos; attribute vec3 iVel; attribute vec4 iA; attribute float iSeed;   // iA: born, life, size, light
+        varying vec2 vUv; varying float vF; varying float vA;
+        void main() {
+          float age = time - iA.x, f = age / iA.y;
+          vUv = uv; vF = f; vA = 0.0;
+          if (f < 0.0 || f >= 1.0 || iA.w <= 0.0) { gl_Position = vec4(0.0, 0.0, -2.0, 1.0); return; }
+          vec4 mv = modelViewMatrix * vec4(iPos + iVel * age, 1.0);
+          float sz = iA.z * (1.0 + 1.7 * f);                                  // the gas spreading as it goes
+          float rot = iSeed * 6.2832 + age * (iSeed - 0.5) * 4.0, c = cos(rot), s = sin(rot);
+          mv.xy += vec2(c * position.x - s * position.y, s * position.x + c * position.y) * sz;
+          // (the newest puffs, piled up just behind the nozzle, come in gently - on a rival ahead in the dark they burned
+          // into one bright blob of its engine's colour; none in the camera's face)
+          vA = iA.w * smoothstep(0.0, 0.16, f) * (1.0 - f) * (1.0 - f) * smoothstep(10.0, 35.0, -mv.z);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */`
+        uniform sampler2D map; uniform vec3 colour, hot, tail; varying vec2 vUv; varying float vF; varying float vA;
+        void main() {
+          float m = texture2D(map, vUv).a;
+          vec3 c = mix(hot * 0.95, colour, smoothstep(0.0, 0.3, vF));
+          c = mix(c, tail, smoothstep(0.35, 1.0, vF));
+          gl_FragColor = vec4(c * m * vA, 1.0);
+        }`,
+    }));
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 2;
+    scene.add(this.mesh);
+  }
+
+  // engine k's nozzle is at p (world) at time t: puffs along the way it came since the last frame
+  emit(k, p, t, strength, width, life, boost) {
+    const L = this.last[k];
+    if (!L.on || L.p.distanceToSquared(p) > 1600 || strength < 0.005) { L.p.copy(p); L.t = t; L.on = true; L.acc = 0; return; }
+    const d = L.p.distanceTo(p), size = width * (2.6 + 1.2 * boost), step = Math.max(0.25, size * 0.38);
+    let along = step - L.acc;
+    for (; along <= d; along += step) {
+      const a = along / d, i = this.next;
+      this.next = (this.next + 1) % this.n;
+      this.lo = Math.min(this.lo, i); this.hi = Math.max(this.hi, i);
+      const j = width * 0.35;
+      this.P[i * 3] = L.p.x + (p.x - L.p.x) * a + (Math.random() - 0.5) * j;
+      this.P[i * 3 + 1] = L.p.y + (p.y - L.p.y) * a + (Math.random() - 0.5) * j;
+      this.P[i * 3 + 2] = L.p.z + (p.z - L.p.z) * a + (Math.random() - 0.5) * j;
+      this.V[i * 3] = (Math.random() - 0.5) * 2.4; this.V[i * 3 + 1] = (Math.random() - 0.3) * 2.0; this.V[i * 3 + 2] = (Math.random() - 0.5) * 2.4;
+      this.A[i * 4] = L.t + (t - L.t) * a;
+      this.A[i * 4 + 1] = life * 1.25 * (0.75 + 0.5 * Math.random());
+      this.A[i * 4 + 2] = size * (0.75 + 0.5 * Math.random());
+      this.A[i * 4 + 3] = strength * (0.4 + 0.2 * boost) * (0.8 + 0.4 * Math.random());
+      this.S[i] = Math.random();
+    }
+    L.acc = d - (along - step);
+    L.p.copy(p); L.t = t;
+  }
+
+  // after every engine's emit this frame: the new puffs to the GPU, the clock on
+  finish(t) {
+    this.mesh.material.uniforms.time.value = t;
+    this.mesh.visible = true;
+    if (this.hi < 0) return;
+    const at = this.mesh.geometry.attributes, wrap = this.hi - this.lo > this.n / 2;   // (wrapped round the ring: all of it)
+    for (const [k, w] of [['iPos', 3], ['iVel', 3], ['iA', 4], ['iSeed', 1]]) {
+      const a = at[k];
+      a.clearUpdateRanges();
+      if (!wrap) a.addUpdateRange(this.lo * w, (this.hi - this.lo + 1) * w);
+      a.needsUpdate = true;
+    }
+    this.lo = Infinity; this.hi = -1;
+  }
+
+  clear() {
+    for (const L of this.last) L.on = false;
+    this.A.fill(-1e6);
+    const a = this.mesh.geometry.attributes.iA;
+    a.clearUpdateRanges(); a.needsUpdate = true;
+  }
 }
 
 // the ship's energy shield: invisible until hit, then a fresnel shell with hex cells, brightest round the point of
@@ -1103,12 +1259,17 @@ export class Ship {
     this.animate(dt, ctrl);
     // light trails off every nozzle: on with speed and thrust, longer and brighter on boost
     this.ensureTrails(scene);
+    const puffs = Ship.trailStyle !== 'ribbon';
     const tr = this.spin * smoothstep(60, 220, ctrl.speed) * (0.25 + 0.3 * clamp(thr, 0, 1) + 0.6 * clamp(boost + kick, 0, 1)) * (1 - 0.8 * brake);
     const nz = this._nz || (this._nz = new THREE.Vector3());
     this.plumes.forEach((pl, k) => {
       nz.copy(pl.outer.position).applyMatrix4(this.visual.matrixWorld);
-      this.engineTrails[k].update(nz, this.t, tr, pl.r * (0.2 + 0.12 * boost), 0.07 + 0.12 * clamp(boost + kick, 0, 1), camera);
+      const width = pl.r * (0.2 + 0.12 * boost), life = 0.07 + 0.12 * clamp(boost + kick, 0, 1), b = clamp(boost + kick, 0, 1);
+      if (puffs) this.exhaust.emit(k, nz, this.t, tr, width, life, b);
+      else this.engineTrails[k].update(nz, this.t, tr, width, life, camera, b);
     });
+    if (puffs) { this.exhaust.finish(this.t); for (const e of this.engineTrails) e.mesh.visible = false; }
+    else if (this.exhaust.mesh.visible) { this.exhaust.clear(); this.exhaust.mesh.visible = false; }
     // vortex trails from both tips when fast and pulling
     const s = smoothstep(80, 150, ctrl.speed) * (0.2 + 0.8 * smoothstep(0.15, 0.9, ctrl.turn));
     const tip = this._tip || (this._tip = new THREE.Vector3());
@@ -1207,13 +1368,27 @@ export class Ship {
   fxObjects() {
     return [...this.plumes, ...(this.retros || [])].flatMap((p) => [p.outer, p.inner, p.halo])
       .concat(this.brakeLights || [], this.shield ? [this.shield] : [], (this.trails || []).map((t) => t.mesh),
-        (this.engineTrails || []).map((t) => t.mesh));
+        (this.engineTrails || []).map((t) => t.mesh), this.exhaust ? [this.exhaust.mesh] : []);
+  }
+
+  // the hot gas behind each main engine, for the heat shimmer (post.js EngineHeatPass): add(nozzle, the flame's end,
+  // the radius at the nozzle, how hot) - world space, the vectors reused
+  heatSources(add) {
+    const a = _hA, b = _hB, e = _hE;
+    for (const p of this.plumes) {
+      if (!p.outer.visible || !(p.heat > 0.02)) continue;
+      p.outer.localToWorld(a.set(0, 0, 0));
+      p.outer.localToWorld(b.set(0, 0, 1));
+      p.outer.localToWorld(e.set(p.r * 1.02, 0, 0));
+      add(a, b, e.distanceTo(a), p.heat);
+    }
   }
 
   ensureTrails(scene) {
     if (!this.engineTrails) this.engineTrails = this.plumes.map(() => new EngineTrail(scene, this.engineColor));
+    if (!this.exhaust) this.exhaust = new ExhaustTrail(scene, this.engineColor || new THREE.Color(0.12, 0.42, 1.0), this.plumes.length);
     if (!this.trails) this.trails = [new Trail(scene), new Trail(scene)];
   }
 
-  clearTrails() { for (const t of [...(this.trails || []), ...(this.engineTrails || [])]) t.clear(); }
+  clearTrails() { for (const t of [...(this.trails || []), ...(this.engineTrails || []), ...(this.exhaust ? [this.exhaust] : [])]) t.clear(); }
 }
