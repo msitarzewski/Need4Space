@@ -1,10 +1,12 @@
 // The kraken off the start: a giant squid lying on the level crown of a sea stack ahead and to the left of the grid,
 // looking out at the track. Its head rests on the rim, two great eyes glowing; its mantle lies back over the crown and
 // rises behind it to the fins. Six arms and a tentacle grip down the rock into the sea, two arms and the other
-// tentacle are raised, curling slowly. Over minutes it creeps a way round the rock and back, its arms trailing; the
-// mantle breathes, the fins ripple, dark clouds pass over its skin and faint lights pulse out along it. Everything
-// moves on the GPU from the clock: each shape is built along its own line (the mantle's spine, each arm's) and the
-// shaders lay those lines on the rock (a table of its surface, angle x height, in a texture)
+// tentacle are raised, writhing, the tentacle now and then lashing out toward the track and coiling back. It creeps
+// round the rock and back, its arms trailing, and turns its head to watch a ship go by; waves of grip run down its arms,
+// lifting them off the stone; the mantle pumps, rising and swaying, the fins ripple, dark clouds pass over its skin and
+// lights pulse out along it. Everything moves on the GPU from the clock: each shape is built along its own line (the
+// mantle's spine, each arm's) and the shaders lay those lines on the rock (a table of its surface, angle x height, in a
+// texture)
 import * as THREE from 'three';
 import { LIFE_U } from './sealife.js';
 
@@ -36,9 +38,9 @@ const ARMS = [
   { at: -112, L: 112, r: 2.4, reach: -0.42, end: -14, lag: 20 },
   { at: -140, L: 116, r: 2.3, reach: -0.95, end: -14, lag: 26 },
   { at: -170, L: 118, r: 2.0, reach: -1.5, end: 22, lag: 34 },
-  { up: 1, at: 35, L: 62, r: 2.0, d0: [0.45, 0.85, 0.35], n: [0.3, -0.6, 0.75], bend: 0.6, curl: 1.9, sway: 0.3, rate: 0.15 },
-  { up: 1, at: 170, L: 56, r: 2.0, d0: [0.9, 0.3, -0.35], n: [0, 1, 0], bend: 0.2, curl: 2.4, sway: 0.28, rate: 0.13 },
-  { up: 1, at: 125, L: 96, r: 1.2, tent: 1, d0: [-0.3, 1, -0.5], n: [1, 0, 0.25], bend: -0.2, curl: 2.7, sway: 0.3, rate: 0.11 },
+  { up: 1, at: 35, L: 62, r: 2.0, d0: [0.45, 0.85, 0.35], n: [0.3, -0.6, 0.75], bend: 0.6, curl: 1.9, sway: 0.5, rate: 0.55 },
+  { up: 1, at: 170, L: 56, r: 2.0, d0: [0.9, 0.3, -0.35], n: [0, 1, 0], bend: 0.2, curl: 2.4, sway: 0.45, rate: 0.48 },
+  { up: 1, at: 125, L: 96, r: 1.2, tent: 1, d0: [-0.3, 1, -0.5], n: [1, 0, 0.25], bend: -0.2, curl: 2.7, sway: 0.4, rate: 0.4 },
 ];
 const NA = ARMS.length;
 
@@ -80,23 +82,23 @@ ${fpars}`)
 const SQ_V = /* glsl */`
 uniform vec3 sqC;
 uniform sampler2D sqRock;
-uniform vec4 sqY, sqP;
+uniform vec4 sqY, sqP;            // sqP: the angle it looks out at, how far it creeps either way and how fast, its head's turn
 const float sqK = ${K.toFixed(3)};
 vec3 sqRockAt(float a, float y) { return texture2D(sqRock, vec2(a / 6.2831853, clamp((y - sqY.x) / (sqY.y - sqY.x), 0.0, 1.0))).rgb; }
 float sqAng(float lag) { return sqP.x + sqP.y * sin(sqP.z * (lTime - lag)); }
 vec3 sqEr(float a) { return vec3(cos(a), 0.0, sin(a)); }
 vec3 sqEp(float a) { return vec3(-sin(a), 0.0, cos(a)); }
-// the mantle's line: in from the front of the head over the crown, then rising behind it to the tip; swinging a little
-// to the side toward its end, slowly
+// the mantle's line: in from the front of the head over the crown, then rising behind it to the tip; rising and
+// sinking and swinging to the side toward its end, a wave running along it
 vec3 sqDir(float s, vec3 er, vec3 ep) {
-  float al = 1.02 * smoothstep(0.34, 0.95, s) + 0.08 * sin(lTime * 0.13) * smoothstep(0.5, 1.0, s);
-  float be = 0.16 * sin(lTime * 0.083) * smoothstep(0.4, 1.0, s);
+  float al = 1.02 * smoothstep(0.34, 0.95, s) + (0.16 * sin(lTime * 0.35) + 0.05 * sin(lTime * 0.9 - s * 5.0)) * smoothstep(0.45, 1.0, s);
+  float be = (0.28 * sin(lTime * 0.21) + 0.08 * sin(lTime * 0.6 - s * 4.0)) * smoothstep(0.4, 1.0, s);
   return (ep * sin(be) - er * cos(be)) * cos(al) + vec3(0.0, sin(al), 0.0);
 }
 // its place and frame at s (R: its girth there - its underside lies on the stone): T along it to the tip, D up its
 // back, S to its side
 void sqSpine(float s, float R, out vec3 P, out vec3 T, out vec3 S, out vec3 D) {
-  float a = sqAng(0.0);
+  float a = sqAng(0.0) + sqP.w;
   vec3 er = sqEr(a), ep = sqEp(a);
   float crown = sqRockAt(a, sqY.y).b, rim = length(sqRockAt(a, crown - 1.0).rg);
   P = sqC + er * (rim + 2.0 * sqK) + vec3(0.0, crown + 4.06 * sqK, 0.0);
@@ -121,7 +123,7 @@ vec3 sqSkin(vec2 q, float back) {
   vec3 c = mix(vec3(0.075, 0.01, 0.014), vec3(0.15, 0.022, 0.045), n);
   c = mix(c, vec3(0.03, 0.005, 0.009), smoothstep(0.62, 0.8, sqN(q * 2.3 + 7.0)) * 0.8);
   c *= 0.8 + 0.4 * smoothstep(0.72, 0.9, sqN(q * 13.0));
-  c *= 0.7 + 0.3 * smoothstep(-0.3, 0.7, sin(q.x * 0.3 - lTime * 0.4 + n * 3.0));
+  c *= 0.7 + 0.3 * smoothstep(-0.3, 0.7, sin(q.x * 0.3 - lTime * 1.1 + n * 3.0));
   return mix(vec3(0.2, 0.11, 0.1), c, back);
 }
 float sqSpots(vec2 p, float dens) {
@@ -233,8 +235,8 @@ export class GiantSquid {
     this.U = {
       sqC: { value: new THREE.Vector3(x, 0, z) }, sqRock: { value: rockTex },
       sqY: { value: V4(y0, y1, ML, 0) },
-      // (it creeps 0.55 rad either way round the rock and back, over about 200 s)
-      sqP: { value: V4(face, 0.55, TAU / 200, 0) },
+      // (it creeps 0.5 rad either way round the rock and back, over 90 s; w: its head's turn toward a ship - update())
+      sqP: { value: V4(face, 0.5, TAU / 90, 0) },
       sqA: { value: [] }, sqB: { value: [] }, sqD: { value: [] }, sqN: { value: [] },
     };
     // per arm - A: raised?, its place round the mouth, length, root girth; B: (down the rock) reach, end height, phase,
@@ -279,26 +281,35 @@ float sqArmR(float u, int k) {
 vec3 sqArmRock(float u, int k, vec3 root, vec3 dir, float r) {
   vec4 A = sqA[k], B = sqB[k];
   float t = lTime;
-  float a = sqAng(B.w * u) + B.x * pow(min(u / 0.65, 1.0), 0.75) + 0.1 * sin(u * 7.0 + B.z + t * 0.05) * u;
+  float a = sqAng(B.w * u) + sqP.w * (1.0 - smoothstep(0.08, 0.5, u)) + B.x * pow(min(u / 0.65, 1.0), 0.75) + 0.09 * sin(u * 7.0 + B.z - t * 0.5) * u;
   float crown = sqRockAt(a, sqY.y).b;
   float y = mix(crown - 3.0, B.y, u) + 1.2 * sin(u * 9.0 - t * 0.35 + B.z) * u * (1.0 - u);
-  float rr = length(sqRockAt(a, y).rg) + r * 0.72 + 0.25 + 0.15 * sin(u * 26.0 - t * 0.7 + B.z) * smoothstep(0.1, 0.3, u);
-  float lift = step(0.0, B.y) * smoothstep(0.72, 1.0, u) * (6.0 + 2.5 * sin(t * 0.21 + B.z)) * sqK;
+  float rr = length(sqRockAt(a, y).rg) + r * 0.72 + 0.25 + 0.25 * sin(u * 26.0 - t * 2.2 + B.z) * smoothstep(0.1, 0.3, u);
+  // (a wave of grip running down it every ~12 s: the arm drawn up off the stone and laid down again)
+  rr += 1.8 * sqK * exp(-pow((u - fract(t * 0.08 + B.z * 0.31)) * 7.0, 2.0)) * smoothstep(0.1, 0.25, u);
+  float lift = step(0.0, B.y) * smoothstep(0.72, 1.0, u) * (6.0 + 3.5 * sin(t * 0.8 + B.z)) * sqK;
   rr += lift;
-  y += lift * (0.5 + 0.4 * sin(t * 0.17 + B.z * 2.0));
+  y += lift * (0.5 + 0.4 * sin(t * 0.6 + B.z * 2.0));
   vec3 p = sqC + sqEr(a) * rr + vec3(0.0, y, 0.0);
   return mix(root + dir * (u * A.z), p, smoothstep(0.0, 0.13, u));
 }
 // raised: from its root along a line that bends one way, curls at its end and sways, the way it bends turning a little
 // (a slow wave running along it too, bending it in S curves)
 float sqTh(float w, vec4 B, float rate) {
-  return B.x * w + B.y * w * w * w + B.w * (sin(lTime * rate + B.z + w * 2.5) * w + 0.9 * sin(w * 6.0 - lTime * rate * 1.7 + B.z) * w * (1.0 - w));
+  return B.x * w + B.y * (1.0 + 0.3 * sin(lTime * rate * 0.7 + B.z)) * w * w * w
+    + B.w * (sin(lTime * rate + B.z + w * 2.5) * w + 0.9 * sin(w * 6.0 - lTime * rate * 1.7 + B.z) * w * (1.0 - w));
 }
 vec3 sqArmUp(float u, int k, vec3 root, mat3 Bs, out vec3 T, out vec3 Nin) {
   vec4 A = sqA[k], B = sqB[k];
   vec3 d0 = normalize(Bs * sqD[k].xyz), n = Bs * sqN[k].xyz;
+  // the tentacle's lash, every 16 s: out toward the track in a second, uncurling, then coiled back over five
+  if (sqD[k].w > 0.5) {
+    float p = fract(lTime / 16.0 + B.z * 0.1), st = smoothstep(0.0, 0.07, p) * (1.0 - smoothstep(0.12, 0.45, p));
+    d0 = normalize(d0 + Bs[0] * 1.3 * st);
+    B.x += 0.9 * st; B.y *= 1.0 - 0.8 * st;
+  }
   n = normalize(n - d0 * dot(n, d0));
-  float ps = 0.35 * sin(lTime * 0.05 + B.z);
+  float ps = 0.6 * sin(lTime * 0.23 + B.z);
   n = n * cos(ps) + cross(d0, n) * sin(ps);
   float rate = sqN[k].w, ds = u / 16.0;
   vec3 p = root;
@@ -326,7 +337,7 @@ vec3 sqArmUp(float u, int k, vec3 root, mat3 Bs, out vec3 T, out vec3 Nin) {
     N = normalize(o - T * dot(o, T));
     fl = 0.72;                                   // (pressed flat against the stone)
   } else {
-    float a0 = sqAng(0.0);
+    float a0 = sqAng(0.0) + sqP.w;
     vec3 Nin;
     c = sqArmUp(u, k, root, mat3(sqEr(a0), vec3(0.0, 1.0, 0.0), sqEp(a0)), T, Nin);
     N = -Nin;
@@ -352,7 +363,7 @@ vec3 sqArmUp(float u, int k, vec3 root, mat3 Bs, out vec3 T, out vec3 Nin) {
         emissive: /* glsl */`{
     float w = vUV.y - 6.2831853;
     float sp = sqSpots(vec2(vUV.x * vLen / 1.8, w * 1.3 + vArm * 3.1), 0.35) * smoothstep(0.3, 0.8, vOut);
-    float pulse = exp(-pow((vUV.x - fract(lTime * 0.045 + vArm * 0.137)) * 8.0, 2.0));
+    float pulse = exp(-pow((vUV.x - fract(lTime * 0.12 + vArm * 0.137)) * 8.0, 2.0));
     totalEmissiveRadiance += vec3(0.12, 0.55, 0.9) * sp * (0.15 + 1.5 * pulse);
   }`,
       });
@@ -368,9 +379,9 @@ vec3 sqArmUp(float u, int k, vec3 root, mat3 Bs, out vec3 T, out vec3 Nin) {
   vec3 P, T, S, D;
   sqSpine(aS.x, aS.y, P, T, S, D);
   // breathing: the mantle swelling and easing, slowly; the fins rippling, their edges most
-  float b = 1.0 + 0.06 * sin(lTime * 0.5) * smoothstep(0.16, 0.3, aS.x) * (1.0 - smoothstep(0.85, 1.0, aS.x));
+  float b = 1.0 + 0.08 * sin(lTime * 1.3) * smoothstep(0.16, 0.3, aS.x) * (1.0 - smoothstep(0.85, 1.0, aS.x));
   vec3 o = vec3(aO.xy * b, aO.z);
-  if (aPart > 1.5) o.y += pow(aS.z, 1.5) * 1.4 * sqK * sin(lTime * 0.8 - aS.x * 10.0);
+  if (aPart > 1.5) o.y += pow(aS.z, 1.5) * 1.8 * sqK * sin(lTime * 2.2 - aS.x * 10.0);
   transformed = P + S * o.x + D * o.y + T * o.z;
   objectNormal = normalize(S * normal.x + D * normal.y + T * normal.z);
   vS = aS; vO = aO; vLN = normal; vPart = aPart;`,
@@ -390,12 +401,12 @@ vec3 sqArmUp(float u, int k, vec3 root, mat3 Bs, out vec3 T, out vec3 Nin) {
     float z = vS.x * ${ML.toFixed(1)}, sx = smoothstep(0.4, 0.6, abs(vLN.x));
     float sp = mix(sqSpots(vec2(z, vO.x) / 1.6, 0.3), sqSpots(vec2(z, vO.y) / 1.6 + 17.0, 0.3), sx);
     sp *= smoothstep(0.0, 0.5, vLN.y) * step(vPart, 0.5) * step(0.17, vS.x);
-    float pulse = exp(-pow((vS.x - fract(lTime * 0.035)) * 6.0, 2.0));
+    float pulse = exp(-pow((vS.x - fract(lTime * 0.09)) * 6.0, 2.0));
     totalEmissiveRadiance += vec3(0.12, 0.55, 0.9) * sp * (0.15 + 1.4 * pulse);
     if (vPart > 0.5 && vPart < 1.5) {
       // the eye: a glowing amber iris streaked round a great dark pupil that widens and narrows, slowly
       vec3 L = normalize(vec3(sign(vO.x) * 0.8, 0.2, -0.56)), n = normalize(vLN);
-      float f = dot(n, L), pup = 0.9 - 0.025 * sin(lTime * 0.31);
+      float f = dot(n, L), pup = 0.9 - 0.03 * sin(lTime * 0.6);
       vec3 tA = normalize(cross(L, vec3(0.0, 1.0, 0.0))), tB = cross(L, tA);
       float ang = atan(dot(n, tB), dot(n, tA));
       float iris = smoothstep(0.64, 0.7, f) * (1.0 - smoothstep(pup - 0.02, pup + 0.01, f));
@@ -417,4 +428,14 @@ vec3 sqArmUp(float u, int k, vec3 root, mat3 Bs, out vec3 T, out vec3 Nin) {
   }
 
   setOn(on) { for (const m of this.meshes) m.visible = on; }
+
+  // every frame: its head turns to watch the camera go by (within ~0.7 rad of where it looks out, when within ~900 m)
+  update(dt, cam) {
+    const P = this.U.sqP.value, C = this.U.sqC.value, t = LIFE_U.lTime.value;
+    const look = P.x + P.y * Math.sin(P.z * t);
+    let d = Math.atan2(cam.z - C.z, cam.x - C.x) - look;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    const want = Math.hypot(cam.x - C.x, cam.z - C.z) < 900 ? Math.max(-0.7, Math.min(0.7, d)) : 0;
+    P.w += (want - P.w) * (1 - Math.exp(-Math.min(dt, 0.1) * 0.9));
+  }
 }

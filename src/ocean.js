@@ -984,6 +984,7 @@ export class OceanWorld {
     const pr = renderer ? renderer.getPixelRatio() * (this.renderScale || 1) : 1;
     this.life.update(t, dt, camera, s, this.level, ws, pr);
     this.seabed.update(t, this.level, ws.slice().sort((a, b) => a.pos.distanceToSquared(cp) - b.pos.distanceToSquared(cp)), pr, cp);
+    this.squid?.update(dt, camera.position);
     const tr = this.track, gi = tr.gantryIdx, sIdx = Math.floor(s / tr.step);
     gi.map((i) => ({ i, d: Math.min((i - sIdx + tr.n) % tr.n, (sIdx - i + tr.n) % tr.n) }))
       .sort((p, q) => p.d - q.d).slice(0, 3).forEach(({ i }, k) => {

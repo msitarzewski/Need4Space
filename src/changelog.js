@@ -2,6 +2,15 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.5.7', date: '16 Oct 2026', name: 'Teeming',
+    notes: [
+      'Twice the fish along the road under the sea, in more and bigger shoals',
+      'Big schools all round the track at every depth, and far more out over the abyss: clouds of fish in every direction',
+      'Fish are seen much further off - twice as far before the water swallows them',
+      'The giant squid comes alive: it turns its head to watch you pass, its arms writhe and grip their way down the rock, the mantle pumps and sways, and every so often the long tentacle lashes out toward the track',
+    ],
+  },
+  {
     version: '1.5.6', date: '16 Oct 2026', name: 'The kraken',
     notes: [
       'A giant squid lies on a great sea stack ahead and to the left of the grid: its head on the rim watching the track with glowing amber eyes, its mantle rising behind',

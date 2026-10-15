@@ -139,8 +139,10 @@ const inst = (base, attrs, count) => {
 // Fish too far off for their shape (or a whole school out over the abyss): each a glint as long as it is on the screen,
 // along the way it swims there, faintly lit of itself (lanternfish: a school reads as a shimmer of blue far off) and
 // flashing silver now and then as it turns. Never drawn thinner than a pixel or shorter than a pixel and a half: dimmed
-// in proportion instead, so a far school shimmers and never sparkles. The schools circle as the shoals' meshes do (the
-// same numbers: A x y z radius, B phase speed height length). d0..d1 its fade in, f0..f1 its fade out (m)
+// in proportion instead, so a far school shimmers and never sparkles - but never below a quarter, and the water dims
+// them only half as much as it dims everything else: schools read from far off, as clouds of glints. The schools circle
+// as the shoals' meshes do (the same numbers: A x y z radius, B phase speed height length). d0..d1 its fade in, f0..f1
+// its fade out (m)
 function fishPoints(A, B, n, { d0 = 0, d1 = 1, f0 = 650, f1 = 760 } = {}, Cc = null, Dg = null) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
@@ -167,11 +169,11 @@ function fishPoints(A, B, n, { d0 = 0, d1 = 1, f0 = 650, f1 = 760 } = {}, Cc = n
         vDir = length(sd) > 1e-6 ? normalize(sd) : vec2(1.0, 0.0);
         vE = vec3(lp, max(wp, 1.0), S);
         float flash = pow(0.5 + 0.5 * sin(lTime * 0.8 + iB.x * 13.0), 12.0);
-        float cover = min(1.0, lp / 1.5) * min(1.0, wp);
+        float cover = max(min(1.0, lp / 1.5) * min(1.0, wp), 0.25);
         float de = length(mv.xyz);                   // (as the meshes' cut: the distance, not the depth)
         float vis = smoothstep(fade.x, fade.y, de) * (1.0 - smoothstep(fade.z, fade.w, de)) * step(cameraPosition.y, lvl) * step(P.y, lvl - 1.0);
         vec3 glow = iD.rgb * (0.7 + 0.3 * sin(lTime * 1.7 + iB.x * 5.0));
-        vC = (iC.rgb * 0.22 + vec3(0.03, 0.12, 0.16) + vec3(0.35, 0.5, 0.55) * flash + glow) * cover * vis * seTrans(cameraPosition, P, lvl);
+        vC = (iC.rgb * 0.4 + vec3(0.05, 0.17, 0.22) + vec3(0.35, 0.5, 0.55) * flash + glow) * 1.25 * cover * vis * sqrt(seTrans(cameraPosition, P, lvl));
         gl_Position = projectionMatrix * mv;
         gl_PointSize = vis > 0.0 ? S : 0.0;
       }`,
@@ -495,7 +497,7 @@ export class Seabed {
       let lastS = -1e9;
       const g2 = {};
       for (const s of under) {
-        if (s - lastS < 45 + rnd() * 35) continue;
+        if (s - lastS < 28 + rnd() * 26) continue;
         lastS = s;
         tr.frame(s, f);
         // (some over the deck itself, high enough to part round the ships - and clear of the highest of the deck under
@@ -529,7 +531,7 @@ export class Seabed {
       const kind = () => { let u = rnd() * kw; for (const k of KINDS) { u -= k[6]; if (u <= 0) return k; } return KINDS[0]; };
       const Ar = [], Br = [], Cr = [], Dr = [];
       for (const [x, y, z, r] of spots) {
-        const K = kind(), dir = rnd() < 0.5 ? 1 : -1, sp = (K[5] + rnd() * 0.1) * dir, per = Math.max(8, Math.round(K[4] * D));
+        const K = kind(), dir = rnd() < 0.5 ? 1 : -1, sp = (K[5] + rnd() * 0.1) * dir, per = Math.max(8, Math.round(K[4] * 1.3 * D));
         const tint = 0.85 + rnd() * 0.3;
         for (let k = 0; k < per; k++) {
           Ar.push(x, y, z, r * (0.75 + rnd() * 0.5));
@@ -588,21 +590,25 @@ mat3 lfBasis(vec3 f, float roll) {
       this.shoals.frustumCulled = false;
       this.shoals.name = 'shoals-way';
       scene.add(this.shoals);
-      this.shoalsFar = fishPoints(A, B, n, { d0: 175, d1: 235, f0: 620, f1: 760 }, C, Dg);
+      this.shoalsFar = fishPoints(A, B, n, { d0: 175, d1: 235, f0: 1000, f1: 1200 }, C, Dg);
       this.shoalsFar.name = 'shoals-way-far';
       scene.add(this.shoalsFar);
-      // the schools out over the abyss and the city, off the way (160 - 520 m out): seen only from afar, as glints
+      // the schools all round the way, off it: big clouds 60 - 300 m out at every depth, and further ones out over the
+      // abyss and the city (180 - 750 m): seen only from some way off, as glints
       const far = [];
-      for (let k = 0; k < 800 && far.length < Math.round(100 * D); k++) {
+      const school = (lat0, lat1, gap, rMin, rMax, dy) => {
         const s = under[Math.floor(rnd() * under.length)];
         tr.frame(s, f);
-        const R = f.R.clone().setY(0).normalize(), lat = (rnd() < 0.5 ? -1 : 1) * (160 + rnd() * 360), x = f.P.x + R.x * lat, z = f.P.z + R.z * lat;
-        const r = 18 + rnd() * 30, floor = basin.height(x, z), y = Math.min(SEA_Y - 30 - r * 0.3, f.P.y + (rnd() - 0.3) * 120);
-        if (y < floor + 25 + r * 0.3) continue;
-        if (tr.P[tr.nearestIndex(new THREE.Vector3(x, y, z))].distanceTo(new THREE.Vector3(x, y, z)) < 130 + r) continue;
+        const R = f.R.clone().setY(0).normalize(), lat = (rnd() < 0.5 ? -1 : 1) * (lat0 + rnd() * (lat1 - lat0)), x = f.P.x + R.x * lat, z = f.P.z + R.z * lat;
+        const r = rMin + rnd() * (rMax - rMin), floor = basin.height(x, z), y = Math.min(SEA_Y - 30 - r * 0.3, f.P.y + (rnd() - 0.3) * dy);
+        if (y < floor + 20 + r * 0.3) return;
+        const p = new THREE.Vector3(x, y, z);
+        if (tr.P[tr.nearestIndex(p)].distanceTo(p) < gap + r) return;
         far.push([x, y, z, r]);
-      }
-      const per2 = 340, n2 = far.length * per2, A2 = new Float32Array(n2 * 4), B2 = new Float32Array(n2 * 4), C2 = new Float32Array(n2 * 4), D2 = new Float32Array(n2 * 4);
+      };
+      for (let k = 0; k < 2400 && far.length < Math.round(260 * D); k++) school(TRACK_W / 2 + 50, 300, 45, 10, 26, 90);
+      for (let k = 0; k < 2400 && far.length < Math.round(480 * D); k++) school(180, 750, 130, 18, 46, 150);
+      const per2 = 380, n2 = far.length * per2, A2 = new Float32Array(n2 * 4), B2 = new Float32Array(n2 * 4), C2 = new Float32Array(n2 * 4), D2 = new Float32Array(n2 * 4);
       let i = 0;
       for (const [x, y, z, r] of far) {
         const dir = rnd() < 0.5 ? 1 : -1, sp = (0.12 + rnd() * 0.1) * dir, K = rnd() < 0.4 ? KINDS[6 + Math.floor(rnd() * 2)] : kind();
@@ -613,7 +619,7 @@ mat3 lfBasis(vec3 f, float roll) {
           B2.set([rnd() * TAU, sp * (0.9 + rnd() * 0.2), (rnd() - 0.5) * r * 0.7, 0.7 + rnd() * 1.1], i * 4);
         }
       }
-      this.schools = fishPoints(A2, B2, n2, { d0: 0, d1: 1, f0: 700, f1: 820 }, C2, D2);
+      this.schools = fishPoints(A2, B2, n2, { d0: 45, d1: 75, f0: 1050, f1: 1250 }, C2, D2);
       this.schools.name = 'schools-far';
       scene.add(this.schools);
       console.info(`seabed: ${rocks.length} pinnacles, ${kelp.length} fronds, ${this.grass.geometry.instanceCount} tufts, ${n} fish in ${spots.length} shoals, ${n2} in ${far.length} schools far off`);
