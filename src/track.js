@@ -659,7 +659,7 @@ export class Track {
       const before = deckMat.onBeforeCompile;
       deckMat.onBeforeCompile = (sh) => {
         before(sh);
-        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nfloat deckMoss = 0.0;')
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nfloat deckMoss = 0.0, deckSeaWet = 0.0;')
           .replace('#include <map_fragment>', `#include <map_fragment>
   {
     float x = abs(vMapUv.x - 0.5) * ${TRACK_W.toFixed(1)}, along = vMapUv.y * 40.0, edge = ${(TRACK_W / 2).toFixed(1)} - x;
@@ -669,10 +669,14 @@ export class Track {
     deckMoss = smoothstep(0.42, 0.62, base * 0.85 + n1 * 0.45 + n2 * 0.25 - 0.35);
     ${TH.seaMoss ? `#ifdef USE_FOG
     deckMoss *= smoothstep(-4.0, -14.0, vFogWorld.y);
+    // (over the sea the deck dark and wet with the spray: a darker, cinematic night - the lamps' pools, the headlights
+    // and the glints off it stand out)
+    deckSeaWet = smoothstep(-1.0, 2.0, vFogWorld.y);
+    diffuseColor.rgb *= 1.0 - 0.42 * deckSeaWet;
     #endif` : ''}
     diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.035, 0.06, 0.015), vec3(0.08, 0.11, 0.025), n2), deckMoss);
   }`)
-          .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.95, deckMoss);');
+          .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.95, deckMoss) * (1.0 - 0.3 * deckSeaWet);');
       };
     }
     if (TH.frost) {

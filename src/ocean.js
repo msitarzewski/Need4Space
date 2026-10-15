@@ -320,6 +320,7 @@ export class OceanWorld {
     this.level = SEA_Y;
     this.nightLights = true;                         // (main.js: the ships' own lights on all the way round)
     this.headlight = { pos: [0, 0.55, -6.6], at: [0, -7.5, -36], angle: 0.62, penumbra: 0.8, distance: 170 };
+    this.headlightK = 0.5;                           // (the headlights at half: the night darker round them)
     // four real lights following the city's nearest big lamps: they light the ships and the deck going past
     this.cityLights = [0, 1, 2, 3].map(() => { const l = new THREE.PointLight(0xffffff, 0, 100, 2); scene.add(l); return l; });
     this.bigLamps = this.city.lamps.filter((L) => L.I >= 1300);
@@ -847,8 +848,9 @@ export class OceanWorld {
     this.dome.material.uniforms.under.value = Math.max(0, this.level - cp.y);
     const deep = smoothstep(0, 1.5, this.level - cp.y);
     this.underK = deep;                              // (audio.js: the sound heard through the water)
-    // the eye opening up in the dark of the deep (main.js: the exposure times this)
-    this.exposureK = 1 + 0.8 * smoothstep(10, 220, this.level - cp.y);
+    // the exposure: over the sea a darker night (the track's lights, the headlights and the moon carry it); the eye
+    // opening up in the dark of the deep (main.js: the exposure times this)
+    this.exposureK = 0.78 + 1.02 * smoothstep(10, 220, this.level - cp.y);
     this.heat.enabled = deep > 0;
     this.heat.quad.material.uniforms.time.value = t;
     this.heat.quad.material.uniforms.deep.value = deep;
@@ -876,7 +878,8 @@ export class OceanWorld {
     this.dome.material.uniforms.flashK.value = fk;
     this.dome.material.uniforms.flashDir.value.copy(this.lightning.dir);
     this.sun.intensity = SUN_E * (1 + 1.2 * fk * (cp.y > this.level ? 1 : 0.2));
-    this.scene.environmentIntensity = 1.8 * (1 + 0.8 * fk);
+    // (the sky's soft light weaker: the night's shadows deeper, the lights' pools stand out)
+    this.scene.environmentIntensity = 1.15 * (1 + 0.8 * fk);
     if (this.lightning.thunderAt && t > this.lightning.thunderAt) { this.lightning.thunderAt = 0; this.thunder = true; }
     if (this.beam) this.beam.rotation.y = -t * (Math.PI * 2 / 10);
     // the city's nearest big lamps as real lights (only under the sea, and only near)

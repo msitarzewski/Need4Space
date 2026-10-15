@@ -393,14 +393,26 @@ export class Seabed {
     {
       const spots = [];
       let lastS = -1e9;
+      const g2 = {};
       for (const s of under) {
         if (s - lastS < 70 + rnd() * 50) continue;
         lastS = s;
         tr.frame(s, f);
-        // (some over the deck itself, high enough to part round the ships; the rest off to the sides)
-        const lat = (rnd() - 0.5) * 2 * (TRACK_W / 2 + 45), over = Math.abs(lat) < TRACK_W / 2 + 6;
-        const y = over ? f.P.y + 9 + rnd() * 18 : f.P.y + (rnd() - 0.2) * 22;
-        spots.push([f.P.x + f.R.x * lat, y, f.P.z + f.R.z * lat, 8 + rnd() * 16]);
+        // (some over the deck itself, high enough to part round the ships - and clear of the highest of the deck under
+        // the whole circle they swim, which climbs and banks within it: set by the middle only, fish dipped into the
+        // road there, a tail standing out of it; the rest off to the sides, their circle clear of the track)
+        const r = 8 + rnd() * 16, lat0 = (rnd() - 0.5) * 2 * (TRACK_W / 2 + 45), over = Math.abs(lat0) < TRACK_W / 2 + 6;
+        let lat = lat0, y;
+        if (over) {
+          let top = -1e9;
+          for (let ds = -r - 6; ds <= r + 6; ds += 3) { tr.frame(tr.wrap(s + ds), g2); top = Math.max(top, g2.P.y + Math.abs(g2.R.y) * (TRACK_W / 2 + 1.5) + 1.5); }
+          tr.frame(s, f);
+          y = top + 8 + r * 0.25 + rnd() * 14;
+        } else {
+          lat = Math.sign(lat0) * Math.max(Math.abs(lat0), TRACK_W / 2 + 8 + r * 1.15);
+          y = f.P.y + (rnd() - 0.2) * 22;
+        }
+        spots.push([f.P.x + f.R.x * lat, y, f.P.z + f.R.z * lat, r]);
       }
       const per = Math.round(150 * D), n = spots.length * per, A = new Float32Array(n * 4), B = new Float32Array(n * 4);
       let i = 0;
@@ -425,8 +437,10 @@ export class Seabed {
   for (int i = 0; i < 4; i++) {
     vec3 dv = P - shipP[i].xyz;
     float d2 = dot(dv, dv), k = shipP[i].w * exp(-d2 / 140.0);
-    P += normalize(dv + vec3(0.001)) * k * 9.0;
-    F = normalize(F + normalize(dv + vec3(0.001)) * k * 3.0);
+    // (sideways only: pushed down they went into the road)
+    vec3 dh = normalize(vec3(dv.x, 0.0, dv.z) + vec3(0.001, 0.0, 0.0));
+    P += dh * k * 9.0;
+    F = normalize(F + dh * k * 3.0);
   }
   mat3 B = lfBasis(F, 0.0);
   vec3 q = position;

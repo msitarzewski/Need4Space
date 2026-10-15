@@ -972,7 +972,7 @@ async function boot() {
     rig.kick = fx.kick;
     if (track) {
       const dark = world.nightLights ? 1 : 1 - track.caveLight(ship.root.position);   // (a night map: the ships' own lights on all the way)
-      headlight.intensity = ship.power * 16000 * dark;          // only in the meteorite ("start flashlights only in the meteorite")
+      headlight.intensity = ship.power * 16000 * dark * (world.headlightK ?? 1);   // only in the meteorite ("start flashlights only in the meteorite"); a map may dim it
       for (const l of ship.exhaustLights) l.intensity *= 1 + 4 * dark;
       const inCave = race ? race.entries.filter((e) => !e.player && (world.nightLights || track.caveLight(e.ship.root.position) < 0.7))
         .sort((a, b) => a.ship.root.position.distanceToSquared(camera.position) - b.ship.root.position.distanceToSquared(camera.position)) : [];

@@ -2,6 +2,14 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.5.3', date: '16 Oct 2026', name: 'Darker night',
+    notes: [
+      'The ocean planet’s night is darker over the sea: the road dark and wet, the lamps’ pools and the headlights standing out',
+      'The ships’ headlights at half their strength on the ocean planet',
+      'No more fish tails sticking out of the road: the shoals keep clear of it',
+    ],
+  },
+  {
     version: '1.5.2', date: '16 Oct 2026', name: 'Sea mist',
     notes: [
       'A low mist lies over the sea all round: the far stacks, causeways and the edge of the world fade into it',
