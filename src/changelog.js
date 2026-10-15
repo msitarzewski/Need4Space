@@ -2,6 +2,14 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.5.0', date: '16 Oct 2026', name: 'Dark water',
+    notes: [
+      'The sea is dark water from above: the road under it, the rocks and the ships diving are no longer seen through it',
+      'Lights in the sea no longer blow out or swell and fade as you move: their reflections are steady and softer',
+      'Reflections sway less as you drive over the water',
+    ],
+  },
+  {
     version: '1.4.9', date: '16 Oct 2026', name: 'Solid water',
     notes: [
       'With ambient occlusion on, what lies under the sea no longer shows through the water as dark shapes',

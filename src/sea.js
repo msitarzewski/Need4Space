@@ -564,7 +564,7 @@ export class Ocean {
               // (bent by the long swells only, gently: by the short waves and the ripples too, everything mirrored in
               // the sea boiled as the camera ran over them)
               // (as three.js's Water: the bend falls off with distance - full only within ~25 m, none to speak of far off)
-              vec2 ruv = rp.xy / rp.w + sNL * 0.03 * min(1.0, 25.0 / dist);
+              vec2 ruv = rp.xy / rp.w + sNL * 0.015 * min(1.0, 25.0 / dist);
               float inScr = smoothstep(0.0, 0.02, min(min(ruv.x, 1.0 - ruv.x), min(ruv.y, 1.0 - ruv.y)));
               // (soft, more so further off, and drawn out up and down a little, as a rippled sea softens and draws out
               // what it mirrors: read from the mirror's mips, the taps a mip texel apart - no stripes, nothing that
@@ -581,6 +581,10 @@ export class Ocean {
               if (mw > 0.0) {
                 vec3 rm = textureLod(seRefl, rc, lod).rgb * 0.4 + (textureLod(seRefl, rc + dy, lod).rgb + textureLod(seRefl, rc - dy, lod).rgb) * 0.3;
                 if (!(rm.r < 1e4 && rm.g < 1e4 && rm.b < 1e4)) rm = refl;
+                // (a light in it no brighter than the glow's threshold: mirrored at full strength the lamps bloomed, and
+                // a small one, a pixel or two in the mirror, swelled and faded as it crossed the pixels - the lights in
+                // the water flickered and blew out as the camera moved; capped after the mips' averaging, they hold)
+                rm = min(rm, vec3(1.6));
                 refl = mix(refl, rm, mw);
               }
             }
@@ -610,13 +614,11 @@ export class Ocean {
               vec3 l = Lv * inversesqrt(d2), hh = normalize(l + V);
               float nhl = max(dot(Ns, hh), 0.0), ar = 0.012 + 0.025 * smoothstep(60.0, 500.0, dist), dl = nhl * nhl * (ar - 1.0) + 1.0;
               float Fl = 0.02 + 0.98 * pow(1.0 - max(dot(hh, V), 0.0), 5.0);
-              c += seLC[i] * lp.w * (ar / (3.14159 * dl * dl)) * Fl * max(dot(Ns, l), 0.0) / max(4.0 * nv, 0.12) / d2;
+              c += min(seLC[i] * lp.w * (ar / (3.14159 * dl * dl)) * Fl * max(dot(Ns, l), 0.0) / max(4.0 * nv, 0.12) / d2, vec3(1.6));
             }
-            // (how much of the sea's own light comes up through the surface: never more than a flat sea would let in at this
-            // angle - at a grazing view the waves' facets turned toward the eye let it see in sideways, straight to the
-            // drowned feet of a far sea stack, black bands under it; no ray goes in so shallow: the water's own colour)
-            float Ff = 0.02 + 0.98 * pow(1.0 - clamp(V.y, 0.0, 1.0), 5.0);
-            float a = max(F, Ff);
+            // (from above the sea is dark water: what lies under it - the drowned road, the rocks, the ships diving - is
+            // not seen through it; what the surface does not reflect is the water's own deep colour)
+            float a = max(F, 0.97);
             c += SE_MURK * 0.6 * (a - F);
             c = mix(c, foamC, foam); a = mix(a, 1.0, foam * 0.92);
             c += bio;

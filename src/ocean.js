@@ -666,40 +666,20 @@ export class OceanWorld {
     if (Math.abs(x) < TRACK_W_HALF + 4 && y > -6 && y < 6.5) p.addScaledVector(tr.U[i], 6.5 - y);
   }
 
-  // The lights that show in the sea as streaks of their own: of the big fixed lights near enough to the water - the
-  // lighthouse, the Keeper's lantern, the castles' braziers, the city's lamps out of the sea - the twelve that shine
-  // brightest at the camera. Each keeps its slot while it stays among the brightest and fades in and out of it. (The
-  // track's own lamps, barriers, gantries and the ships are in the sea's mirror: as streaks here too they were swapped
-  // in and out of the twelve every moment as the posts went by - the lights in the water flickered)
-  reflectLights(cp, dt = 1 / 60) {
-    const tr = this.track, cand = (this._cand ||= []), U = this.ocean.U;
-    cand.length = 0;
-    const key = (p) => `${Math.round(p.x)},${Math.round(p.y)},${Math.round(p.z)}`;
-    const add = (p, col, I, id = null) => { if (p.y > SEA_Y - 1 && p.y < SEA_Y + 120) cand.push({ p, col, I, k: I / Math.max(100, p.distanceToSquared(cp)), id: id ?? key(p) }); };
-    if (this.lightLamp) add(this.lightLamp.p, [1.0, 0.86, 0.62], 30000);
-    if (this.keeper) add(this.keeper.top, [1.0, 0.8, 0.55], 120000, 'keeper');
-    for (const L of this.castleLamps || []) add(L.p, L.col, L.I * 0.8);
-    for (const L of this.city.lamps) if (L.p.y > SEA_Y) add(L.p, L.col, Math.min(L.I, 20000));
-    cand.sort((a, b) => b.k - a.k);
-    const top = new Map(), keep = new Map();
-    cand.forEach((c, j) => { if (j < 12) top.set(c.id, c); if (j < 18) keep.set(c.id, c); });
-    const slots = (this._slots ||= Array.from({ length: 12 }, () => ({ id: null, w: 0, c: null, p: new THREE.Vector3() }))), fade = Math.min(1, dt / 0.35);
-    for (const sl of slots) {
-      if (sl.id === null) continue;
-      const c = keep.get(sl.id);
-      if (c) { sl.c = c; sl.p.copy(c.p); sl.w = Math.min(1, sl.w + fade); top.delete(sl.id); } else if ((sl.w -= fade) <= 0) { sl.id = null; sl.w = 0; }
+  // The lights that show in the sea as streaks of their own: the lighthouse's lantern and the Keeper's, always (the
+  // rest show in the sea's mirror). Picked before as the twelve brightest of every big light round the sea, the set
+  // changed all the time as the camera moved and the streaks swelled and faded in and out: the lights in the water
+  // flickered
+  reflectLights() {
+    const U = this.ocean.U, fixed = [];
+    if (this.lightLamp) fixed.push([this.lightLamp.p, [1.0, 0.86, 0.62], 30000]);
+    if (this.keeper) fixed.push([this.keeper.top, [1.0, 0.8, 0.55], 120000]);
+    for (let j = 0; j < 12; j++) {
+      const q = fixed[j];
+      if (!q) { U.seLP.value[j].set(0, -1e5, 0, 0); continue; }
+      U.seLP.value[j].set(q[0].x, q[0].y, q[0].z, q[2]);
+      U.seLC.value[j].set(q[1][0], q[1][1], q[1][2]);
     }
-    for (const c of top.values()) {
-      const sl = slots.find((q) => q.id === null);
-      if (!sl) break;
-      sl.id = c.id; sl.c = c; sl.p.copy(c.p); sl.w = fade;
-    }
-    slots.forEach((sl, j) => {
-      const c = sl.c;
-      if (sl.id === null || !c) { U.seLP.value[j].set(0, -1e5, 0, 0); return; }
-      U.seLP.value[j].set(sl.p.x, sl.p.y, sl.p.z, c.I * sl.w * sl.w * (3 - 2 * sl.w));     // (a fading light where it was last)
-      U.seLC.value[j].set(c.col[0], c.col[1], c.col[2]);
-    });
   }
 
   // (the race is handed over before the warm-up: the beams are made then, so their shaders compile with the rest)
@@ -847,7 +827,7 @@ export class OceanWorld {
         m.visible = sp.center.distanceTo(cp) - sp.radius < reach;
       }
     }
-    this.reflectLights(cp, dt);
+    this.reflectLights();
     this.shipBeams(cp);
     // the ships, for the life (splashes where they go into the sea or out of it, bubbles under it)
     const ws = this.shipsWet;
