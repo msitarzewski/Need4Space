@@ -6,7 +6,8 @@ export const DEFAULTS = { ship: 'feather', tonemap: 'aces', ao: true, bloom: tru
   blur: true, reflections: true, streaks: true, ai: 'easy', music: 'high', sfx: 'high', aa: 'smaa', aoRes: 'auto',
   brakeLights: true, laptop: false, touch: 'auto', map: 'space', shafts: true, lensWater: true, iceSnow: true, iceDust: true, aurora: true,
   iceStorm: true, iceGeysers: true, wreckFx: true, wreckMist: true, drift: false, airPitch: true, sandFx: true, dustDevils: true, heatHaze: true,
-  sandstorm: true, caveFx: true, canyonAO: true, engineHeat: true, engineTrails: 'puffs', colossus: true, nozzleMotion: true, showroom: true };
+  sandstorm: true, caveFx: true, canyonAO: true, engineHeat: true, engineTrails: 'puffs', colossus: true, nozzleMotion: true, showroom: true,
+  deckLight: true, hullShadows: true, engineFaces: 'dark', shipPaint: 'gloss', shipTrim: 'dark', shipAccents: true };
 // Graphics quality presets ("low, which would be laptop, balanced in between, and high the actual default"): each sets
 // the rows below at once; a row changed by hand afterwards shows the preset as Custom. Low is Laptop mode (quality.js:
 // the lite shaders and fewer lights as well - tested on a Core Ultra 5 235U; the render scale stays at 100 %), High
@@ -42,6 +43,12 @@ const ROWS = [
   ['canyonAO', 'Canyon shading (ice, desert; needs AO)', [[true, 'On'], [false, 'Off']]],
   ['bloom', 'Bloom', [[true, 'On'], [false, 'Off']]],
   ['reflections', 'Deck reflections (needs AO)', [[true, 'On'], [false, 'Off']]],
+  ['deckLight', 'Road light on the ships', [[true, 'On'], [false, 'Off']]],
+  ['hullShadows', 'Ship seam shadows', [[true, 'On'], [false, 'Off']]],
+  ['engineFaces', 'Engine faces', [['dark', 'Dark, ring glow only'], ['glow', 'Glowing']]],
+  ['shipPaint', 'Ship paint', [['gloss', 'Deep gloss, metal flake'], ['classic', 'Classic']]],
+  ['shipTrim', 'Ship metal trim', [['dark', 'Dark satin'], ['classic', 'Classic']]],
+  ['shipAccents', 'Ship accent lights', [[true, 'On'], [false, 'Off']]],
   ['engineHeat', 'Engine heat shimmer', [[true, 'On'], [false, 'Off']]],
   ['engineTrails', 'Engine trails', [['puffs', 'Glowing gas'], ['ribbon', 'Light ribbons']]],
   ['nozzleMotion', 'Rocket nozzle: spinning, folding teeth (Comet)', [[true, 'On'], [false, 'Off']]],

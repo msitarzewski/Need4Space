@@ -391,9 +391,48 @@ async function boot() {
   // the render scale: the frame drawn at a fraction (or a multiple) of the screen's pixels, resampled to it here
   const resample = new ResamplePass();
   composer.addPass(resample);
-  // before each frame's draw (the world's matrices up to date): the engines' heat sources, every ship's
   const fleet = () => (race ? race.entries.map((e) => e.ship) : [ship]);
-  const shipLook = () => { if (heat.enabled) heat.gather(camera, fleet()); };
+  // The deck's light on the ships (ship.js setDeckLight): the deck's mean colour, and per ship this frame the sun on the
+  // deck under it, the sky's share over it (none in a cave) and the engine lights, lamps and headlight round it.
+  const deckColour = track ? track.deckAlbedo(renderer) : new THREE.Color(0.25, 0.25, 0.25);
+  const deck = { k: 1, up: new THREE.Vector3(), sun: new THREE.Vector3(), E: new THREE.Color(), p: new THREE.Vector3() };
+  let deckLights = null;
+  // over a jump's gap the deck below is gone: 1 on the deck, down to a quarter 15 m into the gap
+  const deckGap = (s) => {
+    let k = 1;
+    for (const [s0, s1] of track.gaps) {
+      const d = track.wrap(s - s0), L = track.wrap(s1 - s0);
+      if (d <= L) k = Math.min(k, 1 - 0.75 * smoothstep(0, 15, Math.min(d, L - d)));
+    }
+    return k;
+  };
+  const deckLight = () => {
+    const sun = world.sun || world.sunL?.sun, D = deck;
+    if (sun) D.sun.copy(sun.position).sub(sun.target.position).normalize();
+    const lights = (deckLights ||= [...rivalLights, ...(world.lamps || []), ...fleet().flatMap((s) => s.exhaustLights)]);
+    for (const e of race ? race.entries : [{ ship, racer }]) {
+      const s = e.ship, p = s.root.position;
+      D.up.set(0, 1, 0).applyQuaternion(s.root.quaternion);
+      const cave = track ? track.caveLight(p) : 1;
+      D.E.setRGB(0, 0, 0);
+      if (sun) D.E.copy(sun.color).multiplyScalar(sun.intensity * Math.max(0, D.sun.dot(D.up)) * cave);
+      // a light's mean irradiance over the deck within 6 m of the ship, h over it, fading with its distance away
+      for (const l of lights) {
+        if (!l.visible || !(l.intensity > 0)) continue;
+        D.p.setFromMatrixPosition(l.matrixWorld).sub(p);                    // (the world's matrices are up to date)
+        const y = D.p.dot(D.up), h = Math.max(0.5, y + 1.2), r2 = D.p.lengthSq() - y * y;
+        const w = 2 * (1 - h / Math.sqrt(36 + h * h)) / 36 * Math.exp(-r2 / 64);
+        if (w > 1e-4) D.E.r += l.color.r * l.intensity * w, D.E.g += l.color.g * l.intensity * w, D.E.b += l.color.b * l.intensity * w;
+      }
+      // the player's headlight (the meteorite): its pool lies ahead, a little of it under the ship
+      if (s === ship && headlight.intensity > 0) D.E.r += headlight.color.r * headlight.intensity * 1e-4, D.E.g += headlight.color.g * headlight.intensity * 1e-4,
+        D.E.b += headlight.color.b * headlight.intensity * 1e-4;
+      const gap = track && e.racer ? deckGap(e.racer.s) : 1;
+      s.setDeckLight(D.up, deckColour, D.E, 0.012 + 0.988 * cave, deck.k * gap);
+    }
+  };
+  // before each frame's draw (the world's matrices up to date): every ship's deck light and the engines' heat sources
+  const shipLook = () => { deckLight(); if (heat.enabled) heat.gather(camera, fleet()); };
   let pixelRatio = Math.min(devicePixelRatio, 2), renderScale = 1, blurOn = true, aoRes = 'auto';
   // half-size AO: asked for, or 'auto' with more than ~1440p of pixels to fill
   const applyAoRes = () => {
@@ -477,6 +516,12 @@ async function boot() {
     Ship.nozzleMotion = v.nozzleMotion !== false;
     blurOn = v.blur;
     Ship.brakeLights = v.brakeLights;
+    deck.k = v.deckLight !== false ? 1 : 0;           // the deck's light on the ships
+    Ship.microShadow = v.hullShadows !== false ? 1 : 0;   // their seams and recesses shaded from the sun
+    Ship.engineFace = v.engineFaces === 'glow' ? 0 : 1;   // dark engine faces, the ring alone glowing
+    Ship.paintFinish = v.shipPaint === 'classic' ? 0 : 1;  // the deep gloss paint with its metal flake
+    Ship.trimFinish = v.shipTrim === 'classic' ? 0 : 1;    // the dark satin metal
+    Ship.accentLights = v.shipAccents !== false ? 1 : 0;   // the accent light strips
     const size = { high: 4096, medium: 2048 }[v.shadows];
     if (world.shadowMode) world.shadowMode(size, renderer, scene);
     else if (renderer.shadowMap.enabled !== !!size) {
@@ -648,7 +693,7 @@ async function boot() {
     (m.rCamQ ||= new THREE.Quaternion()).slerpQuaternions(m.pCamQ, m.camQ || m.q, a);
   };
   // test hooks: __feather.state(), __feather.advance(seconds) (ticks without frames), __feather.shot(name)
-  window.__feather = { ship, flight, racer, race, rig, world, track, input, lap, THREE, scene, renderer, composer, bloom, gtao, ssr, streaks, heat, RIVAL_LIGHT,
+  window.__feather = { ship, flight, racer, race, rig, world, track, input, lap, THREE, scene, renderer, composer, bloom, gtao, ssr, streaks, heat, RIVAL_LIGHT, deck,
     agx, camera, fx, settings, render, audio,
     get ctl() { return ctl; }, get mode() { return mode; }, setMode, get rewarming() { return warming; },
     state: () => ({ mode, x: ctl.pos.x, y: ctl.pos.y, z: ctl.pos.z, s: racer ? racer.s : 0, lat: racer ? racer.x : 0,
