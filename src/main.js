@@ -393,7 +393,7 @@ async function boot() {
   composer.addPass(resample);
   // before each frame's draw (the world's matrices up to date): the engines' heat sources, every ship's
   const fleet = () => (race ? race.entries.map((e) => e.ship) : [ship]);
-  const shipLook = () => { if (heat.enabled) heat.gather(camera, fleet()); };
+  const shipLook = () => { if (heat.enabled) { heat.amount = 8 * (1 + 2.4 * (world.underK || 0)); heat.gather(camera, fleet()); } };
   let pixelRatio = Math.min(devicePixelRatio, 2), renderScale = 1, blurOn = true, aoRes = 'auto';
   // half-size AO: asked for, or 'auto' with more than ~1440p of pixels to fill
   const applyAoRes = () => {
@@ -855,6 +855,7 @@ async function boot() {
     const focalPx = renderer.domElement.height * renderScale * (Q.lite ? 0.7 : 1) / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
     race?.visuals(dt, camera, fx, scene, focalPx);
     fx.exhaust(ship, ctl, dt);
+    fx.streaks.water = world.underK || 0;
     fx.update(dt, camera, ctl);
     const sb = blurOn ? 0.035 * smoothstep(160, 330, ctl.speed) + 0.03 * ctl.boosting + 0.04 * fx.kick : 0;
     blur.uniforms.strength.value = sb;

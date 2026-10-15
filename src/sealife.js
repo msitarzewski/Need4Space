@@ -281,7 +281,7 @@ export class SeaLife {
   constructor(scene, track, { city, stacks = [], dens = 1 } = {}) {
     this.track = track; this.city = city; this.dens = dens;
     const rnd = (this.rnd = mulberry32(5150));
-    this.spray = new Spray(Math.round(7000 * Math.max(0.5, dens)));
+    this.spray = new Spray(Math.round(16000 * Math.max(0.5, dens)));
     scene.add(this.spray.points);
     // ripple rings on the sea: the latest breaks (x, z, time, size) - the ocean draws them
     this.rings = Array.from({ length: 16 }, () => new THREE.Vector4(0, 0, -1e6, 0));
@@ -659,9 +659,14 @@ export class SeaLife {
         this.ring(p.x, p.z, t, sz);
       }
       e.under = under;
-      if (under && e.near) for (let k = 0; k < 3; k++) {
-        this.spray.add({ x: p.x - e.dir.x * 6 + (rnd() - 0.5) * 2, y: p.y + (rnd() - 0.5), z: p.z - e.dir.z * 6 + (rnd() - 0.5) * 2 },
-          (rnd() - 0.5) * 2, rnd(), (rnd() - 0.5) * 2, t, 3, 2);
+      // under the sea: the water churned off it - bubbles streaming from its engines and spun off its wingtips
+      if (under && e.near) {
+        const side = new THREE.Vector3(-e.dir.z, 0, e.dir.x);
+        for (let k = 0; k < 14; k++) {
+          const tip = k < 4 ? (k % 2 ? 1 : -1) * 5 : (rnd() - 0.5) * 3, back = k < 4 ? 2 + rnd() * 2 : 6 + rnd() * 3;
+          this.spray.add({ x: p.x - e.dir.x * back + side.x * tip, y: p.y + (rnd() - 0.5) * 1.2, z: p.z - e.dir.z * back + side.z * tip },
+            -e.dir.x * 6 * rnd() + (rnd() - 0.5) * 3, rnd() * 1.5, -e.dir.z * 6 * rnd() + (rnd() - 0.5) * 3, t, 3, 2);
+        }
       }
     }
     this.spray.flush();

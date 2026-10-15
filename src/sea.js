@@ -180,6 +180,15 @@ export function seaLight() {
 	iblIrradiance *= seAmb;
 	// deep down, the city's light all round: a blue fill (shapes read against the dark)
 	vec3 seFill = SE_FILL * smoothstep( 50.0, 220.0, SE_Y - vFogWorld.y );
+	// the lamps' and the ships' light rippling as the water moves (under the sea, near the camera)
+	{
+		float seZ = SE_Y - vFogWorld.y;
+		if ( seZ > 1.0 ) {
+			float rip = seCaustic( vFogWorld.xz * 1.6 + vFogWorld.y * 0.4, fogColor.g * 1.4 );
+			float near = 1.0 - smoothstep( 40.0, 90.0, distance( vFogWorld, cameraPosition ) );
+			reflectedLight.directDiffuse *= mix( 1.0, 0.55 + 0.45 * rip, near * smoothstep( 1.0, 4.0, seZ ) );
+		}
+	}
 	irradiance += seFill;
 	#if defined( RE_IndirectSpecular )
 		radiance = radiance * seAmb + seFill * 0.35;

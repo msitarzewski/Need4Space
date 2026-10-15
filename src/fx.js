@@ -200,11 +200,13 @@ class Streaks {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
     g.setAttribute('alpha', new THREE.BufferAttribute(this.alpha, 1));
+    // (water: under the sea they are motes of drifting life rushing past - short, dim, sea-green - not lines of light)
+    this.water = 0;
     this.lines = new THREE.LineSegments(g, new THREE.ShaderMaterial({
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { water: { value: 0 } },
       vertexShader: /* glsl */`attribute float alpha; varying float vA;
         void main() { vA = alpha; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-      fragmentShader: /* glsl */`varying float vA; void main() { gl_FragColor = vec4(vec3(0.85, 0.9, 1.0) * vA, 1.0); }`,
+      fragmentShader: /* glsl */`uniform float water; varying float vA; void main() { gl_FragColor = vec4(mix(vec3(0.85, 0.9, 1.0), vec3(0.3, 0.6, 0.58), water) * vA, 1.0); }`,
     }));
     this.lines.frustumCulled = false;
     this.lines.renderOrder = 4;
@@ -218,7 +220,8 @@ class Streaks {
 
   update(dt, speed, boost) {
     const on = smoothstep(110, 260, speed) * (0.45 + 0.55 * boost);
-    const len = Math.min(22, speed * 0.05);
+    const len = Math.min(22, speed * 0.05) * (1 - 0.8 * this.water);
+    this.lines.material.uniforms.water.value = this.water;
     for (let i = 0; i < this.n; i++) {
       const p = this.pts[i];
       p.z += speed * dt * p.k * 1.1;
@@ -226,7 +229,7 @@ class Streaks {
       const q = this.pts[i], o = i * 6;
       this.pos.set([q.x, q.y, q.z, q.x, q.y, q.z - len * q.k], o);
       const fade = smoothstep(-100, -60, q.z) * smoothstep(-1, -8, q.z);
-      this.alpha[i * 2] = on * fade * 0.28;
+      this.alpha[i * 2] = on * fade * 0.28 * (1 - 0.45 * this.water);
       this.alpha[i * 2 + 1] = 0;
     }
     this.lines.visible = on > 0.01;

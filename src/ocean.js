@@ -15,6 +15,7 @@ import { mesaGeometry, archGeometry } from './sandstone.js';
 import { sunOnly, setCave } from './look.js';
 import { City, lighthouseGeometry, stoneMaterial, castleGeometry, bakedGeometry } from './atlantis.js';
 import { SeaLife } from './sealife.js';
+import { Seabed } from './seabed.js';
 import { TrackGrid } from './spires.js';
 import { moonMesh } from './celestial.js';
 import { mulberry32, smoothstep, fbm } from './noise.js';
@@ -82,7 +83,7 @@ export const OCEAN_LAYOUT = layout(P, {
   // its light: cyan barriers and lanes, aqua strips, warm gantries
   theme: { field: [0.05, 0.7, 1.0], fieldFlash: [0.6, 0.95, 1.0], strip: [0.0, 0.45, 0.9], stripCore: [0.6, 0.95, 1.0],
     lane: [0.0, 0.55, 1.0], laneCore: [0.65, 0.92, 1.0], spill: [0.0, 0.38, 0.7], stud: [0.6, 1.6, 2.6], trim: [0.05, 0.7, 1.3],
-    gantry: [2.6, 1.9, 1.2], lamp: [2.8, 2.2, 1.5], flip: [0.1, 0.9, 0.95], moss: false, sand: false },
+    gantry: [2.6, 1.9, 1.2], lamp: [2.8, 2.2, 1.5], flip: [0.1, 0.9, 0.95], moss: false, sand: false, seaMoss: true },
 });
 
 // the sea stacks' rock: dark basalt, wet and black where the swell reaches, pale with salt and lichen up high, weed and
@@ -266,6 +267,9 @@ export class OceanWorld {
     this.life = new SeaLife(scene, this.track, { city: this.city, dens: this.dens });
     this.ocean.U.seRings.value = this.life.rings;
     this.noAO.push(...this.life.meshes);
+    // round the way under the sea: pinnacles, kelp, weed off the track's edges, sea grass, anemones, vents, shoals
+    this.seabed = new Seabed(scene, this.track, { grid: this.grid, basin: this.city.basin, keeper: KEEPER, rockMat: this.rockMat, dens: this.dens });
+    this.noAO.push(...this.seabed.meshes.filter((m) => m !== this.seabed.rocks));
     this.shipsWet = [];
     lap('life');
     this.worldShadow(scene);
@@ -542,6 +546,8 @@ export class OceanWorld {
 
   setOptions(v) {
     this.life.setOn(v.seaLife !== false);
+    this.seabed.setOn(v.seaLife !== false);
+    if (this.seabed.rocks) this.seabed.rocks.visible = true;
     this.mirrorOn = v.seaReflect !== false;
     this.stormOn = v.oceanStorm !== false;
     if (!this.mirrorOn) this.ocean.U.seReflOn.value = 0;
@@ -738,7 +744,9 @@ export class OceanWorld {
       w.dir.copy(e.racer.vel).normalize();
       w.near = w.pos.distanceTo(cp) < 160;
     });
-    this.life.update(t, dt, camera, s, this.level, ws, renderer ? renderer.getPixelRatio() * (this.renderScale || 1) : 1);
+    const pr = renderer ? renderer.getPixelRatio() * (this.renderScale || 1) : 1;
+    this.life.update(t, dt, camera, s, this.level, ws, pr);
+    this.seabed.update(t, this.level, ws.slice().sort((a, b) => a.pos.distanceToSquared(cp) - b.pos.distanceToSquared(cp)), pr, cp);
     const tr = this.track, gi = tr.gantryIdx, sIdx = Math.floor(s / tr.step);
     gi.map((i) => ({ i, d: Math.min((i - sIdx + tr.n) % tr.n, (sIdx - i + tr.n) % tr.n) }))
       .sort((p, q) => p.d - q.d).slice(0, 3).forEach(({ i }, k) => {

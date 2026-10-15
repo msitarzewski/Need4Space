@@ -624,8 +624,9 @@ export class Track {
         .replace('mapN.xy *= normalScale;', 'mapN.xy *= normalScale;\n  mapN.xy += (texture2D(detailNormal, vNormalMapUv * detailRep).xy * 2.0 - 1.0) * 0.45;')
         .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n' + SPECULAR_AA);
     };
-    if (TH.moss) {
-      // moss creeping in from both walls - in places a hand's width, in places metres - broken up, in the seams
+    if (TH.moss || TH.seaMoss) {
+      // moss creeping in from both walls - in places a hand's width, in places metres - broken up, in the seams (a sea
+      // map's: weed, and only where the deck is under the sea)
       const before = deckMat.onBeforeCompile;
       deckMat.onBeforeCompile = (sh) => {
         before(sh);
@@ -637,6 +638,9 @@ export class Track {
     float reach = 0.5 + 2.4 * smoothstep(0.4, 0.75, texture2D(detailMap, vec2(along / 97.0, 0.17)).r);
     float base = 1.0 - smoothstep(reach * 0.35, reach, edge);
     deckMoss = smoothstep(0.42, 0.62, base * 0.85 + n1 * 0.45 + n2 * 0.25 - 0.35);
+    ${TH.seaMoss ? `#ifdef USE_FOG
+    deckMoss *= smoothstep(-4.0, -14.0, vFogWorld.y);
+    #endif` : ''}
     diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.035, 0.06, 0.015), vec3(0.08, 0.11, 0.025), n2), deckMoss);
   }`)
           .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.95, deckMoss);');
@@ -701,7 +705,7 @@ float snN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
           .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.directSpecular = min(reflectedLight.directSpecular, vec3(0.8));');
       };
     }
-    deckMat.customProgramCacheKey = () => (TH.moss ? 'feather-deck-moss' : TH.frost ? 'feather-deck-frost' : TH.sand ? 'feather-deck-sand' : 'feather-deck');
+    deckMat.customProgramCacheKey = () => (TH.seaMoss ? 'feather-deck-seamoss' : TH.moss ? 'feather-deck-moss' : TH.frost ? 'feather-deck-frost' : TH.sand ? 'feather-deck-sand' : 'feather-deck');
     this.deckMat = deckMat;
     out.deck = new THREE.Mesh(top, deckMat);
     const E = W + WALL_T;
