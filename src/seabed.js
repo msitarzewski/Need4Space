@@ -54,31 +54,77 @@ function tuftGeometry() {
   g.computeVertexNormals();
   return g;
 }
-// A crab (1 = ~1 m across its shell): a broad low shell, eyes on stalks, four legs a side (thigh up and out, shin
-// down to the ground) and two claws held forward; 'leg' 0 the body, 1..8 the legs, 9 / 10 the claws (they step and
-// work: the shader). Its x across it (it walks that way, sideways), y up, z forward (its face)
-function crabGeometry() {
+// A crab (1 = ~1 m across its shell): the shell broad at the front and narrowing back, domed with a ridge, a row of
+// spines along its front edge; a pale belly plate under it; eyes on stalks; four legs a side in three joints to a
+// pointed tip; two claws held forward, each a heavy hand with a fixed finger and a moving one. Attributes: 'leg' (0
+// the body, 1..8 the legs, 9 / 10 the claws: they step and work in the shader), 'part' (0 shell, 1 belly, 2 legs,
+// 3 claw, 4 claw tips, 5 eyes: their colours). Its x across it (it walks that way, sideways), y up, z forward (its face)
+export function crabGeometry() {
   const parts = [];
-  const add = (g, leg) => { g.deleteAttribute('uv'); g.setAttribute('leg', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count).fill(leg), 1)); parts.push(g); };
-  add(new THREE.SphereGeometry(1, 16, 8).scale(0.5, 0.2, 0.38).translate(0, 0.32, 0), 0);
-  for (const sd of [-1, 1]) add(new THREE.CylinderGeometry(0.025, 0.03, 0.14, 5).translate(sd * 0.12, 0.5, 0.3), 0);
-  for (const sd of [-1, 1]) add(new THREE.SphereGeometry(0.05, 6, 4).translate(sd * 0.12, 0.58, 0.3), 0);
-  const seg = (a, b, r) => {
-    const d = new THREE.Vector3().subVectors(b, a), g = new THREE.CylinderGeometry(r * 0.8, r, d.length(), 5);
+  const add = (g, leg, part) => {
+    if (g.attributes.uv) g.deleteAttribute('uv');
+    if (g.index) g = g.toNonIndexed();
+    const n = g.attributes.position.count;
+    g.setAttribute('leg', new THREE.Float32BufferAttribute(new Float32Array(n).fill(leg), 1));
+    g.setAttribute('part', new THREE.Float32BufferAttribute(new Float32Array(n).fill(part), 1));
+    parts.push(g);
+  };
+  // the shell: a squashed sphere pushed into shape - wide in front, narrow behind, a ridge down the middle, the front
+  // edge raised in a lip
+  {
+    const g = new THREE.SphereGeometry(1, 28, 14), P = g.attributes.position;
+    for (let i = 0; i < P.count; i++) {
+      let x = P.getX(i), y = P.getY(i), z = P.getZ(i);
+      const front = Math.max(0, z), back = Math.max(0, -z);
+      x *= 0.52 * (1 + 0.22 * front - 0.28 * back);
+      z *= 0.4;
+      y = y > 0 ? y * 0.2 * (1 + 0.35 * Math.exp(-x * x * 40)) : y * 0.09;
+      y += 0.04 * front * front;
+      P.setXYZ(i, x, y + 0.36, z);
+    }
+    g.computeVertexNormals();
+    add(g, 0, 0);
+  }
+  // spines along the front edge, either side
+  for (const sd of [-1, 1]) for (let k = 0; k < 4; k++) {
+    const a = 0.25 + k * 0.28, g = new THREE.ConeGeometry(0.035, 0.12, 5).rotateZ(-sd * Math.PI / 2).rotateY(sd * a * 0.6);
+    add(g.translate(sd * (0.36 + k * 0.06), 0.37, 0.28 - k * 0.11), 0, 0);
+  }
+  // the belly plate
+  add(new THREE.SphereGeometry(1, 16, 6, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2).scale(0.4, 0.07, 0.3).translate(0, 0.33, -0.02), 0, 1);
+  // the eyes on their stalks
+  for (const sd of [-1, 1]) {
+    add(new THREE.CylinderGeometry(0.022, 0.03, 0.14, 6).rotateX(0.35).translate(sd * 0.1, 0.48, 0.33), 0, 0);
+    add(new THREE.SphereGeometry(0.045, 10, 6).translate(sd * 0.1, 0.55, 0.36), 0, 5);
+  }
+  // a limb's piece from a to b, tapered
+  const seg = (a, b, r0, r1) => {
+    const d = new THREE.Vector3().subVectors(b, a), g = new THREE.CylinderGeometry(r1, r0, d.length(), 7);
     g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.clone().normalize()));
     return g.translate((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
   };
+  const ball = (p, r) => new THREE.SphereGeometry(r, 7, 5).translate(p.x, p.y, p.z);
   let n = 1;
   for (const sd of [-1, 1]) for (let k = 0; k < 4; k++, n++) {
-    const z = 0.18 - k * 0.14, root = new THREE.Vector3(sd * 0.42, 0.3, z), knee = new THREE.Vector3(sd * 0.82, 0.5, z - 0.05), foot = new THREE.Vector3(sd * 1.05, 0.0, z - 0.1);
-    add(seg(root, knee, 0.045), n);
-    add(seg(knee, foot, 0.035), n);
+    const z = 0.14 - k * 0.13, spread = 1 - k * 0.06;
+    const root = new THREE.Vector3(sd * 0.4, 0.32, z), knee = new THREE.Vector3(sd * 0.78 * spread, 0.58, z - 0.04 - k * 0.04);
+    const ankle = new THREE.Vector3(sd * 1.05 * spread, 0.22, z - 0.08 - k * 0.06), tip = new THREE.Vector3(sd * 1.14 * spread, 0.0, z - 0.1 - k * 0.07);
+    add(seg(root, knee, 0.055, 0.045), n, 2);
+    add(ball(knee, 0.047), n, 2);
+    add(seg(knee, ankle, 0.045, 0.034), n, 2);
+    add(ball(ankle, 0.035), n, 2);
+    add(seg(ankle, tip, 0.032, 0.006), n, 4);
   }
+  // the claws: an arm in two pieces to a heavy hand, a fixed finger off it and a moving one hinged under it
   for (const sd of [-1, 1]) {
-    const leg = sd < 0 ? 9 : 10, a = new THREE.Vector3(sd * 0.28, 0.3, 0.3), b = new THREE.Vector3(sd * 0.42, 0.34, 0.62);
-    add(seg(a, b, 0.06), leg);
-    add(new THREE.SphereGeometry(1, 8, 6).scale(0.11, 0.08, 0.17).translate(sd * 0.44, 0.35, 0.78), leg);
-    add(new THREE.BoxGeometry(0.05, 0.05, 0.18).translate(sd * 0.48, 0.32, 0.92), leg);
+    const leg = sd < 0 ? 9 : 10, a = new THREE.Vector3(sd * 0.3, 0.33, 0.3), elbow = new THREE.Vector3(sd * 0.5, 0.42, 0.52), wrist = new THREE.Vector3(sd * 0.44, 0.4, 0.74);
+    add(seg(a, elbow, 0.07, 0.06), leg, 3);
+    add(ball(elbow, 0.062), leg, 3);
+    add(seg(elbow, wrist, 0.06, 0.07), leg, 3);
+    add(new THREE.SphereGeometry(1, 12, 8).scale(0.13, 0.1, 0.2).translate(sd * 0.44, 0.42, 0.9), leg, 3);
+    add(new THREE.ConeGeometry(0.05, 0.24, 7).rotateX(Math.PI / 2).translate(sd * 0.45, 0.45, 1.18), leg, 4);
+    // (the moving finger: lowest point of the hand, opening down - the shader works it by its height there)
+    add(new THREE.ConeGeometry(0.045, 0.22, 7).rotateX(Math.PI / 2 + 0.25).translate(sd * 0.43, 0.35, 1.15), leg + 10, 4);
   }
   return mergeGeometries(parts);
 }
@@ -579,21 +625,25 @@ mat3 lfBasis(vec3 f, float roll) {
       let next = 0;
       for (const s of under) {
         if (s < next) continue;
-        next = s + 14 + rnd3() * 26;
+        next = s + 9 + rnd3() * 16;
         tr.frame(s, f);
         if (f.P.y > SEA_Y - 10) continue;
-        const sd = rnd3() < 0.5 ? -1 : 1, size = rnd3() < 0.12 ? 1.4 + rnd3() * 0.6 : 0.55 + rnd3() * 0.5;
-        const p = f.P.clone().addScaledVector(f.R, sd * (TRACK_W / 2 - 1.1 - size * 0.6));
-        list.push([p.x, p.y, p.z, size, f.T.x, f.T.z, rnd3() * TAU, 1.5 + rnd3() * 4, f.U.x, f.U.y, f.U.z, sd * (0.2 + rnd3() * 0.8)]);
+        // (out on the road as well as along the walls: those on the deck cross it, those by a wall walk along it)
+        const sd = rnd3() < 0.5 ? -1 : 1, size = rnd3() < 0.15 ? 1.5 + rnd3() * 0.5 : 0.8 + rnd3() * 0.5, onDeck = rnd3() < 0.55;
+        const lat = onDeck ? (rnd3() - 0.5) * 2 * (TRACK_W / 2 - 4) : sd * (TRACK_W / 2 - 1.2 - size * 0.7);
+        const p = f.P.clone().addScaledVector(f.R, lat);
+        const dir = onDeck ? f.R : f.T;
+        list.push([p.x, p.y, p.z, size, dir.x, dir.z, rnd3() * TAU, onDeck ? 3 + rnd3() * 6 : 1.5 + rnd3() * 4, f.U.x, f.U.y, f.U.z, sd * (0.2 + rnd3() * 0.8)]);
       }
       const nc = list.length, A = new Float32Array(nc * 4), B = new Float32Array(nc * 4), Uu = new Float32Array(nc * 4);
       list.forEach((q, k) => { A.set(q.slice(0, 4), k * 4); B.set(q.slice(4, 8), k * 4); Uu.set(q.slice(8, 12), k * 4); });
       const g = inst(crabGeometry(), { iA: A, iB: B, iU: Uu }, Math.max(1, nc));
       const mat = placedMaterial({
         key: 'crabs', side: THREE.FrontSide, roughness: 0.45, metalness: 0.1,
-        pars: 'attribute float leg; attribute vec4 iA, iB, iU;',
+        pars: 'attribute float leg, part; attribute vec4 iA, iB, iU; varying float vPart; varying vec3 vCP;',
+        fpars: 'varying float vPart; varying vec3 vCP;',
         place: /* glsl */`
-  vAl = leg; vSeed = vec3(abs(iU.w), position.y, 0.0);
+  vAl = leg; vSeed = vec3(abs(iU.w), position.y, 0.0); vPart = part; vCP = position;
   vec3 up = normalize(iU.xyz), along = normalize(vec3(iB.x, 0.0, iB.y));
   along = normalize(along - up * dot(along, up));
   vec3 face = cross(along, up) * sign(iU.w);
@@ -604,12 +654,23 @@ mat3 lfBasis(vec3 f, float roll) {
   float stepK = abs(cos(lTime * 0.22 + iB.z));
   if (leg > 0.5 && leg < 8.5) q.y += max(0.0, sin(lTime * 7.0 + leg * 1.9 + iB.z)) * 0.09 * abs(q.x) * stepK;
   if (leg > 8.5) q.y += sin(lTime * 1.3 + leg * 2.0 + iB.z) * 0.05 * max(0.0, q.z - 0.3);
+  // (the moving fingers open and shut)
+  if (leg > 18.5) q.y -= (0.5 + 0.5 * sin(lTime * 2.3 + leg + iB.z)) * 0.12 * max(0.0, q.z - 1.04);
   mat3 B = mat3(along, up, face);
   transformed = P + B * (q * iA.w);
   objectNormal = B * normal;`,
-        // (a shell red to orange, darker low down - the legs, the claws' undersides; the eyes' faint glint)
-        color: `diffuseColor.rgb = mix(vec3(0.7, 0.24, 0.08), vec3(0.85, 0.45, 0.14), vSeed.x) * (0.55 + 0.6 * smoothstep(0.1, 0.45, vSeed.y));`,
-        emissive: `totalEmissiveRadiance += vec3(0.06, 0.016, 0.006) + vec3(0.4, 0.9, 0.7) * step(0.54, vSeed.y) * step(vAl, 0.5) * 0.6;`,
+        // (the shell deep red on top to orange at its rim, speckled; the belly cream; the legs orange-red banded paler at
+        // the joints; the claws red with dark tips; the eyes black and glossy. A faint warm glow of their own: they read in
+        // the dark past the headlights)
+        color: `{
+    float spk = fract(sin(dot(floor(vCP.xz * 22.0), vec2(12.9898, 78.233))) * 43758.5453);
+    vec3 shell = mix(vec3(0.62, 0.08, 0.04), vec3(0.95, 0.38, 0.1), smoothstep(0.42, 0.3, vCP.y + 0.06 * abs(vCP.x)));
+    shell *= 0.85 + 0.25 * step(0.86, spk);
+    vec3 c = vPart < 0.5 ? shell : vPart < 1.5 ? vec3(0.9, 0.78, 0.6) : vPart < 2.5 ? mix(vec3(0.85, 0.3, 0.08), vec3(0.95, 0.6, 0.3), smoothstep(0.0, 0.03, abs(fract(length(vCP.xz) * 3.2) - 0.5) - 0.42))
+      : vPart < 3.5 ? vec3(0.78, 0.12, 0.05) : vPart < 4.5 ? vec3(0.12, 0.05, 0.04) : vec3(0.02);
+    diffuseColor.rgb = c;
+  }`,
+        emissive: `totalEmissiveRadiance += diffuseColor.rgb * 0.09 + vec3(0.5, 0.9, 0.8) * step(4.5, vPart) * 0.25;`,
       });
       this.crabs = new THREE.Mesh(g, mat);
       this.crabs.frustumCulled = false;

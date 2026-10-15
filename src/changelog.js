@@ -2,6 +2,15 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.5.6', date: '16 Oct 2026', name: 'The kraken',
+    notes: [
+      'A giant squid lies on a great sea stack ahead and to the left of the grid: its head on the rim watching the track with glowing amber eyes, its mantle rising behind',
+      'Its arms grip down the rock into the sea while two arms and a long tentacle curl slowly in the air; over minutes it creeps round the rock and back',
+      'The crabs are bigger and more detailed - spiny shells, eyes on stalks, jointed legs, claws that open and shut - and they cross the road itself now, not only its edges',
+      'A switch for the giant squid in Settings',
+    ],
+  },
+  {
     version: '1.5.5', date: '16 Oct 2026', name: 'Life on the road',
     notes: [
       'Under the sea the road is overgrown: grass in tufts and weed along the walls, thinning out across the deck',

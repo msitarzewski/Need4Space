@@ -16,6 +16,7 @@ import { mesaGeometry, archGeometry } from './sandstone.js';
 import { sunOnly, setCave } from './look.js';
 import { City, lighthouseGeometry, stoneMaterial, castleGeometry, bakedGeometry } from './atlantis.js';
 import { SeaLife } from './sealife.js';
+import { GiantSquid } from './squid.js';
 import { Seabed } from './seabed.js';
 import { TrackGrid } from './spires.js';
 import { moonMesh } from './celestial.js';
@@ -161,7 +162,7 @@ function keeperLit(mat, U, key) {
 // A sea stack: a pillar of basalt out of the deep - its outline lobed and bitten, narrowing upward with ledges where a
 // softer layer wore back, leaning a little, its top a broken crown of spires. x, z, r (its radius at the sea), h (its
 // top over the sea)
-function stackGeometry({ x, z, r, h, seed }) {
+function stackGeometry({ x, z, r, h, seed, calm = false }) {
   const rnd = mulberry32(seed), NU = r > 40 ? 64 : 44, s1 = rnd() * 50, s2 = rnd() * 50;
   const lean = (rnd() - 0.5) * 0.12, leanA = rnd() * Math.PI * 2;
   const rows = [];
@@ -170,6 +171,7 @@ function stackGeometry({ x, z, r, h, seed }) {
   rows.push(h);
   const crown = Array.from({ length: NU }, (_, j) => {
     const th = (j / NU) * Math.PI * 2;
+    if (calm) return h * (0.97 + 0.03 * fbm(Math.cos(th) * 2 + s1, Math.sin(th) * 2 + s2, 3));
     return h * (0.82 + 0.18 * fbm(Math.cos(th) * 2 + s1, Math.sin(th) * 2 + s2, 3)) + (rnd() < 0.12 ? rnd() * h * 0.12 : 0);
   });
   const pos = [], idx = [];
@@ -195,7 +197,7 @@ function stackGeometry({ x, z, r, h, seed }) {
   }
   // the crown's cap: a fan to a point a little under its highest spire
   const ci = pos.length / 3, last = (nr - 1) * NU;
-  const cy = Math.max(...crown) * 0.93;
+  const cy = Math.max(...crown) * (calm ? 0.99 : 0.93);
   pos.push(x + lean * cy * Math.cos(leanA), cy, z + lean * cy * Math.sin(leanA));
   for (let j = 0; j < NU; j++) idx.push(last + j, ci, last + (j + 1) % NU);
   const g = new THREE.BufferGeometry();
@@ -513,6 +515,17 @@ export class OceanWorld {
       geos.push(g);
       return true;
     };
+    // the kraken's rock: a great stack ahead and to the left of the grid, the giant squid on it (squid.js) - first, so
+    // the others keep off it
+    {
+      // (over the drowned city's ground, where the other stacks are kept off: placed here by hand, clear of the track)
+      const kx = -130, kz = -200, kr = 34, kh = 100, seed = 3131, kg = stackGeometry({ x: kx, z: kz, r: kr, h: kh, seed, calm: true });
+      if (grid.geometryClear(kg, 6, 7) >= 0) {
+        placed.push({ x: kx, z: kz, r: kr, h: kh });
+        geos.push(kg);
+        this.buildSquid(scene, kg, kx, kz, kr, kh);
+      } else console.warn('the rock for the giant squid crosses the track: left out');
+    }
     // along the spray run and the arch, close in
     for (let s = tr.at('start', 300); s < tr.at('arch', 300); s += 50 + rnd() * 60) {
       tr.frame(s, f);
@@ -571,6 +584,40 @@ export class OceanWorld {
       this.castleLamps = lamps;
     }
     console.info(`stacks: ${geos.length - 1}, castles: ${builders.length}`);
+  }
+
+  // The giant squid on its rock: the rock's surface as a table - its angle round the axis by height - for the arms to
+  // lie on, and the crown's height at each angle for the head to rest on (a texture for the shaders); it looks out
+  // toward the grid
+  buildSquid(scene, g, x, z, r, h) {
+    const P = g.attributes.position.array, NUr = r > 40 ? 64 : 44, rows = Math.floor((P.length / 3 - 1) / NUr);
+    const ry = [];
+    for (let i = 0; i < rows; i++) { let m = -1e9; for (let j = 0; j < NUr; j++) m = Math.max(m, P[(i * NUr + j) * 3 + 1]); ry.push(m); }
+    const y0 = -40, y1 = ry[rows - 1], NL = 64, tab = new Float32Array(NUr * NL * 4);
+    const at = (i, j, c) => P[(i * NUr + (j % NUr)) * 3 + c];
+    // (the crown: the top row's heights, each texel halfway between two columns, smoothed over its neighbours)
+    const cr = Array.from({ length: NUr }, (_, j) => (at(rows - 1, j, 1) + at(rows - 1, j + 1, 1)) / 2);
+    const crown = cr.map((_, j) => { let m = 0; for (let d = -2; d <= 2; d++) m += cr[(j + d + NUr) % NUr]; return m / 5; });
+    for (let L = 0; L < NL; L++) {
+      const y = y0 + ((L + 0.5) / NL) * (y1 - y0);
+      let i = 0;
+      while (i < rows - 2 && ry[i + 1] < y) i++;
+      const t = Math.min(1, Math.max(0, (y - ry[i]) / Math.max(1e-3, ry[i + 1] - ry[i])));
+      for (let j = 0; j < NUr; j++) {
+        const px = (at(i, j, 0) + at(i, j + 1, 0)) / 2 * (1 - t) + (at(i + 1, j, 0) + at(i + 1, j + 1, 0)) / 2 * t;
+        const pz = (at(i, j, 2) + at(i, j + 1, 2)) / 2 * (1 - t) + (at(i + 1, j, 2) + at(i + 1, j + 1, 2)) / 2 * t;
+        tab.set([px - x, pz - z, crown[j], 0], (L * NUr + j) * 4);
+      }
+    }
+    const half = new Uint16Array(tab.length);
+    for (let k = 0; k < tab.length; k++) half[k] = THREE.DataUtils.toHalfFloat(tab[k]);
+    const tex = new THREE.DataTexture(half, NUr, NL, THREE.RGBAFormat, THREE.HalfFloatType);
+    tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.magFilter = tex.minFilter = THREE.LinearFilter;
+    tex.needsUpdate = true;
+    const grid = this.track.frame(this.track.at('start', 120), {}).P;
+    this.squid = new GiantSquid(scene, { x, z, rockTex: tex, y0, y1, face: Math.atan2(grid.z - z, grid.x - x) });
+    this.noAO.push(...this.squid.meshes);
   }
 
   // The old lighthouse out on its rock beside the far turn: its lantern's light swept round by a beam over the sea and
@@ -730,6 +777,7 @@ export class OceanWorld {
     this.mirrorOn = v.seaReflect !== false;
     this.stormOn = v.oceanStorm !== false;
     this.wetOn = v.shipWet !== false;
+    this.squid?.setOn(v.kraken !== false);
     if (!this.mirrorOn) this.ocean.U.seReflOn.value = 0;
   }
 
