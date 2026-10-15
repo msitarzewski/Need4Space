@@ -5,6 +5,7 @@
 // through a temple's hall, under an aqueduct - then surges up out of the water off a kicker, rolls over the swell,
 // passes the old lighthouse, loops, and comes home along the south.
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { Track, TRACK_W, layout } from './track.js';
 import { hullMaps } from './hull.js';
 import { bakeLater } from './bake.js';
@@ -29,7 +30,7 @@ export const MID_HALF = 45, MID_NEAR = 250, MID_FAR = 550;
 export const FAR_HALF = 170, FAR_NEAR = 100, FAR_FAR = 900;
 const MOON_DIR = SUN_DIR;
 // the Keeper: the colossus standing on the abyss's floor, its feet 900 m down, its head and lantern over the sea
-export const KEEPER = { x: 900, z: 250, foot: SEA_Y - 900 };
+export const KEEPER = { x: 900, z: 250, foot: SEA_Y - 520, floor: SEA_Y - 900, scale: 0.65, yaw: THREE.MathUtils.degToRad(340), plinth: 250 };
 
 // The circuit (x east, y up, z south; the sea at y 0). The grid faces north, the moon ahead and to the right.
 const P = [];
@@ -250,7 +251,7 @@ export class OceanWorld {
     this.noAO.push(this.ocean.mesh, abyss, this.shafts.mesh);
     lap('sea');
     // the drowned city
-    this.city = new City(this.track, this.grid, { dens: this.dens, avoid: [{ x: KEEPER.x, z: KEEPER.z, r: 230 }] });
+    this.city = new City(this.track, this.grid, { dens: this.dens, avoid: [{ x: KEEPER.x, z: KEEPER.z, r: 300 }] });
     this.buildKeeper(scene);
     const cm = this.city.meshes();
     for (const m of [...cm.stone, ...cm.floor]) { m.layers.set(2); m.receiveShadow = true; scene.add(m); }
@@ -293,34 +294,81 @@ export class OceanWorld {
     console.info(`ocean built (ms): ${times.join(', ')}`);
   }
 
-  // The Keeper (until its model is in): a colossus of dark stone standing on the abyss's floor - its robe falling to a
-  // broad hem 900 m down, its hooded head and shoulders out of the sea, its right arm raised holding a great lantern
-  // whose light lies on the sea; its eyes alight in the hood's shadow
+  // The Keeper (assets/keeper.glb): an old hooded colossus of basalt and green bronze, worn and broken, its raised
+  // lantern over the sea, a staff in its other hand, teal inlay runs still glowing here and there. Built 1.3 km tall;
+  // at that size its shoulders and its staff crossed the dive's road wherever it faced - stood at two thirds on a basalt
+  // pedestal out of the abyss's floor (its feet 520 m down) and turned so the road runs between its robe and its staff,
+  // it clears the road by 17 m at the nearest (the road's real frames tested against every point of the model).
+  // Three levels of detail by the camera's distance; the dead inlay only close up; the bands' glow uneven along them.
   buildKeeper(scene) {
-    const K = KEEPER, f0 = K.foot;
-    const prof = [[190, 0], [178, 40], [152, 200], [132, 450], [114, 700], [100, 860], [122, 930], [124, 962], [70, 992], [62, 1004],
-      [78, 1020], [84, 1050], [66, 1086], [30, 1100], [0, 1104]].map(([r, y]) => new THREE.Vector2(r, y));
-    const body = new THREE.LatheGeometry(prof, 64).translate(K.x, f0, K.z);
-    const arm = new THREE.CylinderGeometry(22, 30, 230, 24).translate(0, 115, 0)
-      .applyMatrix4(new THREE.Matrix4().makeRotationZ(-0.42)).translate(K.x + 104, f0 + 940, K.z);
-    const g = mergeGeometries([body.toNonIndexed(), arm.toNonIndexed()]);
-    g.deleteAttribute('uv');
-    g.computeVertexNormals();
-    const m = new THREE.Mesh(g, this.rockMat || basaltMaterial({ key: 'keeper' }));
-    m.name = 'keeper';
-    m.layers.set(2); m.castShadow = m.receiveShadow = true;
-    scene.add(m);
-    // the lantern and the eyes; a real light at the lantern for the sea, the head and the ships near it
-    const top = new THREE.Vector3(K.x + 104 + Math.sin(0.42) * 230, f0 + 940 + Math.cos(0.42) * 230, K.z);
-    const lantern = new THREE.Mesh(new THREE.IcosahedronGeometry(9, 3), new THREE.MeshBasicMaterial({ color: new THREE.Color(16, 11, 6) }));
-    lantern.position.copy(top).add(new THREE.Vector3(0, -14, 0));
-    const eyes = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(3.2, 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 14, 16) }), 2);
-    for (const [i, sd] of [[0, -1], [1, 1]]) eyes.setMatrixAt(i, new THREE.Matrix4().makeTranslation(K.x - 62, f0 + 1050, K.z + sd * 14));
-    const light = new THREE.PointLight(new THREE.Color(1.0, 0.8, 0.55), 6e5, 1400, 2);
-    light.position.copy(lantern.position);
-    scene.add(lantern, eyes, light);
-    this.keeper = { mesh: m, lantern, light, top: lantern.position.clone() };
-    this.noAO.push(lantern, eyes);
+    const K = KEEPER, yF = K.floor - 5, yT = K.foot;
+    // the pedestal: a column of basalt, flared where it stands on the floor, a lip under the statue's hem (<= 250 m)
+    const prof = [[0, yF], [268, yF], [262, yF + 30], [250, yF + 64], [238, yF + 130], [232, (yF + yT) / 2], [234, yT - 70],
+      [244, yT - 36], [249, yT - 16], [246, yT - 8], [245, yT], [0, yT]].map(([r, y]) => new THREE.Vector2(r, y));
+    const ped = new THREE.Mesh(new THREE.LatheGeometry(prof, 96).translate(K.x, 0, K.z), this.rockMat || basaltMaterial({ key: 'keeper' }));
+    ped.name = 'keeper-pedestal';
+    ped.layers.set(2); ped.receiveShadow = true;
+    scene.add(ped);
+    // the lantern's light (made now: a light added after the warm-up recompiles every material); set where the model's
+    // marker says once it is in
+    const top = new THREE.Vector3(K.x - 256, K.foot + 725, K.z + 24);
+    const light = new THREE.PointLight(new THREE.Color(1.0, 0.62, 0.3), 6e5, 1400, 2);
+    light.position.copy(top);
+    scene.add(light);
+    this.keeper = { mesh: ped, light, top, lods: null, inlay: null };
+    this.ready = new GLTFLoader().loadAsync('assets/keeper.glb').then((gltf) => {
+      const root = gltf.scene;
+      root.name = 'keeper';
+      root.scale.setScalar(K.scale);
+      root.rotation.y = K.yaw;
+      root.position.set(K.x, K.foot, K.z);
+      const part = (n) => root.getObjectByName(n);
+      const lods = ['Keeper_LOD0', 'Keeper_LOD1', 'Keeper_LOD2'].map(part).filter(Boolean);
+      const glows = ['glow_bands_live', 'glow_bands_dim', 'glow_eyes', 'glow_lantern'].map(part).filter(Boolean);
+      const meshes = (o) => { const m = []; o.traverse((c) => { if (c.isMesh) m.push(c); }); return m; };
+      // the stone: the broken pieces lying out past the pedestal's lip trimmed away (they lay on the floor at full size)
+      const stone = new Set();
+      for (const l of lods) for (const m of meshes(l)) stone.add(m.material);
+      for (const mat of stone) {
+        mat.onBeforeCompile = (sh) => {
+          sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vKeepP;')
+            .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vKeepP = position;');
+          sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vKeepP;')
+            .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+  if (vKeepP.y < 40.0 && length(vKeepP.xz) > ${(245 / K.scale).toFixed(1)}) discard;`);
+        };
+        mat.customProgramCacheKey = () => 'keeper-stone';
+      }
+      // the bands: their glow along each run as baked (the vertex colour), dim and broken
+      for (const g of glows.slice(0, 2)) for (const m of meshes(g)) {
+        m.material.onBeforeCompile = (sh) => {
+          sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+#ifdef USE_COLOR
+  totalEmissiveRadiance *= vColor.r;
+#endif`);
+        };
+        m.material.customProgramCacheKey = () => 'keeper-band';
+      }
+      root.traverse((o) => { if (o.isMesh) { o.layers.set(2); o.castShadow = false; o.receiveShadow = true; } });
+      for (const g of glows) for (const m of meshes(g)) { m.receiveShadow = false; this.noAO.push(m); }
+      root.updateMatrixWorld(true);
+      const mark = part('light_lantern');
+      if (mark) { mark.getWorldPosition(top); light.position.copy(top); }
+      scene.add(root);
+      Object.assign(this.keeper, { root, lods, inlay: part('Keeper_inlay_dead') });
+    });
+  }
+
+  // the Keeper's detail by the camera's distance (LOD0 close, LOD1 past ~1 km, LOD2 past ~3.3 km)
+  keeperLod(cp) {
+    const k = this.keeper;
+    if (!k || !k.lods || !k.lods.length) return;
+    const d = Math.hypot(cp.x - KEEPER.x, cp.y - (KEEPER.foot + 300), cp.z - KEEPER.z);
+    const l = d < 1000 ? 0 : d < 3300 ? 1 : 2;
+    if (l === k.level) return;
+    k.level = l;
+    k.lods.forEach((o, i) => (o.visible = i === Math.min(l, k.lods.length - 1)));
+    if (k.inlay) k.inlay.visible = l === 0;
   }
 
   // Sea stacks: basalt pillars standing out of the swell round the spray run and off the causeways, kept clear of the
@@ -682,6 +730,7 @@ export class OceanWorld {
     // the sea's level at the camera (the swell there): the fog's split, the dome's deep below it
     const cp = camera.position;
     this.cam = camera;
+    this.keeperLod(cp);
     this.level = waveHeight(cp.x, cp.z, t);
     this.fog.color.setRGB(1, t % 1000, this.level);
     this.dome.material.uniforms.under.value = Math.max(0, this.level - cp.y);

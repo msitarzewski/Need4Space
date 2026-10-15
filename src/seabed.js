@@ -157,7 +157,7 @@ export class Seabed {
       tr.frame(s, f);
       const R = f.R.clone().setY(0).normalize(), sd = rnd() < 0.5 ? -1 : 1, lat = sd * (TRACK_W / 2 + 45 + rnd() * 140);
       const x = f.P.x + R.x * lat, z = f.P.z + R.z * lat;
-      if (keeper && Math.hypot(x - keeper.x, z - keeper.z) < 190) continue;
+      if (keeper && Math.hypot(x - keeper.x, z - keeper.z) < (keeper.plinth || 190) + 40) continue;
       const y0 = basin.height(x, z) - 10, y1 = f.P.y + (rnd() - 0.35) * 70;
       if (y1 - y0 < 40) continue;
       const r = 14 + rnd() * 26, P = pinnacleGeometry({ x, z, y0, y1, r, seed: 900 + rocks.length });
@@ -185,7 +185,7 @@ export class Seabed {
       }
     }
     if (keeper) for (let k = 0; k < Math.round(260 * D); k++) {
-      const a = rnd() * TAU, rr = 175 + rnd() * 60, x = keeper.x + Math.cos(a) * rr, z = keeper.z + Math.sin(a) * rr;
+      const r0 = (keeper.plinth || 175) + 22, a = rnd() * TAU, rr = r0 + rnd() * 60, x = keeper.x + Math.cos(a) * rr, z = keeper.z + Math.sin(a) * rr;
       frond(x, basin.height(x, z) - 1, z, 25 + rnd() * 55, 2 + rnd() * 2.5);
     }
     // the floor near the way (within ~140 m under the deck): kelp beds and meadows
