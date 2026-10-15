@@ -3,7 +3,7 @@
 // gantries, boost pads, a start gantry, an asteroid field. TrackRacer rides it: magnetic hold, hover cushion, air on
 // crests, walls you scrape along.
 import * as THREE from 'three';
-import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeVertices, mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { clamp, damp, smoothstep, mulberry32, noise2, fbm } from './noise.js';
 import { bakeDeckMaps } from './deck.js';
 import { rockMaterial } from './rock.js';
@@ -186,6 +186,98 @@ function fieldMaterial() {
 export const CAVE_R = 40, CAVE_MOUTH = 45;            // the cave's reach round its centre line, its mouths' light fade (m)
 export const WRECK_R = 46, WRECK_MOUTH = 30;          // the same for the derelict's dark stretches (round the deck only)
 const _cv = new THREE.Vector3(), _cw = new THREE.Vector3();
+
+// A light gate's leg ("make the legs a bit more detailed, they look like a simple texture": they were a bare 1.4 m
+// box): an emitter pylon the arch rises out of. A chamfered plinth bolted down, an eight-sided column tapering up with
+// ribs on its corners and dark panels on its faces, a cable conduit up its back, a clamp collar at the top round the
+// arch's tube with a lens ring, and a light slit down the track side and the outer side - drawn in the arch's own
+// material, its uv carrying on from the arch's ends so the pulses run on down into the leg. Origin at the foot,
+// x out from the track, y up. arcLen: the arch's length (its uv.x runs 0..1 over it).
+function gateLeg(arcLen) {
+  const parts = { body: [], trim: [], light: [] };
+  const flat = (g) => { g = g.index ? g.toNonIndexed() : g; g.computeVertexNormals(); return g; };
+  // the plinth, the column and the collar: one turned profile, eight-sided (flats facing the axes)
+  const prof = [[0.0, 0], [1.25, 0], [1.25, 0.22], [1.12, 0.34], [0.86, 0.34], [0.86, 0.46], [0.8, 0.5], [0.68, 2.5], [0.8, 2.52],
+    [0.82, 2.6], [0.82, 2.84], [0.72, 2.92], [0.52, 2.92], [0.52, 2.78], [0.0, 2.78]].map(([r, y]) => new THREE.Vector2(r / Math.cos(Math.PI / 8), y));
+  parts.body.push(flat(new THREE.LatheGeometry(prof, 8, Math.PI / 8)));
+  const colR = (y) => 0.8 + (0.68 - 0.8) * (y - 0.5) / 2.0;                  // (the column's apothem at y)
+  // corner ribs, following the taper
+  for (let k = 0; k < 4; k++) {
+    const a = Math.PI / 4 + k * Math.PI / 2, d = new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
+    const b0 = d.clone().multiplyScalar(colR(0.6) / Math.cos(Math.PI / 8) + 0.03).setY(0.6), b1 = d.clone().multiplyScalar(colR(2.45) / Math.cos(Math.PI / 8) + 0.03).setY(2.45);
+    const g = new THREE.BoxGeometry(0.1, b1.distanceTo(b0), 0.16);
+    g.applyMatrix4(new THREE.Matrix4().lookAt(new THREE.Vector3(), d, new THREE.Vector3(0, 1, 0)));
+    const tilt = Math.atan2(b0.clone().setY(0).length() - b1.clone().setY(0).length(), b1.y - b0.y);
+    g.applyMatrix4(new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(-d.z, 0, d.x), tilt));
+    g.translate((b0.x + b1.x) / 2, (b0.y + b1.y) / 2, (b0.z + b1.z) / 2);
+    parts.body.push(flat(g));
+  }
+  // dark panels on the four faces, each lying on its tapered face (a panel and its frame), and bolts round the plinth
+  for (let k = 0; k < 4; k++) {
+    const a = k * Math.PI / 2, n = new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
+    const tilt = Math.atan2(0.12, 2.0);
+    for (const [w, h, t, y, into] of [[0.62, 1.5, 0.03, 1.45, 'trim'], [0.5, 1.36, 0.035, 1.45, 'trim']]) {
+      if (into === 'trim' && w < 0.6 && (k === 0 || k === 2)) continue;          // (the slit faces: no inner panel)
+      const g = new THREE.BoxGeometry(t, h, w);
+      g.applyMatrix4(new THREE.Matrix4().makeRotationZ(-tilt));
+      g.applyMatrix4(new THREE.Matrix4().makeRotationY(-a));
+      g.translate(n.x * (colR(y) + t / 2 - 0.004), y, n.z * (colR(y) + t / 2 - 0.004));
+      parts[into].push(flat(g));
+    }
+  }
+  for (let k = 0; k < 8; k++) {
+    const a = Math.PI / 8 + k * Math.PI / 4, r = 1.02;
+    const g = new THREE.CylinderGeometry(0.055, 0.055, 0.06, 6).translate(r * Math.cos(a), 0.37, r * Math.sin(a));
+    parts.trim.push(flat(g));
+  }
+  // the cable conduit up the back (the -z face), into a clamp box under the collar
+  parts.trim.push(flat(new THREE.CylinderGeometry(0.07, 0.07, 1.7, 8).translate(0, 1.36, -(colR(1.36) + 0.12))));
+  parts.trim.push(flat(new THREE.BoxGeometry(0.3, 0.22, 0.2).translate(0, 2.3, -(colR(2.3) + 0.08))));
+  parts.trim.push(flat(new THREE.BoxGeometry(0.34, 0.12, 0.28).translate(0, 0.52, -(colR(0.52) + 0.1))));
+  // its mount: it stands 1.8 m out past the deck's side face (x = -1.8 here), so a bearer under the plinth runs back to
+  // a plate bolted flat on that face, two braces under it (without them it hung in space beside the deck)
+  const EDGE = -(2.5 - WALL_T);                                               // (the deck's side face; the deck 1.8 m deep)
+  parts.trim.push(flat(new THREE.BoxGeometry(1.3 - EDGE, 0.34, 2.0).translate((1.3 + EDGE) / 2, -0.37, 0)));
+  parts.trim.push(flat(new THREE.BoxGeometry(0.2, 1.5, 2.3).translate(EDGE + 0.1, -0.95, 0)));
+  for (const z of [-0.85, 0.85]) {
+    const a0 = new THREE.Vector3(EDGE + 0.2, -1.55, z), a1 = new THREE.Vector3(1.0, -0.55, z), d = a1.clone().sub(a0);
+    const g = new THREE.BoxGeometry(0.18, d.length(), 0.18);
+    g.applyMatrix4(new THREE.Matrix4().makeRotationZ(-Math.atan2(d.x, d.y)));
+    g.translate((a0.x + a1.x) / 2, (a0.y + a1.y) / 2, z);
+    parts.trim.push(flat(g));
+  }
+  for (const y of [-0.5, -1.0, -1.45]) for (const z of [-0.8, 0.8]) {
+    parts.body.push(flat(new THREE.CylinderGeometry(0.05, 0.05, 0.06, 6).rotateZ(Math.PI / 2).translate(EDGE + 0.23, y, z)));
+  }
+  // the light: a slit on the track side (-x) and on the outer side (+x), each in a dark recess; the lens ring
+  const slit = (x, sgn) => {
+    const g = new THREE.PlaneGeometry(0.12, 1.75);
+    g.applyMatrix4(new THREE.Matrix4().makeRotationY(sgn > 0 ? Math.PI / 2 : -Math.PI / 2));
+    g.applyMatrix4(new THREE.Matrix4().makeRotationZ(sgn * -Math.atan2(0.12, 2.0)));
+    g.translate(x, 1.42, 0);
+    return g;
+  };
+  for (const sgn of [-1, 1]) {
+    parts.trim.push(flat(new THREE.BoxGeometry(0.06, 1.85, 0.22).applyMatrix4(new THREE.Matrix4().makeRotationZ(sgn * -Math.atan2(0.12, 2.0))).translate(sgn * (colR(1.42) - 0.02), 1.42, 0)));
+    parts.light.push(slit(sgn * (colR(1.42) + 0.014), sgn));
+  }
+  parts.light.push(new THREE.TorusGeometry(0.62, 0.045, 8, 32).rotateX(Math.PI / 2).translate(0, 2.93, 0));
+  const merge = (gs) => mergeGeometries(gs.map((g) => { const x = g.index ? g.toNonIndexed() : g; for (const k of Object.keys(x.attributes)) if (!['position', 'normal', 'uv'].includes(k)) x.deleteAttribute(k); return x; }));
+  // the light's uv: x carries on from the arch's end (its 0 at y = WALL_H + 0.2 above the foot), y across the slit
+  const lightFor = (mirror) => {
+    const g = merge(parts.light), P = g.attributes.position, uv = g.attributes.uv;
+    for (let i = 0; i < P.count; i++) {
+      const a = (P.getY(i) - (WALL_H + 0.2)) / arcLen;
+      uv.setX(i, mirror ? 1 - a : a);
+    }
+    return g;
+  };
+  return {
+    body: merge(parts.body), trim: merge(parts.trim), lightL: lightFor(false), lightR: lightFor(true),
+    bodyMat: new THREE.MeshStandardMaterial({ color: 0x40464e, roughness: 0.42, metalness: 0.75 }),
+    trimMat: new THREE.MeshStandardMaterial({ color: 0x1d2024, roughness: 0.62, metalness: 0.55 }),
+  };
+}
 
 export class Track {
   constructor(L = SPACE_LAYOUT) {
@@ -1113,8 +1205,7 @@ float snN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
   lightGates() {
     const R = TRACK_W / 2 + 2.5, out = [], f = {};
     const ring = new THREE.TorusGeometry(R, 0.45, 12, 72, Math.PI);
-    const leg = new THREE.BoxGeometry(1.4, WALL_H + 1.5, 1.4);
-    const legMat = new THREE.MeshStandardMaterial({ color: 0x3a4048, roughness: 0.5, metalness: 0.7 });
+    const leg = gateLeg(Math.PI * R);
     this.gateMats = [];
     for (const g of this.gates) {
       const mat = new THREE.ShaderMaterial({
@@ -1135,11 +1226,16 @@ float snN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
       arch.matrix.makeBasis(f.R, f.U, f.T.clone().negate()).setPosition(f.P.clone().addScaledVector(f.U, WALL_H));
       out.push(arch);
       for (const sd of [-1, 1]) {
-        const m = new THREE.Mesh(leg, legMat);
-        m.matrixAutoUpdate = false;
-        m.matrix.makeBasis(f.R, f.U, f.T.clone().negate()).setPosition(f.P.clone().addScaledVector(f.R, sd * R).addScaledVector(f.U, (WALL_H + 1.5) / 2 - 0.2));
-        m.castShadow = true;
-        out.push(m);
+        // the pylon (its x out from the track: turned round on the left), the slits and the lens in the arch's own light
+        const M = new THREE.Matrix4().makeBasis(f.R.clone().multiplyScalar(sd), f.U, f.T.clone().negate().multiplyScalar(sd))
+          .setPosition(f.P.clone().addScaledVector(f.R, sd * R).addScaledVector(f.U, -0.2));
+        for (const [g, m_] of [[leg.body, leg.bodyMat], [leg.trim, leg.trimMat], [sd < 0 ? leg.lightL : leg.lightR, mat]]) {
+          const m = new THREE.Mesh(g, m_);
+          m.matrixAutoUpdate = false;
+          m.matrix.copy(M);
+          m.castShadow = m_ !== mat;
+          out.push(m);
+        }
       }
     }
     return out;
