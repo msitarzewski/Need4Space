@@ -17,7 +17,7 @@ import { TrackRacer, TRACK_W, PERKS } from './track.js';
 import { patchShaders } from './look.js';
 import { smoothstep } from './noise.js';
 import { loadShip, Ship } from './ship.js';
-import { SHIP_URLS, RIVAL_TIER, shipChoice, shipName } from './ships.js';
+import { SHIP_URLS, RIVAL_TIER, HANDLING, shipChoice, shipName } from './ships.js';
 import { Flight } from './flight.js';
 import { CameraRig } from './camera.js';
 import { Input } from './input.js';
@@ -133,6 +133,7 @@ async function boot() {
   if (MAP !== 'meadow') flight.gravity = 0;
   const track = world.track || null;
   const racer = track ? new TrackRacer(ship, track) : null;
+  if (racer) racer.handling = HANDLING[SHIP] || HANDLING.feather;      // how the chosen ship flies (ships.js)
   // eight rivals, cloned before the player's ship first animates (their canopies and rotors start at rest)
   status('Rolling out the rivals');
   progress('rivals');
