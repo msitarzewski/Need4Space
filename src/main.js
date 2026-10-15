@@ -507,6 +507,10 @@ async function boot() {
     Ship.brakeLights = v.brakeLights;
     deck.k = v.deckLight !== false ? 1 : 0;           // the deck's light on the ships
     Ship.microShadow = v.hullShadows !== false ? 1 : 0;   // their seams and recesses shaded from the sun
+    Ship.engineFace = v.engineFaces === 'glow' ? 0 : 1;   // dark engine faces, the ring alone glowing
+    Ship.paintFinish = v.shipPaint === 'classic' ? 0 : 1;  // the deep gloss paint with its metal flake
+    Ship.trimFinish = v.shipTrim === 'classic' ? 0 : 1;    // the dark satin metal
+    Ship.accentLights = v.shipAccents !== false ? 1 : 0;   // the accent light strips
     const size = { high: 4096, medium: 2048 }[v.shadows];
     if (world.shadowMode) world.shadowMode(size, renderer, scene);
     else if (renderer.shadowMap.enabled !== !!size) {
