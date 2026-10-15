@@ -527,7 +527,7 @@ function partsMaterial(n, U) {
       .replace('#include <common>', '#include <common>\nattribute float partId;\nattribute vec2 ringP;\nvarying float vPartId;\nvarying vec2 vRingP;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vPartId = partId;\n  vRingP = ringP;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying float vPartId;\nvarying vec2 vRingP;\nuniform vec4 partA[${n}];\nuniform vec4 partB[${n}];\nuniform vec2 partR[${n}];\nuniform vec3 ringEng, ringHot;`)
+      .replace('#include <common>', `#include <common>\nvarying float vPartId;\nvarying vec2 vRingP;\nuniform vec4 partA[${n}];\nuniform vec4 partB[${n}];\nuniform vec2 partR[${n}];\nuniform vec3 ringEng, ringHot;\nuniform float ringK;`)
       .replace('vec4 diffuseColor = vec4( diffuse, opacity );',
         'int partI = int( vPartId + 0.5 );\n\tvec4 partCA = partA[ partI ], partCB = partB[ partI ];\n\tvec4 diffuseColor = vec4( partCA.rgb, opacity );')
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = partCA.a;')
@@ -539,7 +539,7 @@ function partsMaterial(n, U) {
   if (partRW.y > 0.0) {
     float uu = (length(vRingP) - partRW.x) / partRW.y, core = exp(-uu * uu);
     float gain = dot(totalEmissiveRadiance, vec3(0.2126, 0.7152, 0.0722)) / max(dot(partCB.rgb, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
-    totalEmissiveRadiance = mix(ringEng, ringHot, core * core) * (0.35 + 6.0 * core) * gain * 0.9;
+    totalEmissiveRadiance = mix(ringEng, ringHot, core * core) * (0.35 + 6.0 * core) * gain * 0.9 * ringK;
   }`);
   };
   m.customProgramCacheKey = () => 'feather-parts-' + n;
@@ -747,22 +747,24 @@ export class Ship {
     // look's ring shader: a gaussian across the ring); each ring its own radius
     // (a rival has none of its own: its rings are in the parts atlas it cloned, lit through setupParts)
     this.ringMats = [];
+    this.ringUs = [];
     this.model.traverse((o) => {
       const key = o.isMesh && Object.keys(RINGS).find((k) => o.name.startsWith(k));
       if (!key) return;
       const [rc, w] = RINGS[key], m = o.material.clone(), eng = this.engineColor.clone(), hot = eng.clone().lerp(white, 0.8);
       // (the ring's size and the team's colours as uniforms: one program for every ring of every ship)
-      const U = { ringRW: { value: new THREE.Vector2(rc, w) }, ringEng: { value: eng }, ringHot: { value: hot } };
+      const U = { ringRW: { value: new THREE.Vector2(rc, w) }, ringEng: { value: eng }, ringHot: { value: hot }, ringK: { value: 1 } };
+      this.ringUs.push(U);
       m.onBeforeCompile = (sh) => {
         Object.assign(sh.uniforms, U);
         sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vRingP;')
           .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vRingP = position;');
-        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vRingP;\nuniform vec2 ringRW;\nuniform vec3 ringEng, ringHot;')
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vRingP;\nuniform vec2 ringRW;\nuniform vec3 ringEng, ringHot;\nuniform float ringK;')
           .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
   {
     float uu = (length(vRingP.xy) - ringRW.x) / ringRW.y, core = exp(-uu * uu);
     float gain = dot(totalEmissiveRadiance, vec3(0.2126, 0.7152, 0.0722)) / max(dot(emissive, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
-    totalEmissiveRadiance = mix(ringEng, ringHot, core * core) * (0.35 + 6.0 * core) * gain * 0.9;
+    totalEmissiveRadiance = mix(ringEng, ringHot, core * core) * (0.35 + 6.0 * core) * gain * 0.9 * ringK;
   }`);
       };
       m.customProgramCacheKey = () => 'feather-ring';
@@ -1017,7 +1019,8 @@ export class Ship {
       else this.partE.push({ o: p.id * 4, kind: p.kind, base: p.base, e, brake: !!p.brake });
     }
     this.partU = { partA: { value: S.A }, partB: { value: B }, partR: { value: S.R },
-      ringEng: { value: this.engineColor.clone() }, ringHot: { value: this.engineColor.clone().lerp(white, 0.8) } };
+      ringEng: { value: this.engineColor.clone() }, ringHot: { value: this.engineColor.clone().lerp(white, 0.8) },
+      ringK: { value: 1 } };
     this.partMat = partsMaterial(S.n, this.partU);
     S.groups.forEach((G, gi) => {
       const levels = G.levels.map((idx) => partsGeometry(G, idx));
@@ -1295,6 +1298,9 @@ export class Ship {
       this.mats[n].emissiveIntensity = this.glowBase[n] * (0.03 + 0.97 * this.spin) * drive;
     }
     for (const m of this.ringMats) m.emissiveIntensity = this.glowBase.EngineGlow * (0.03 + 0.97 * this.spin) * drive;
+    const ringK = 0.03 + 0.97 * this.spin;
+    for (const U of this.ringUs) U.ringK.value = ringK;
+    if (this.partU && this.partU.ringK) this.partU.ringK.value = ringK;
     for (const n of AVIONICS) {
       if (this.mats[n]) this.mats[n].emissiveIntensity = this.glowBase[n] * ease(this.avionics);
     }
