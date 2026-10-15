@@ -1175,8 +1175,10 @@ float snN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
       for (let k = 0; k <= 6; k++) { const x = TRACK_W / 2 + (X - TRACK_W / 2) * k / 6; g.push(box(0.5, 6.4, 0.5, x, -DECK - 6.1, 0)); }
       const glow = [box(0.25, h * 0.86, 0.5, X - 4.05, lo + h * 0.5, -2), box(0.25, h * 0.86, 0.5, X - 4.05, lo + h * 0.5, 2),
         box(12.2, 0.3, 12.2, X, lo + h * 0.3 + 1.0), box(14.2, 0.3, 14.2, X, lo + h * 0.72 + 1.0), box(1.4, 1.4, 1.4, X, lo + h + 22)];
+      // (on the left turned round, not mirrored: a mirrored box is wound inside out - lit from inside, and black
+      // under the AO, which sees only its far faces)
       const Mi = this.basisAt(t.i, new THREE.Matrix4());
-      if (t.side < 0) Mi.multiply(new THREE.Matrix4().makeScale(-1, 1, 1));
+      if (t.side < 0) Mi.multiply(new THREE.Matrix4().makeRotationY(Math.PI));
       for (const x of g) towerParts.push(x.applyMatrix4(Mi));
       for (const x of glow) glowParts.push(x.applyMatrix4(Mi));
     }
@@ -1418,19 +1420,18 @@ float snN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
     const merge = (a, b) => { const g = mergeTwo(a, b); g.deleteAttribute('uv'); return g; };
     const mm = new THREE.InstancedMesh(merge(postG, armG), new THREE.MeshStandardMaterial({ color: 0x4a5058, roughness: 0.5, metalness: 0.6 }), n);
     const lm = new THREE.InstancedMesh(lensG, new THREE.MeshBasicMaterial({ color: new THREE.Color(...TH.lamp) }), n);
-    const M = new THREE.Matrix4(), mirror = new THREE.Matrix4().makeScale(-1, 1, 1);
+    const M = new THREE.Matrix4(), turn = new THREE.Matrix4().makeRotationY(Math.PI);
     let used = 0;
     for (let k = 0; k < n; k++) {
       const i = k * every, side = k % 2 ? 1 : -1;
       if (this.inGap(i * this.step, 6) || this.inLoop(i * this.step, 10) || this.inTunnel(i * this.step, 5) || this.inCave(i * this.step, 20) || this.inCanopy(i * this.step, 8)) continue;
       this.basisAt(i, M);
       M.setPosition(this.P[i].clone().addScaledVector(this.R[i], side * X).addScaledVector(this.U[i], WALL_H));
-      if (side < 0) M.multiply(mirror);
+      if (side < 0) M.multiply(turn);                   // (turned round, not mirrored: see the towers)
       mm.setMatrixAt(used, M);
       lm.setMatrixAt(used++, M);
     }
     mm.count = lm.count = used;
-    mm.material.side = lm.material.side = THREE.DoubleSide;   // the left-hand posts are mirrored
     mm.castShadow = true;
     return [mm, lm];
   }

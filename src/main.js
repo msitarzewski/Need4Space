@@ -297,6 +297,27 @@ async function boot() {
       hide.forEach((o) => (o.visible = true));
     }
   };
+  // The dust between the camera and what the AO darkens is not occluded: the AO fades with the air's transmittance to
+  // the pixel (in the desert's sandstorm the mesas, towers and posts deep in the dust were darkened out of it as dark
+  // shapes)
+  if (MAP === 'desert') {
+    const b = gtao.blendMaterial, g = gtao.gtaoMaterial.uniforms, tex = 'vec4 texel = texture2D( tDiffuse, vUv );';
+    if (!b.fragmentShader.includes(tex)) throw new Error('AO blend shader changed: dust fade not applied');
+    Object.assign(b.uniforms, { tDepth: g.tDepth, cameraProjectionMatrixInverse: g.cameraProjectionMatrixInverse,
+      cameraWorldMatrix: g.cameraWorldMatrix, fogColor: { value: scene.fog.color } });
+    b.fragmentShader = 'uniform sampler2D tDepth;\nuniform mat4 cameraProjectionMatrixInverse, cameraWorldMatrix;\nuniform vec3 fogColor;\n'
+      + DUST_GLSL + b.fragmentShader.replace(tex, tex + /* glsl */`
+			float z = texture2D( tDepth, vUv ).r;
+			if ( z < 1.0 ) {
+				vec4 vp = cameraProjectionMatrixInverse * vec4( vec3( vUv, z ) * 2.0 - 1.0, 1.0 );
+				vec3 v = vp.xyz / vp.w, o = cameraWorldMatrix[ 3 ].xyz, d = normalize( mat3( cameraWorldMatrix ) * v );
+				vec3 aT, aL, sT, sL;
+				daPath( o, d, length( v ), aT, aL );
+				daStorm( o, d, length( v ), fogColor.r, fogColor.g, 2, sT, sL );   // (as the fog chunk: strength, clock)
+				texel.rgb = mix( vec3( 1.0 ), texel.rgb, dot( aT * sT, vec3( 1.0 / 3.0 ) ) );
+			}`);
+    b.needsUpdate = true;
+  }
   composer.addPass(gtao);
   // reflections on the deck (uses the AO pass's depth and normals: off with AO)
   const ssr = new DeckSSRPass(scene, camera, gtao);
