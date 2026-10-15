@@ -526,11 +526,9 @@ export class Ocean {
           vec4 r2 = texture2D(seDetail, sW.xz / 14.0 + seTime * vec2(-0.009, -0.018));
           float far = smoothstep(120.0, 2600.0, dist);
           // (each layer only where its ripples span a few pixels: finer, the averaged slope left a mirror-sharp sea under
-          // a pixel that held a dozen ripples, and the glints shimmered as the camera moved - what they lose goes into
-          // the highlights' roughness instead: rLost)
+          // a pixel that held a dozen ripples, and the glints shimmered as the camera moved)
           float rk1 = 1.0 - smoothstep(0.25, 1.2, fpx), rk2 = 1.0 - smoothstep(0.08, 0.4, fpx);
           vec2 sl = (r1.xy - 0.5) * 0.9 * rk1 + (r2.xy - 0.5) * 0.6 * rk2;
-          float rLost = 0.05 * (1.0 - rk1) + 0.03 * (1.0 - rk2);
           vec3 N = normalize(Ng + vec3(sl.x, 0.0, sl.y));
           float foamN = r1.a * 0.55 + r2.a * 0.45;
           float foam = smoothstep(0.62, 0.2, sJ) * smoothstep(0.42, 0.7, foamN);
@@ -578,7 +576,9 @@ export class Ocean {
               // camera moved, the far reflections flickering
               refl = mix(refl, rm, inScr * (1.0 - smoothstep(220.0, 650.0, dist)));
             }
-            float rough = mix(0.17, 0.3, far), a2 = min(rough * rough * rough * rough + rLost, 1.0);      // (the moon's glade a little broader: calmer)
+            // (the ripples finer than the pixels are left out of the glade, not turned into roughness: so widened it lay
+            // over the whole sea as a white sheet, the dark reflections showing through it in black bands)
+            float rough = mix(0.17, 0.3, far), a2 = rough * rough * rough * rough;
             // the highlights ride the waves big on the screen and, near, the ripples: past ~100 m every finer slope put
             // the glints somewhere new with each step of the camera - the moon's glade and the lamps' streaks boiled
             vec3 Nh = normalize(vec3(sNC.x, 1.0, sNC.y) + vec3(sl.x, 0.0, sl.y) * (1.0 - smoothstep(40.0, 160.0, dist)));
@@ -587,7 +587,7 @@ export class Ocean {
             vec3 Ns = normalize(vec3(sNC.x, 1.0, sNC.y));
             vec3 H = normalize(SE_SUN + V);
             float nh = max(dot(Nh, H), 0.0), dd = nh * nh * (a2 - 1.0) + 1.0;
-            float spec = a2 / (3.14159 * dd * dd) * (0.02 + 0.98 * pow(1.0 - max(dot(H, V), 0.0), 5.0)) * max(dot(Nh, SE_SUN), 0.0) / max(4.0 * nv, 0.15);
+            float spec = a2 / (3.14159 * dd * dd) * (0.02 + 0.98 * pow(1.0 - max(dot(H, V), 0.0), 5.0)) * max(dot(Nh, SE_SUN), 0.0) / max(4.0 * nv, 0.4);
             float thin = smoothstep(0.2, 2.6, sC), back = pow(max(dot(-V, SE_SUN) * 0.5 + 0.5 + 0.3 * dot(N, -V), 0.0), 3.0);
             vec3 sss = vec3(0.004, 0.03, 0.034) * thin * (0.4 + back) * (1.0 - far);
             vec3 foamC = SE_SUNRAD * 0.07 * (0.4 + 0.6 * max(dot(N, SE_SUN), 0.0)) + vec3(0.016, 0.02, 0.026);

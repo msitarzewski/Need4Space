@@ -2,6 +2,13 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.4.7', date: '16 Oct 2026', name: 'Moonlit column',
+    notes: [
+      'The moon’s reflection is a column of light toward the moon again, not a white sheet over the sea',
+      'No more black bands cutting through the reflections of the sea stacks',
+    ],
+  },
+  {
     version: '1.4.6', date: '16 Oct 2026', name: 'Clear of the swell',
     notes: [
       'The low causeway between the sea stacks is raised clear of the waves: no more dark slabs washing in and out under it',
