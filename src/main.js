@@ -10,7 +10,9 @@ import { SpaceWorld, SUN_DIR as SPACE_SUN, SHADOW_HALF, SHADOW_NEAR, SHADOW_FAR,
 import { ForestWorld, SUN_DIR as FOREST_SUN } from './forest.js';
 import { IceWorld, SUN_DIR as ICE_SUN } from './ice.js';
 import { DesertWorld, SUN_DIR as DESERT_SUN } from './desert.js';
+import { OceanWorld, SUN_DIR as OCEAN_SUN } from './ocean.js';
 import { DUST_GLSL, DUST_FOG_CHUNK } from './haze.js';
+import { SEA_GLSL, SEA_FOG_CHUNK } from './sea.js';
 import { ICE_GLSL, ICE_FOG_CHUNK } from './frost.js';
 import { ATMO_GLSL, ATMO_FOG_CHUNK } from './atmo.js';
 import { TrackRacer, TRACK_W, PERKS } from './track.js';
@@ -33,8 +35,8 @@ import { Q, setLite, integratedGPU, liteFiltering, memoryTier } from './quality.
 import { preloadBakedTextures } from './bakedtextures.js';
 import { beginLoadJobs, finishLoadJobs, stopLoadJobs } from './load-jobs.js';
 
-// the map: the circuit chosen in the menu (saved), or ?map=space / forest / ice / desert / meadow (the meadow: the old test range)
-const MAP = { meadow: 'meadow', forest: 'forest', space: 'space', ice: 'ice', desert: 'desert' }[new URLSearchParams(location.search).get('map') || savedSettings().map] || 'space';
+// the map: the circuit chosen in the menu (saved), or ?map=space / forest / ice / desert / ocean / meadow (the meadow: the old test range)
+const MAP = { meadow: 'meadow', forest: 'forest', space: 'space', ice: 'ice', desert: 'desert', ocean: 'ocean' }[new URLSearchParams(location.search).get('map') || savedSettings().map] || 'space';
 const SHIP_URL = { high: 'assets/racer_web.glb', mid: 'assets/racer_web_4k.glb', low: 'assets/racer_web_2k.glb' };   // (by memory tier)
 const LUTS = ['assets/agx_punchy_lut65.bin', 'assets/agx_mhc_lut65.bin'];   // Blender's AgX looks: Punchy, Medium High Contrast
 const status = (t) => (document.getElementById('loadtext').textContent = t);
@@ -54,14 +56,15 @@ const progress = (step, f = 0) => {
 const nextFrame = () => new Promise((r) => { requestAnimationFrame(() => r()); setTimeout(r, 50); });
 async function boot() {
   if (new URLSearchParams(location.search).has('bootprof')) (await import('./profile.js')).bootProfile();
-  const sunDir = { space: SPACE_SUN, forest: FOREST_SUN, ice: ICE_SUN, desert: DESERT_SUN, meadow: MEADOW_SUN }[MAP];
+  const sunDir = { space: SPACE_SUN, forest: FOREST_SUN, ice: ICE_SUN, desert: DESERT_SUN, ocean: OCEAN_SUN, meadow: MEADOW_SUN }[MAP];
   // (the forest uses the space map's cascades - the same boxes - and its own air for fog: atmo.js)
   patchShaders({ sunDir, sunFog: SUN_FOG, shadowHalf: MAP !== 'meadow' ? FAR_HALF : 22, shadowDepth: 200,
     cascades: MAP !== 'meadow' ? [{ half: SHADOW_HALF, depth: SHADOW_FAR - SHADOW_NEAR }, { half: MID_HALF, depth: MID_FAR - MID_NEAR },
       { half: FAR_HALF, depth: FAR_FAR - FAR_NEAR }] : null,
     ...(MAP === 'forest' ? { fogChunk: ATMO_FOG_CHUNK, fogPars: ATMO_GLSL, worldOnly: true } : {}),
     ...(MAP === 'ice' ? { fogChunk: ICE_FOG_CHUNK, fogPars: ICE_GLSL, worldOnly: true } : {}),
-    ...(MAP === 'desert' ? { fogChunk: DUST_FOG_CHUNK, fogPars: DUST_GLSL, worldOnly: true } : {}) });
+    ...(MAP === 'desert' ? { fogChunk: DUST_FOG_CHUNK, fogPars: DUST_GLSL, worldOnly: true } : {}),
+    ...(MAP === 'ocean' ? { fogChunk: SEA_FOG_CHUNK, fogPars: SEA_GLSL, worldOnly: true } : {}) });
   const canvas = document.getElementById('view');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
   // the GPU driver reset (too long a job for a slow GPU, or out of memory): say so rather than a frozen screen
@@ -107,7 +110,8 @@ async function boot() {
   await Promise.all([nextFrame(), bakedLoad, jobLoad]);
   deferBakes(true);
   const world = MAP === 'space' ? new SpaceWorld(scene, renderer, camera) : MAP === 'forest' ? new ForestWorld(scene, renderer, camera)
-    : MAP === 'ice' ? new IceWorld(scene, renderer, camera) : MAP === 'desert' ? new DesertWorld(scene, renderer, camera) : new MeadowWorld(scene, renderer);
+    : MAP === 'ice' ? new IceWorld(scene, renderer, camera) : MAP === 'desert' ? new DesertWorld(scene, renderer, camera)
+    : MAP === 'ocean' ? new OceanWorld(scene, renderer, camera) : new MeadowWorld(scene, renderer);
   deferBakes(false);
   await finishLoadJobs();
   progress('circuit', 1);
@@ -519,7 +523,7 @@ async function boot() {
     for (const e of race ? race.entries : [{ ship }]) e.ship.ensureTrails(scene);
     // Keep shadow program state separate on maps with consistent measured gains.
     const instanceDepth = [];
-    if (['forest', 'ice', 'desert'].includes(MAP)) scene.traverse((o) => {
+    if (['forest', 'ice', 'desert', 'ocean'].includes(MAP)) scene.traverse((o) => {
       if (!o.isInstancedMesh || o.customDepthMaterial || Array.isArray(o.material)
         || o.material.alphaTest > 0 || o.material.displacementMap || o.material.clipShadows) return;
       const key = o.instanceColor ? 1 : 0;

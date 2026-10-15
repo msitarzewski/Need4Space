@@ -6,7 +6,7 @@ export const DEFAULTS = { tonemap: 'aces', ao: true, bloom: true, shadows: 'high
   blur: true, reflections: true, streaks: true, ai: 'easy', music: 'high', sfx: 'high', aa: 'smaa', aoRes: 'auto',
   brakeLights: true, laptop: false, touch: 'auto', map: 'space', shafts: true, lensWater: true, iceSnow: true, iceDust: true, aurora: true,
   iceStorm: true, iceGeysers: true, wreckFx: true, wreckMist: true, drift: false, airPitch: true, sandFx: true, dustDevils: true, heatHaze: true,
-  sandstorm: true, caveFx: true, canyonAO: true, engineHeat: true, engineTrails: 'puffs', colossus: true };
+  sandstorm: true, caveFx: true, canyonAO: true, engineHeat: true, engineTrails: 'puffs', colossus: true, seaLife: true };
 // Graphics quality presets ("low, which would be laptop, balanced in between, and high the actual default"): each sets
 // the rows below at once; a row changed by hand afterwards shows the preset as Custom. Low is Laptop mode (quality.js:
 // the lite shaders and fewer lights as well - tested on a Core Ultra 5 235U; the render scale stays at 100 %), High
@@ -61,6 +61,7 @@ const ROWS = [
   ['wreckFx', 'Derelict: sparks, flicker, drift, arcs (space)', [[true, 'On'], [false, 'Off']]],
   ['wreckMist', 'Derelict: coolant mist, sun beams (space)', [[true, 'On'], [false, 'Off']]],
   ['caveFx', 'Cave: daylight beams, spray, glowworms (forest moon)', [[true, 'On'], [false, 'Off']]],
+  ['seaLife', 'Sea life: leaping fish, leviathans, birds, shoals (ocean)', [[true, 'On'], [false, 'Off']]],
   ['brakeLights', 'Brake lights', [[true, 'On'], [false, 'Off']]],
   ['shadows', 'Shadows', [['high', 'High'], ['medium', 'Medium'], ['off', 'Off']]],
   ['scale', 'Render scale', [[0.5, '50%'], [0.75, '75%'], [1, '100%'], [1.25, '125%'], [1.5, '150%']]],
