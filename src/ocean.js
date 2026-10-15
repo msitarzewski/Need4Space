@@ -660,11 +660,25 @@ export class OceanWorld {
     this.fog.color.setRGB(1, t % 1000, this.level);
     this.dome.material.uniforms.under.value = Math.max(0, this.level - cp.y);
     const deep = smoothstep(0, 1.5, this.level - cp.y);
+    this.underK = deep;                              // (audio.js: the sound heard through the water)
     // the eye opening up in the dark of the deep (main.js: the exposure times this)
     this.exposureK = 1 + 0.8 * smoothstep(10, 220, this.level - cp.y);
     this.heat.enabled = deep > 0;
     this.heat.quad.material.uniforms.time.value = t;
     this.heat.quad.material.uniforms.deep.value = deep;
+    // the camera going into the sea: the froth over the lens, and a burst of bubbles round it
+    const wentIn = this.camWasUnder === false && deep > 0.5;
+    this.camWasUnder = deep > 0.5;
+    if (wentIn) {
+      this.frothT = t;
+      const rnd = this.life.rnd, fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      for (let k = 0; k < 260; k++) {
+        const p = cp.clone().addScaledVector(fwd, 1 + rnd() * 9).add(new THREE.Vector3((rnd() - 0.5) * 7, (rnd() - 0.5) * 5, (rnd() - 0.5) * 7));
+        this.life.spray.add(p, (rnd() - 0.5) * 3, rnd() * 2, (rnd() - 0.5) * 3, t, 3, 2);
+      }
+    }
+    const fr = this.frothT !== undefined ? Math.max(0, 1 - (t - this.frothT) / 0.9) : 0;
+    this.heat.quad.material.uniforms.froth.value = fr * fr * deep;
     this.city.haloMat && (this.cityMeshes.halo.material.uniforms.lvl.value = this.level);
     this.ocean.update(t, camera);
     this.shafts.update(t, this.level);

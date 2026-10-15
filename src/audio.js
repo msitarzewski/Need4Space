@@ -96,7 +96,9 @@ export class GameAudio {
     this.master.gain.value = this.muted ? 0 : 1;
     const lim = c.createDynamicsCompressor();
     lim.threshold.value = -4; lim.knee.value = 4; lim.ratio.value = 14; lim.attack.value = 0.002; lim.release.value = 0.12;
-    this.master.connect(lim).connect(c.destination);
+    // under water (a map that has some: world.underK) everything heard through it - the highs gone, a little quieter
+    this.underF = this.filt('lowpass', 20000, 0.5);
+    this.master.connect(this.underF).connect(lim).connect(c.destination);
     this.sfxBus = this.gain(SFX_LV[this.levels.sfx] ?? 0.9, this.master);
     this.musicBus = this.gain(MUSIC_LV[this.levels.music] ?? 0.36, this.master);
     // echo for enclosed places: a send from everything, its return opened inside
@@ -329,6 +331,10 @@ export class GameAudio {
 
   // ---------------------------------------------------------------- per frame
   update(dt, { camera, ship, ctl, race, track, mode, inp, world }) {
+    if (this.underF) {
+      const k = world?.underK || 0, t = this.ctx.currentTime;
+      if (k !== this.underK) { this.underF.frequency.setTargetAtTime(20000 * Math.pow(520 / 20000, k), t, 0.06); this.underK = k; }
+    }
     if (!this.ctx || this.ctx.state !== 'running') return;
     const c = this.ctx, t = c.currentTime, P = this.p;
     // paused (the menu over the game): the ship and the race fall back, the music plays on

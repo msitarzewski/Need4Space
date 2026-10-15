@@ -411,10 +411,10 @@ export class Ocean {
             float band = exp(-pow((d - rad) / w, 2.0)) + 0.7 * exp(-pow((d - rad * 0.62) / (w * 0.8), 2.0));
             ringK += band * (1.0 - smoothstep(1.5, 7.0, age)) * smoothstep(0.0, 0.2, age) + (1.0 - smoothstep(0.0, rad * 0.7 + 2.0, d)) * (1.0 - smoothstep(0.0, 2.5, age)) * 0.9;
           }
-          foam = max(foam, clamp(ringK, 0.0, 1.0) * smoothstep(0.3, 0.55, foamN + 0.2));
+          foam = max(foam, clamp(ringK * 0.7, 0.0, 0.8) * smoothstep(0.4, 0.62, foamN + 0.1));
           // plankton: points of cyan where the foam churns, flaring and fading
           float spark = smoothstep(0.78, 0.98, fract(r2.b * 7.0 + r1.a * 3.0 + seTime * 0.35)) * smoothstep(0.55, 0.85, foamN);
-          vec3 bio = vec3(0.05, 0.9, 1.25) * (spark * (foam * 7.0 + 0.06) + clamp(ringK, 0.0, 1.5) * 0.9 * smoothstep(0.4, 0.8, foamN)) * seBio * (1.0 - far);
+          vec3 bio = vec3(0.05, 0.9, 1.25) * (spark * (foam * 5.0 + 0.06) + clamp(ringK, 0.0, 1.0) * 0.3 * smoothstep(0.5, 0.85, foamN)) * seBio * (1.0 - far);
           vec3 T, L;
           if (dot(V, Ng) >= 0.0) {
             // from above: the sky mirrored, the moon's glade, light through the thin crests, foam
@@ -542,16 +542,29 @@ export class UnderPass extends Pass {
     super();
     this.needsSwap = true;
     this.quad = new FullScreenQuad(new THREE.ShaderMaterial({
-      uniforms: { tDiffuse: { value: null }, time: { value: 0 }, aspect: { value: 1 }, deep: { value: 1 } },
+      uniforms: { tDiffuse: { value: null }, time: { value: 0 }, aspect: { value: 1 }, deep: { value: 1 }, froth: { value: 0 } },
       vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
       fragmentShader: /* glsl */`
-        uniform sampler2D tDiffuse; uniform float time, aspect, deep; varying vec2 vUv;
+        uniform sampler2D tDiffuse; uniform float time, aspect, deep, froth; varying vec2 vUv;
+        float uh(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
         void main() {
           vec2 q = vUv * vec2(aspect, 1.0);
           vec2 o = vec2(sin(q.y * 23.0 + time * 1.9 + sin(q.x * 7.0 + time * 0.7)), cos(q.x * 19.0 + time * 1.6 + sin(q.y * 9.0 - time * 0.5))) * 0.0016 * deep;
           vec3 c = texture2D(tDiffuse, vUv + o).rgb;
           vec2 e = vUv - 0.5;
           c *= 1.0 - 0.4 * deep * smoothstep(0.15, 0.75, dot(e, e) * 2.4);
+          // going in: the froth over the lens - bubbles of every size rushing up and away, the picture whitened through them
+          if (froth > 0.0) {
+            float b = 0.0;
+            for (int i = 0; i < 3; i++) {
+              float sc = 9.0 + float(i) * 11.0;
+              vec2 g = q * sc + vec2(0.0, time * (1.5 + float(i)) * 2.5), id = floor(g), f = fract(g) - 0.5;
+              vec2 o2 = (vec2(uh(id), uh(id + 7.3)) - 0.5) * 0.6;
+              float r = 0.18 + 0.22 * uh(id + 3.1), d = length(f - o2);
+              b = max(b, step(0.45, uh(id + 1.7)) * (smoothstep(r, r * 0.7, d) - 0.6 * smoothstep(r * 0.6, 0.0, d)));
+            }
+            c = mix(c, c * 0.6 + vec3(0.32, 0.5, 0.55), clamp(b * froth * 1.4 + froth * 0.25, 0.0, 1.0));
+          }
           gl_FragColor = vec4(c, 1.0);
         }`,
     }));
