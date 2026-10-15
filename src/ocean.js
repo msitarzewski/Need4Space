@@ -404,20 +404,29 @@ export class OceanWorld {
     // and glows the city's lamps'. Kept clear of the dive's road
     const ups = [];
     for (let k = 0; k < 10; k++) {
-      const a = (k / 10) * Math.PI * 2 + 0.17, p = new THREE.Vector3(K.x + Math.cos(a) * 253, yT - 2, K.z + Math.sin(a) * 253);
+      const a = (k / 10) * Math.PI * 2 + 0.17, p = new THREE.Vector3(K.x + Math.cos(a) * 254, yT - 12.3, K.z + Math.sin(a) * 254);
       if (this.track.P[this.track.nearestIndex(p)].distanceTo(p) < 34) continue;
       ups.push(p);
     }
     this.keeperU = { kLP: { value: Array.from({ length: 10 }, (_, i) => (ups[i] ? new THREE.Vector4(ups[i].x, ups[i].y + 7, ups[i].z, 70000) : new THREE.Vector4(0, -1e5, 0, 0))) },
       kLC: { value: new THREE.Color(1.0, 0.62, 0.32) } };
     const pedMat = keeperLit(basaltMaterial({ key: 'keeper-ped' }), this.keeperU, 'keeper-ped');
+    // (the bowls their own stone, not lit by their own fire's up-light: a few metres from it, they shone white)
+    const bowlMat = basaltMaterial({ key: 'keeper-bowls' });
     const bowl = [[0, 0], [1.7, 0], [1.9, 0.5], [1.1, 1.1], [0.8, 3.0], [2.6, 3.9], [2.9, 4.5], [2.4, 4.6], [0, 4.1]].map(([r, y]) => new THREE.Vector2(r * 1.4, y * 1.4));
     const bowls = ups.map((p) => new THREE.LatheGeometry(bowl, 16).translate(p.x, p.y, p.z));
     for (const p of ups) this.city.lamps.push({ p: p.clone().setY(p.y + 7.2), col: [1.0, 0.55, 0.2], I: 16000, reach: 180, size: 3.2, kind: 'brazier' });
-    // the pedestal: a column of basalt, flared where it stands on the floor, a lip under the statue's hem (<= 250 m)
+    // the pedestal: a column of basalt, flared where it stands on the floor, a lip under the statue's hem (<= 250 m), and
+    // a ledge round it 12 m under the lip that the braziers stand on (set out past the lip, they floated in the water)
     const prof = [[0, yF], [268, yF], [262, yF + 30], [250, yF + 64], [238, yF + 130], [232, (yF + yT) / 2], [234, yT - 70],
-      [244, yT - 36], [249, yT - 16], [246, yT - 8], [245, yT], [0, yT]].map(([r, y]) => new THREE.Vector2(r, y));
-    const pg = mergeGeometries([new THREE.LatheGeometry(prof, 96).translate(K.x, 0, K.z), ...bowls].map((g) => g.deleteAttribute('uv')));
+      [244, yT - 36], [252, yT - 22], [262, yT - 16], [262, yT - 12.4], [249, yT - 12], [246, yT - 8], [245, yT], [0, yT]].map(([r, y]) => new THREE.Vector2(r, y));
+    const pg = new THREE.LatheGeometry(prof, 96).translate(K.x, 0, K.z).deleteAttribute('uv');
+    if (bowls.length) {
+      const bm = new THREE.Mesh(mergeGeometries(bowls.map((g) => g.deleteAttribute('uv'))), bowlMat);
+      bm.name = 'keeper-braziers';
+      bm.layers.set(2);
+      scene.add(bm);
+    }
     // (its ambient baked, darker down where it stands on the floor: kept out of the AO's own, as the floor is)
     const pao = new Uint8Array(pg.attributes.position.count);
     for (let v = 0; v < pao.length; v++) pao[v] = Math.round(255 * (0.55 + 0.45 * smoothstep(yF, yF + 90, pg.attributes.position.getY(v))));

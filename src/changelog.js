@@ -2,6 +2,13 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.5.4', date: '16 Oct 2026', name: 'Nothing afloat',
+    notes: [
+      'The leviathans’ fins and tail grow out of their bodies (they floated beside them)',
+      'The braziers round the Keeper’s feet stand on a ledge of the pedestal instead of floating in the water',
+    ],
+  },
+  {
     version: '1.5.3', date: '16 Oct 2026', name: 'Darker night',
     notes: [
       'The ocean planet’s night is darker over the sea: the road dark and wet, the lamps’ pools and the headlights standing out',

@@ -103,16 +103,25 @@ function leviathanGeometry() {
     const a = i * NA + j, b = i * NA + ((j + 1) % NA), c = a + NA, d = b + NA;
     idx.push(a, c, b, b, c, d);
   }
-  const fin = (z0, len, w, sweep, y, droop) => {
+  // the fins grow out of the body: each root edge set inside the flank where it is (rooted at a fixed 0.07 out, the
+  // pectorals stood off the body below it and the fluke metres off the tail's thin end - floating). One face each (the
+  // material is two-sided: a face wound both ways had no normal)
+  const girthAt = (z) => girth(Math.min(1, Math.max(0, 0.5 - z))) * 1.08;
+  const fin = (pts, root) => {
     for (const sd of [1, -1]) {
       const b = pos.length / 3;
-      const pts = [[0.07, y, z0 + w / 2], [0.07, y, z0 - w / 2], [0.07 + len, y - droop, z0 - w / 2 - sweep], [0.07 + len * 0.96, y - droop, z0 - sweep + w * 0.15]];
-      for (const [x, yy, z] of pts) { pos.push(sd * x, yy, z); along.push(0.5 - z); span.push(Math.max(0, (x - 0.07) / len)); }
-      idx.push(b, b + 1, b + 2, b, b + 2, b + 3, b, b + 2, b + 1, b, b + 3, b + 2);
+      for (const [x, yy, z] of pts) { pos.push(sd * x, yy, z); along.push(0.5 - z); span.push(Math.max(0, Math.min(1, (x - root) / (pts[2][0] - root)))); }
+      idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
     }
   };
-  fin(0.26, 0.3, 0.09, 0.14, -0.04, 0.05);         // the long pectorals
-  fin(-0.46, 0.13, 0.05, 0.06, 0.0, 0.0);          // the fluke
+  {
+    // the long pectorals, low on the flank behind the head
+    const z0 = 0.26, w = 0.09, sweep = 0.14, len = 0.3, droop = 0.05, y = -0.03;
+    const ra = girthAt(z0 + w / 2) * 0.7, rb = girthAt(z0 - w / 2) * 0.7;
+    fin([[ra, y, z0 + w / 2], [rb, y, z0 - w / 2], [rb + len, y - droop, z0 - w / 2 - sweep], [ra + len * 0.96, y - droop, z0 - sweep + w * 0.15]], Math.min(ra, rb));
+    // the fluke: flat, out both ways from the tail's stalk (its root on the body's own line)
+    fin([[0, 0, -0.43], [0, 0, -0.5], [0.13, -0.01, -0.56], [0.12, -0.01, -0.47]], 0);
+  }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('along', new THREE.Float32BufferAttribute(along, 1));
