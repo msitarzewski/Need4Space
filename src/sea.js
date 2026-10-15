@@ -445,7 +445,10 @@ export class Ocean {
             float ci = max(dot(Nd, V), 0.0), st2 = 1.777 * (1.0 - ci * ci);
             float Fr = st2 >= 1.0 ? 1.0 : 0.02 + 0.98 * pow(1.0 - sqrt(1.0 - st2), 5.0);
             float rip = 0.5 + 0.5 * sin((r1.b * 0.6 + r2.b * 0.4) * 18.0 + seTime * 0.7);
-            vec3 c = SE_MURK * (0.35 + 1.6 * rip * rip) * Fr + SE_SUNRAD * 0.012 * pow(rip, 6.0) * (1.0 - far) + foam * SE_SUNRAD * 0.02 + bio * 0.6;
+            // through the window: the sky bent down to it, the moon a bright blur in it
+            vec3 refr = refract(-V, Nd, 1.333);
+            vec3 win = st2 < 1.0 ? (textureLod(seSky, refr, 2.0).rgb * 1.4 + SE_SUNRAD * (0.6 * pow(max(dot(refr, SE_SUN), 0.0), 60.0) + 0.06 * pow(max(dot(refr, SE_SUN), 0.0), 6.0))) * (1.0 - Fr) : vec3(0.0);
+            vec3 c = SE_MURK * (0.35 + 1.6 * rip * rip) * Fr + SE_SUNRAD * 0.012 * pow(rip, 6.0) * (1.0 - far) + foam * SE_SUNRAD * 0.02 + bio * 0.6 + win * (0.7 + 0.6 * rip);
             float a = 1.0 - (1.0 - Fr) * (1.0 - foam * 0.5);
             seWater(cameraPosition, -V, dist, T, L);
             float tw = dot(T, vec3(0.3333));
@@ -494,4 +497,47 @@ export class UnderPass extends Pass {
     renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
     this.quad.render(renderer);
   }
+}
+
+// Moonlight shafts under the sea near the surface: long faint beams hanging from it along the moon's light bent going
+// in, flickering with the waves over them, fading with depth and off round the camera. Billboards turned about their
+// own axis, worked out round the camera every frame on the GPU (a fixed lattice that wraps)
+export class Shafts {
+  constructor(n = 90) {
+    const g = new THREE.InstancedBufferGeometry().copy(new THREE.PlaneGeometry(1, 1).translate(0, -0.5, 0));
+    const a = new Float32Array(n * 4), rnd = (i) => (Math.sin(i * 12.9898 + 4.1) * 43758.5453) % 1;
+    for (let i = 0; i < n; i++) a.set([Math.abs(rnd(i)) * 220, Math.abs(rnd(i + 0.5)) * 220, 1.2 + Math.abs(rnd(i + 0.7)) * 3, 50 + Math.abs(rnd(i + 0.9)) * 90], i * 4);
+    g.setAttribute('aS', new THREE.InstancedBufferAttribute(a, 4));
+    g.instanceCount = n;
+    const cy = Math.sqrt(1 - (1 - SUN_DIR.y * SUN_DIR.y) / 1.777), k = Math.sqrt(1 - cy * cy) / Math.hypot(SUN_DIR.x, SUN_DIR.z);
+    const down = new THREE.Vector3(-SUN_DIR.x * k, -cy, -SUN_DIR.z * k).normalize();
+    this.mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      uniforms: { time: { value: 0 }, lvl: { value: 0 }, down: { value: down } },
+      vertexShader: /* glsl */`
+        uniform float time, lvl; uniform vec3 down; attribute vec4 aS; varying float vA; varying vec2 vQ;
+        void main() {
+          vec3 c = cameraPosition;
+          // its foot on the surface, on a lattice round the camera that wraps as it moves
+          vec2 p = c.xz + mod(aS.xy - c.xz + 110.0, 220.0) - 110.0;
+          vec3 top = vec3(p.x, lvl, p.y) - down * 2.0;
+          vec3 axis = down, toCam = normalize(c - top), side = normalize(cross(axis, toCam));
+          vec3 wp = top + side * position.x * aS.z + axis * (-position.y) * aS.w;
+          vQ = vec2(position.x * 2.0, -position.y);
+          float d = distance(c.xz, p);
+          vA = (1.0 - smoothstep(60.0, 110.0, d)) * smoothstep(18.0, 40.0, d) * (1.0 - smoothstep(10.0, 70.0, lvl - c.y)) * step(c.y, lvl)
+            * (0.55 + 0.45 * sin(time * 0.7 + aS.x * 0.37) * sin(time * 0.43 + aS.y * 0.21));
+          gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
+        }`,
+      fragmentShader: /* glsl */`
+        varying float vA; varying vec2 vQ;
+        void main() {
+          float k = (1.0 - vQ.x * vQ.x) * pow(1.0 - vQ.y, 1.5) * smoothstep(0.0, 0.05, vQ.y);
+          gl_FragColor = vec4(vec3(0.035, 0.09, 0.105) * k * vA, 1.0);
+        }`,
+    }));
+    this.mesh.frustumCulled = false;
+    this.mesh.name = 'moon-shafts';
+  }
+  update(t, lvl) { const u = this.mesh.material.uniforms; u.time.value = t; u.lvl.value = lvl; }
 }

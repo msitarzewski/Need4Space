@@ -10,7 +10,7 @@ import { hullMaps } from './hull.js';
 import { bakeLater } from './bake.js';
 import { Q } from './quality.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { SUN_DIR, SUN_E, SUN_COL, SEA_Y, seaSkyDome, seaLight, Ocean, waveHeight, UnderPass } from './sea.js';
+import { SUN_DIR, SUN_E, SUN_COL, SEA_Y, seaSkyDome, seaLight, Ocean, waveHeight, UnderPass, Shafts } from './sea.js';
 import { mesaGeometry, archGeometry } from './sandstone.js';
 import { sunOnly, setCave } from './look.js';
 import { City, lighthouseGeometry, stoneMaterial } from './atlantis.js';
@@ -237,7 +237,9 @@ export class OceanWorld {
     abyss.name = 'abyss';
     abyss.frustumCulled = false;
     scene.add(abyss);
-    this.noAO.push(this.ocean.mesh, abyss);
+    this.shafts = new Shafts();
+    scene.add(this.shafts.mesh);
+    this.noAO.push(this.ocean.mesh, abyss, this.shafts.mesh);
     lap('sea');
     // the drowned city
     this.city = new City(this.track, this.grid, { dens: this.dens });
@@ -566,6 +568,7 @@ export class OceanWorld {
     this.heat.quad.material.uniforms.deep.value = deep;
     this.city.haloMat && (this.cityMeshes.halo.material.uniforms.lvl.value = this.level);
     this.ocean.update(t, camera);
+    this.shafts.update(t, this.level);
     if (this.beam) this.beam.rotation.y = -t * (Math.PI * 2 / 10);
     // the city's nearest big lamps as real lights (only under the sea, and only near)
     {
