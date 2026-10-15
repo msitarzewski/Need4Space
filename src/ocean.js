@@ -17,6 +17,7 @@ import { sunOnly, setCave } from './look.js';
 import { City, lighthouseGeometry, stoneMaterial, castleGeometry, bakedGeometry } from './atlantis.js';
 import { SeaLife } from './sealife.js';
 import { GiantSquid } from './squid.js';
+import { Rain } from './rain.js';
 import { Seabed } from './seabed.js';
 import { TrackGrid } from './spires.js';
 import { moonMesh } from './celestial.js';
@@ -278,6 +279,8 @@ export class OceanWorld {
     scene.add(abyss);
     this.lightning = new Lightning();
     scene.add(this.lightning.mesh);
+    // the rain over the sea (rain.js; the rings it makes on the sea: sea.js)
+    this.rain = new Rain(scene, this.dens);
     this.shafts = new Shafts();
     scene.add(this.shafts.mesh);
     this.noAO.push(abyss, this.shafts.mesh);
@@ -308,6 +311,7 @@ export class OceanWorld {
     // round the way under the sea: pinnacles, kelp, weed off the track's edges, sea grass, anemones, vents, shoals
     this.seabed = new Seabed(scene, this.track, { grid: this.grid, basin: this.city.basin, keeper: KEEPER, rockMat: this.rockMat, dens: this.dens });
     this.noAO.push(...this.seabed.meshes.filter((m) => m !== this.seabed.rocks));
+    this.noAO.push(...this.rain.meshes);
     this.shipsWet = [];
     lap('life');
     this.worldShadow(scene);
@@ -778,6 +782,8 @@ export class OceanWorld {
     this.stormOn = v.oceanStorm !== false;
     this.wetOn = v.shipWet !== false;
     this.squid?.setOn(v.kraken !== false);
+    this.rainOn = v.oceanRain !== false;
+    this.rain.setOn(this.rainOn);
     if (!this.mirrorOn) this.ocean.U.seReflOn.value = 0;
   }
 
@@ -856,7 +862,7 @@ export class OceanWorld {
     const tp = this.track.parts;
     const under = (this._under ||= [...this.city.parts, this.cityMeshes.halo, this.cityMeshes.street, this.cityMeshes.glow, this.shafts.mesh,
       this.life.shoal, this.life.jelly, this.life.snow, this.life.giant.mesh, ...this.scene.children.filter((o) => o.name === 'abyss'),
-      tp.under, ...tp.girders, ...tp.walls, this.pylons].filter(Boolean));
+      tp.under, ...tp.girders, ...tp.walls, this.pylons, ...this.rain.meshes].filter(Boolean));
     this.ocean.reflect(renderer, this.scene, this.cam, this.sky, this.skyCam, this.fog, under);
   }
 
@@ -1004,6 +1010,24 @@ export class OceanWorld {
       for (const o of this.deepOnly) o.visible = under;
       this.squid?.update(dt, camera.position, deep);
     }
+    // the rain: falling round the camera, splashing on the deck ahead of it, lit by the nearest ships' headlights; the
+    // sea's rings where it falls (none of it under the sea)
+    if (this.rainOn !== false) {
+      const under = cp.y < this.level, lamps = (this._lamps ||= []);
+      lamps.length = 0;
+      if (this.race) {
+        for (const e of this.race.entries) {
+          const r = e.ship.root, pw = e.ship.engineOn === false ? 0 : (e.ship.power ?? 1) * (this.headlightK ?? 1);
+          lamps.push({ pos: r.position, fwd: (e._fwd ||= new THREE.Vector3()).set(0, 0, -1).applyQuaternion(r.quaternion), power: pw, d: r.position.distanceToSquared(cp) });
+        }
+        lamps.sort((a, b) => a.d - b.d);
+      }
+      const fr = (this._rainFr ||= Array.from({ length: 4 }, () => ({})));
+      fr.forEach((f, i) => this.track.frame(this.track.wrap(s - 15 + i * 25), f));
+      this.rain.update(t, dt, camera, under, lamps, fr);
+      this.ocean.U.seRain.value = under ? 0 : 1;
+      this.rainLevel = under ? 0 : 1;                   // (its sound: audio.js)
+    } else { this.ocean.U.seRain.value = 0; this.rainLevel = 0; }
     const tr = this.track, gi = tr.gantryIdx, sIdx = Math.floor(s / tr.step);
     gi.map((i) => ({ i, d: Math.min((i - sIdx + tr.n) % tr.n, (sIdx - i + tr.n) % tr.n) }))
       .sort((p, q) => p.d - q.d).slice(0, 3).forEach(({ i }, k) => {

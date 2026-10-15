@@ -418,6 +418,7 @@ export class GameAudio {
     this.level(P.buzzG, buzz, t, 0.05);
 
     this.ambient(world, t, v);
+    this.rainSound(world, t);
 
     // ---- the rivals' engines: the nearest five
     const ents = race && mode === 'race' ? race.entries.filter((e) => !e.player) : [];
@@ -527,6 +528,20 @@ export class GameAudio {
       const w = world.creatures?.whalePos?.(Math.floor(Math.random() * 3));
       if (w) this.whaleCall(w);
     }
+  }
+  // the rain: a hiss with a patter under it, round the listener, as loud as the world says (world.rainLevel 0..1; made
+  // the first time it is wanted)
+  rainSound(world, t) {
+    const k = world?.rainLevel ?? 0;
+    if (!this.rainG) {
+      if (k <= 0) return;
+      const g = (this.rainG = this.sleeper());
+      g.connect(this.sfxBus);
+      this.loop(this.pink).connect(this.filt('highpass', 2500, 0.5)).connect(this.gain(0.5, g));
+      this.loop(this.white).connect(this.filt('bandpass', 7000, 0.6)).connect(this.gain(0.12, g));
+      this.loop(this.brown).connect(this.filt('lowpass', 500, 0.7)).connect(this.gain(0.6, g));
+    }
+    this.level(this.rainG, 0.16 * k, t, 0.5);
   }
   // through a curtain of water: a rushing burst, the thud of it on the hull
   splash() {

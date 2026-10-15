@@ -71,12 +71,13 @@ export class Flight {
     // ---- rotation: rates chase the stick; the assist levels the wings, and the nose near the ground
     const fwd = this.forward, up = this.up, right = this.right;
     const ctl = live ? power : 0;
-    const tgt = new THREE.Vector3(inp.pitch * RATES.pitch, -inp.yaw * RATES.yaw, -inp.roll * RATES.roll).multiplyScalar(ctl);
+    const roll = clamp(inp.roll + (inp.rollKeys || 0), -1, 1);
+    const tgt = new THREE.Vector3(inp.pitch * RATES.pitch, -inp.yaw * RATES.yaw, -roll * RATES.roll).multiplyScalar(ctl);
     const bank = this.bank, pitch = this.pitch;
     const groundS = this.terrain.surface(this.pos.x, this.pos.z);
     this.agl = this.pos.y - this.ship.bottom - groundS;
     if (this.assist && live) {
-      if (Math.abs(inp.roll) < 0.1) tgt.z += 3.0 * (bank - inp.yaw * 0.45) * ctl;
+      if (Math.abs(roll) < 0.1) tgt.z += 3.0 * (bank - inp.yaw * 0.45) * ctl;
       if (Math.abs(inp.pitch) < 0.1 && this.agl < 14) tgt.x += -2.2 * pitch * ctl * smoothstep(14, 4, this.agl);
     }
     this.rate.lerp(tgt, damp(7, dt));

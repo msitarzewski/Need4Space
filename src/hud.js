@@ -14,9 +14,9 @@ export const CONTROLS = [
   ['Flight', [
     [['W', 'S'], 'Throttle up / down (S at zero: brake)'],
     [['A', 'D'], 'Steer'],
-    [['←', '→', '↑', '↓'], 'Steer; in the air ↓ nose down, ↑ nose up'],
+    [['↑', '↓'], 'In the air: ↓ nose down, ↑ nose up'],
     [['Shift'], 'Boost (orange pads on the track kick too)'],
-    [['Z', 'X'], 'Airbrakes left / right: sharper turns'],
+    [['←', '→'], 'Airbrakes left / right: sharper turns (Z / X too)'],
     [['Mouse'], 'Click to steer (Esc releases)'],
   ]],
   ['Ship and track', [

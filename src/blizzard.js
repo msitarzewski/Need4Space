@@ -26,7 +26,7 @@ vec3 bzLight(vec3 dir) {
 }`;
 
 // a camera-facing quad stretched along a velocity (the camera's own taken off): fx.js's streaks
-const STRETCH = /* glsl */`
+export const STRETCH = /* glsl */`
 vec4 bzStreak(vec3 p, vec3 vel, float size, float shutter, float maxLen, out float k) {
   vec4 mv = viewMatrix * vec4(p, 1.0);
   vec3 d = normalize(mv.xyz), tr = (viewMatrix * vec4(vel, 0.0)).xyz * shutter;

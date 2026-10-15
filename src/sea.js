@@ -104,8 +104,8 @@ const float SE_BA = 1.5e-4;         // its extinction over the sea (per m)
 // the sea mist: a low bank lying on the water all round, thick at the surface and thinning upward - the far sea, the
 // distant stacks and causeways and the edge of the world go into it (its extinction at the water, per m; its scale
 // height; the moonlight it gives back)
-const float SE_FA = 1.0e-3;
-const float SE_FH = 70.0;
+const float SE_FA = 1.5e-3;
+const float SE_FH = 80.0;
 const vec3 SE_FOGC = vec3(0.034, 0.042, 0.058);
 vec3 seMistC(vec3 d) { return SE_FOGC + SE_SUNRAD * 0.012 * pow(max(dot(d, SE_SUN), 0.0), 6.0); }
 // the optical depth of a density exp(-y / H) along o + d t, t in [0, dist]
@@ -474,7 +474,7 @@ export class Ocean {
   constructor(renderer, skyCube) {
     const wa = WAVES.map((W) => new THREE.Vector4(W.D.x, W.D.y, W.k, W.A)), wb = WAVES.map((W) => new THREE.Vector4(W.Q, W.w, W.ph, 0));
     this.U = { seCenter: { value: new THREE.Vector3() }, seTime: { value: 0 }, seWaveA: { value: wa }, seWaveB: { value: wb },
-      seSky: { value: skyCube }, seDetail: { value: rippleTexture(renderer) }, seBio: { value: 1 },
+      seSky: { value: skyCube }, seDetail: { value: rippleTexture(renderer) }, seBio: { value: 1 }, seRain: { value: 0 },
       seRings: { value: Array.from({ length: 16 }, () => new THREE.Vector4(0, 0, -1e6, 0)) },
       seLP: { value: Array.from({ length: 12 }, () => new THREE.Vector4(0, -1e5, 0, 0)) }, seLC: { value: Array.from({ length: 12 }, () => new THREE.Vector3()) },
       seRefl: { value: null }, seReflM: { value: new THREE.Matrix4() }, seReflOn: { value: 0 }, seReflPx: { value: 1 }, sePxA: { value: 0.002 } };
@@ -514,11 +514,26 @@ export class Ocean {
           gl_Position = projectionMatrix * viewMatrix * vec4(vW, 1.0);
         }`,
       fragmentShader: /* glsl */`
-        uniform samplerCube seSky; uniform sampler2D seDetail; uniform float seTime, seBio; uniform vec4 seRings[16]; uniform vec4 seLP[12]; uniform vec3 seLC[12];
+        uniform samplerCube seSky; uniform sampler2D seDetail; uniform float seTime, seBio, seRain; uniform vec4 seRings[16]; uniform vec4 seLP[12]; uniform vec3 seLC[12];
         uniform sampler2D seRefl; uniform mat4 seReflM; uniform float seReflOn, seReflPx;
         uniform vec4 seWaveA[6], seWaveB[6]; uniform float sePxA;
         varying vec2 vXZ;
         ${SEA_GLSL}
+        // the rain on the sea: rings spreading where the drops fall - one drop in each cell of two grids at a time, its ring
+        // inside its cell (none crosses into the next: one cell looked at each); the ring's slope across it, outward
+        vec2 seRainRings(vec2 p, float t) {
+          vec2 g = vec2(0.0);
+          for (int L = 0; L < 2; L++) {
+            float cs = L == 0 ? 1.6 : 2.3;
+            vec2 q = p / cs + float(L) * 7.31, i = mod(floor(q), 289.0), f = fract(q);
+            vec2 h = fract(sin(vec2(dot(i, vec2(127.1, 311.7)), dot(i, vec2(269.5, 183.3)))) * 43758.5453);
+            float ph = fract(t * (0.9 + 0.5 * h.y) + h.x * 7.0);
+            vec2 dv = f - (0.3 + 0.4 * h);
+            float d = length(dv), w = (d - ph * 0.28) / 0.035;
+            g += dv / max(d, 1e-4) * (-w * exp(-w * w)) * (1.0 - ph) * (1.0 - ph) * smoothstep(0.0, 0.06, ph) * 0.55;
+          }
+          return g;
+        }
         void main() {
           // the swell worked out again here, exactly, at this point's own place on the sea: the grid follows the camera,
           // and its corners sampled the waves at new places as it moved - between them the waves' shape and slope (and
@@ -559,6 +574,9 @@ export class Ocean {
           float rk1 = 1.0 - smoothstep(0.25, 1.2, fpx), rk2 = 1.0 - smoothstep(0.08, 0.4, fpx);
           vec2 sl = (r1.xy - 0.5) * 0.9 * rk1 + (r2.xy - 0.5) * 0.6 * rk2;
           vec3 N = normalize(Ng + vec3(sl.x, 0.0, sl.y));
+          // (the rain's rings: from above, and only near - finer than a few pixels they would glitter)
+          float rk = seRain * (1.0 - smoothstep(0.02, 0.06, fpx)) * step(SE_Y, cameraPosition.y);
+          if (rk > 0.0) { vec2 rr = seRainRings(sW.xz, seTime) * rk; N = normalize(N + vec3(rr.x, 0.0, rr.y)); }
           float foamN = r1.a * 0.55 + r2.a * 0.45;
           float foam = smoothstep(0.62, 0.2, sJ) * smoothstep(0.42, 0.7, foamN);
           // rings spreading where something broke the sea (a leap, a splash, a ship going in): foam, and the plankton lit

@@ -2,6 +2,15 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.5.9', date: '16 Oct 2026', name: 'Rain',
+    notes: [
+      'Rain over the ocean planet: it slants down in the wind and rushes past as you race, lit up in the headlights; drops splash on the track and ring the sea, and you hear it',
+      'A little more mist on the sea',
+      'The airbrakes are on the left / right arrows now (Z / X still work); steer with A / D, the mouse or a stick',
+      'A switch for the rain in Settings',
+    ],
+  },
+  {
     version: '1.5.8', date: '16 Oct 2026', name: 'Smoother seas',
     notes: [
       'The ocean planet runs faster, most of all under the sea (the slowest stretch a quarter quicker), with nothing changed in how it looks',

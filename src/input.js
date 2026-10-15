@@ -55,14 +55,16 @@ export class Input {
     const s = {
       throttleUp: k('KeyW'), throttleDown: k('KeyS'), throttleAxis: null,
       pitch: k('ArrowUp') - k('ArrowDown') - this.stick.y,
-      roll: k('ArrowRight') - k('ArrowLeft') + this.stick.x,
+      // (the left / right arrows are the airbrakes, as Z / X: steering is A / D, the mouse, the sticks; in free
+      // flight they still roll the ship - rollKeys)
+      roll: this.stick.x, rollKeys: k('ArrowRight') - k('ArrowLeft'),
       yaw: k('KeyD') - k('KeyA'),
       climb: k('Space'), descend: k('KeyC'),
       boost: k('ShiftLeft') || k('ShiftRight'),
       engine: this.was('KeyE'), canopy: this.was('KeyF'), camera: this.was('KeyV'),
       reset: this.was('KeyR'), respawn: this.was('KeyT'), help: this.was('KeyH'), mute: this.was('KeyM'),
       assist: this.was('KeyL'), invert: this.was('KeyI'), click: this.was('Mouse0'), settings: this.was('KeyO'),
-      airL: k('KeyZ'), airR: k('KeyX'),
+      airL: Math.max(k('KeyZ'), k('ArrowLeft')), airR: Math.max(k('KeyX'), k('ArrowRight')),
     };
     // gamepad (standard mapping)
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
