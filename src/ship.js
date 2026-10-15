@@ -616,6 +616,44 @@ function deckPatch(sh, U) {
     .replace('#include <lights_fragment_end>', C.lights_fragment_end.replace(IND_DIFF, DECK_ADD + IND_DIFF));
 }
 
+// The hull's baked occlusion on the sun too (micro-shadowing - Chan 2018, as Filament has it). three applies an AO map
+// to the sky's light only, so the panel seams, vents, hatches and the corners where parts meet were as bright as open
+// panel under the sun, and the hull read flat beside the Cycles renders (where real geometry shadows them). The AO
+// becomes a cone of open sky: light from inside it reaches the surface, light from lower down fades out - so a seam
+// darkens where the sun grazes it, and open panel (AO ~1) is untouched. hullMicro 0: as before. The map is read once
+// for this and the sky's AO both.
+const MICRO_PARS = /* glsl */`
+uniform float hullMicro;
+float hullAperture = 1e4;
+void RE_Direct_Hull( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight ) {
+	IncidentLight hullLight = directLight;
+	float ms = saturate( dot( geometryNormal, hullLight.direction ) * hullAperture );
+	hullLight.color *= ms * ms;
+	RE_Direct_Physical( hullLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
+}
+#undef RE_Direct
+#define RE_Direct RE_Direct_Hull
+`;
+const AO_READ = 'texture2D( aoMap, vAoMapUv ).r';
+const HULL_MICRO = { value: 1 };          // (Settings: one switch for every ship)
+function microPatch(sh) {
+  const C = THREE.ShaderChunk;
+  if (!C.aomap_fragment.includes(AO_READ) || !/#define RE_Direct\s+RE_Direct_Physical/.test(C.lights_physical_pars_fragment)) {
+    if (!microPatch.warned) console.warn('light chunks changed: the hull micro-shadowing not applied');
+    microPatch.warned = true;
+    return;
+  }
+  sh.uniforms.hullMicro = HULL_MICRO;
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <lights_physical_pars_fragment>', '#include <lights_physical_pars_fragment>\n#ifdef USE_AOMAP\n' + MICRO_PARS + '#endif\n')
+    .replace('#include <lights_fragment_begin>', `#ifdef USE_AOMAP
+	float hullAO = ${AO_READ};
+	hullAperture = hullMicro > 0.0 ? inversesqrt( 1.0 - min( mix( 1.0, hullAO, hullMicro ), 0.9999 ) ) : 1e4;
+#endif
+#include <lights_fragment_begin>`)
+    .replace('#include <aomap_fragment>', C.aomap_fragment.replace(AO_READ, 'hullAO'));
+}
+
 // Glass that reads as glass. three.js scales a transparent surface's reflection by its opacity as well, so the canopy
 // and the bay windows were a flat grey film ("the glass on the engine looks so bad"). Here the reflection goes on at
 // full strength (premultiplied blending: the glass adds its reflection and dims what is behind by its opacity), and
@@ -893,6 +931,10 @@ export class Ship {
       }
     });
   }
+
+  // the hull's occlusion on the sun and lamps (microPatch), for every ship: 0 off .. 1
+  static set microShadow(k) { HULL_MICRO.value = k; }
+  static get microShadow() { return HULL_MICRO.value; }
 
   // the deck's light this frame (main.js): up its normal under the ship (world), direct the irradiance the sun, lamps
   // and engines put on it round the ship, sky the share of the sky's light reaching it, k 0 (off) .. 1
@@ -1190,6 +1232,7 @@ export class Ship {
       const rg = !!nm?.userData.rg;
       m.onBeforeCompile = (sh) => {
         deckPatch(sh, this.deckU);
+        microPatch(sh);
         sh.fragmentShader = sh.fragmentShader.replace('#include <lights_physical_fragment>',
           '#include <lights_physical_fragment>\n#ifdef USE_CLEARCOAT\n  material.clearcoat *= clamp(1.0 - metalnessFactor, 0.0, 1.0);\n#endif');
         if (rg) sh.fragmentShader = rgNormalChunk(sh.fragmentShader);
@@ -1212,6 +1255,7 @@ export class Ship {
     const A = new THREE.Color(...team.livery), B = new THREE.Color(...team.body);
     m.onBeforeCompile = (sh) => {
       deckPatch(sh, this.deckU);
+      microPatch(sh);
       sh.uniforms.teamA = { value: A };
       sh.uniforms.teamB = { value: B };
       sh.fragmentShader = sh.fragmentShader

@@ -506,6 +506,7 @@ async function boot() {
     blurOn = v.blur;
     Ship.brakeLights = v.brakeLights;
     deck.k = v.deckLight !== false ? 1 : 0;           // the deck's light on the ships
+    Ship.microShadow = v.hullShadows !== false ? 1 : 0;   // their seams and recesses shaded from the sun
     const size = { high: 4096, medium: 2048 }[v.shadows];
     if (world.shadowMode) world.shadowMode(size, renderer, scene);
     else if (renderer.shadowMap.enabled !== !!size) {
