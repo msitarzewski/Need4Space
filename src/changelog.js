@@ -2,6 +2,18 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.2.5', date: '16 Oct 2026', name: 'The broken giant',
+    notes: [
+      'A colossal warship broken in two hangs over the ringed planet in space, wreckage drifting from the break',
+      'The ring station rebuilt in full detail, and the light gates stand on proper emitter pylons',
+      'Engines: heat shimmer behind every ship and glowing gas trails (both in Settings)',
+      'Rival engine lights in the dark are softer and shine from their tails',
+      'The chase camera no longer dips through the road on the rolling straight',
+      'Desert sandstorm: no more black lamp posts or dark shapes in the dust',
+      'Fixed a flickering white bar near the lane lights',
+    ],
+  },
+  {
     version: '1.2.4', date: '16 Oct 2026', name: 'Lamps fixed in place',
     notes: [
       'No more lights floating in the space derelict: floodlights hang from the ceiling on rods',
