@@ -2,6 +2,13 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.4.5', date: '16 Oct 2026', name: 'Steady horizon',
+    notes: [
+      'Far off the sea mirrors the sky and the lights’ streaks only: distant reflections no longer flicker as you move',
+      'Reflections are bent by the waves only close by, as in three.js’s own ocean',
+    ],
+  },
+  {
     version: '1.4.4', date: '16 Oct 2026', name: 'Smooth reflections',
     notes: [
       'The reflection in the sea is drawn anti-aliased: thin lights in it no longer crawl as you move',

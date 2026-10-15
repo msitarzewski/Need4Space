@@ -555,14 +555,16 @@ export class Ocean {
           if (dot(V, Ng) >= 0.0) {
             // from above: the sky mirrored, the moon's glade, light through the thin crests, foam
             float nv = max(dot(N, V), 0.0), F = 0.02 + 0.98 * pow(1.0 - nv, 5.0);
-            vec3 R = reflect(-V, N); R.y = abs(R.y);
+            // (the sky's reflection off a calmer surface further off: the waves a few pixels tall shimmered in it)
+            vec3 R = reflect(-V, normalize(mix(N, vec3(sNC.x, 1.0, sNC.y), smoothstep(80.0, 400.0, dist)))); R.y = abs(R.y);
             vec3 refl = textureLod(seSky, R, far * 3.0).rgb;
             // the mirror: what stands over the sea and the sky, broken up by the waves (the slope shifts where it is read)
             if (seReflOn > 0.5) {
               vec4 rp = seReflM * vec4(sW.x, ${f(SEA_Y)}, sW.z, 1.0);
               // (bent by the long swells only, gently: by the short waves and the ripples too, everything mirrored in
               // the sea boiled as the camera ran over them)
-              vec2 ruv = rp.xy / rp.w + sNL * 0.03 * (1.0 - 0.6 * far);
+              // (as three.js's Water: the bend falls off with distance - full only within ~25 m, none to speak of far off)
+              vec2 ruv = rp.xy / rp.w + sNL * 0.03 * min(1.0, 25.0 / dist);
               float inScr = smoothstep(0.0, 0.02, min(min(ruv.x, 1.0 - ruv.x), min(ruv.y, 1.0 - ruv.y)));
               // (soft, more so further off, and drawn out up and down a little, as a rippled sea softens and draws out
               // what it mirrors: read from the mirror's mips, the taps a mip texel apart - no stripes, nothing that
@@ -571,7 +573,10 @@ export class Ocean {
               vec2 dy = vec2(0.0, exp2(lod) * seReflPx);
               vec2 rc = clamp(ruv, 0.001, 0.999);
               vec3 rm = textureLod(seRefl, rc, lod).rgb * 0.4 + (textureLod(seRefl, rc + dy, lod).rgb + textureLod(seRefl, rc - dy, lod).rgb) * 0.3;
-              refl = mix(refl, rm, inScr);
+              // far off the sea mirrors the sky alone (and the lights' own streaks, worked out exactly below): the mirror's
+              // far things - stacks, castles, causeways, their lights - a pixel or two each in it, came and went as the
+              // camera moved, the far reflections flickering
+              refl = mix(refl, rm, inScr * (1.0 - smoothstep(220.0, 650.0, dist)));
             }
             float rough = mix(0.17, 0.3, far), a2 = min(rough * rough * rough * rough + rLost, 1.0);      // (the moon's glade a little broader: calmer)
             // the highlights ride the waves big on the screen and, near, the ripples: past ~100 m every finer slope put
