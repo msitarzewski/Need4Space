@@ -173,15 +173,30 @@ async function boot() {
   };
   rig.rollFollow = mode === 'race' ? 1 : 0.6;
   rig.anchorFn = mode === 'race' ? trackAnchor : null;
-  // the chase camera stays at least 2.4 m over the deck behind the ship (inside a loop the deck curves up behind it)
-  const camF = {};
+  // the chase camera stays at least 2.4 m over the deck under it, and sees the ship over the deck (inside a loop the
+  // deck curves up behind the ship). It was held over the deck 15 m behind the ship, not under the camera (17-26 m
+  // back): on the rolling straight the deck turns about its centre line, so off the centre the deck under the camera
+  // stood metres above that plane - "when i rotate on a road, it goes thru the road and looks off"
+  const camF = {}, camD = new THREE.Vector3(), camS = new THREE.Vector3();
+  // p's height over the deck at its own slice of the track (searched from s0) and its offset across it; null in a gap
+  const overDeck = (p, s0) => {
+    let s = s0;
+    for (let k = 0; k < 3; k++) { track.frame(s, camF); s += camD.subVectors(p, camF.P).dot(camF.T); }
+    if (track.inGap(s)) return null;
+    track.frame(s, camF);
+    camD.subVectors(p, camF.P);
+    return { h: camD.dot(camF.U), x: camD.dot(camF.R), U: camF.U };
+  };
   rig.deckFn = (p) => {
     if (mode !== 'race' || !track) return;
-    const back = racer.s - 15;
-    if (track.inGap(back)) return;
-    track.frame(back, camF);
-    const d = p.clone().sub(camF.P), h = d.dot(camF.U);
-    if (Math.abs(d.dot(camF.R)) < 40 && h < 2.4) p.addScaledVector(camF.U, 2.4 - h);
+    let d = overDeck(p, racer.s - 20);
+    if (d && Math.abs(d.x) < TRACK_W / 2 + 6 && d.h < 2.4) p.addScaledVector(d.U, 2.4 - d.h);
+    // (and the view of the ship: the points between them over the deck too)
+    const sp = ship.root.position;
+    for (const k of [0.3, 0.6, 0.85]) {
+      d = overDeck(camS.lerpVectors(sp, p, k), racer.s - 20 * k);
+      if (d && Math.abs(d.x) < TRACK_W / 2 + 2 && d.h < 0.8) p.addScaledVector(d.U, (0.8 - d.h) / k);
+    }
   };
   placeStart(false);
   // ship lights for the meteorite tunnel: the player's headlight (faint in daylight, full in the dark) and three
