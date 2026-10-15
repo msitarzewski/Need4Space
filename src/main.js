@@ -355,6 +355,23 @@ async function boot() {
 			}`);
     b.needsUpdate = true;
   }
+  // The same through the sea and its mist: deep in the water a thing's AO - the floor's baked shading most of all -
+  // darkened it out of the water's own colour as a shape, which came and went as the far parts were drawn or not
+  if (MAP === 'ocean') {
+    const b = gtao.blendMaterial, g = gtao.gtaoMaterial.uniforms, tex = 'vec4 texel = texture2D( tDiffuse, vUv );';
+    if (!b.fragmentShader.includes(tex)) throw new Error('AO blend shader changed: sea fade not applied');
+    Object.assign(b.uniforms, { tDepth: g.tDepth, cameraProjectionMatrixInverse: g.cameraProjectionMatrixInverse,
+      cameraWorldMatrix: g.cameraWorldMatrix, fogColor: { value: scene.fog.color } });
+    b.fragmentShader = 'uniform sampler2D tDepth;\nuniform mat4 cameraProjectionMatrixInverse, cameraWorldMatrix;\nuniform vec3 fogColor;\n'
+      + SEA_GLSL + b.fragmentShader.replace(tex, tex + /* glsl */`
+			float z = texture2D( tDepth, vUv ).r;
+			if ( z < 1.0 ) {
+				vec4 vp = cameraProjectionMatrixInverse * vec4( vec3( vUv, z ) * 2.0 - 1.0, 1.0 );
+				vec3 v = vp.xyz / vp.w, o = cameraWorldMatrix[ 3 ].xyz, d = normalize( mat3( cameraWorldMatrix ) * v );
+				texel.rgb = mix( vec3( 1.0 ), texel.rgb, dot( seFogT( o, o + d * length( v ), fogColor.b ), vec3( 1.0 / 3.0 ) ) );
+			}`);
+    b.needsUpdate = true;
+  }
   composer.addPass(gtao);
   // reflections on the deck (uses the AO pass's depth and normals: off with AO)
   const ssr = new DeckSSRPass(scene, camera, gtao);

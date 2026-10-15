@@ -101,6 +101,13 @@ const vec3 SE_DEEP = vec3(0.004, 0.02, 0.045);
 const vec3 SE_FILL = vec3(0.012, 0.045, 0.085);
 const float SE_HA = 360.0;          // the night haze's scale height (m)
 const float SE_BA = 1.5e-4;         // its extinction over the sea (per m)
+// the sea mist: a low bank lying on the water all round, thick at the surface and thinning upward - the far sea, the
+// distant stacks and causeways and the edge of the world go into it (its extinction at the water, per m; its scale
+// height; the moonlight it gives back)
+const float SE_FA = 1.0e-3;
+const float SE_FH = 70.0;
+const vec3 SE_FOGC = vec3(0.034, 0.042, 0.058);
+vec3 seMistC(vec3 d) { return SE_FOGC + SE_SUNRAD * 0.012 * pow(max(dot(d, SE_SUN), 0.0), 6.0); }
 // the optical depth of a density exp(-y / H) along o + d t, t in [0, dist]
 float seExp(float oy, float dy, float dist, float H) {
   float a = exp(-max(oy, -50.0) / H), k = clamp(dy * dist / H, -60.0, 60.0);
@@ -121,8 +128,10 @@ vec3 seGlow(vec3 d) {
 // along o + d t (t < dist) through the air: transmittance and the light picked up
 void seAir(vec3 o, vec3 d, float dist, out vec3 T, out vec3 L) {
   float od = SE_BA * seExp(o.y - SE_Y, d.y, dist, SE_HA);
-  T = exp(-od * vec3(0.9, 1.0, 1.1));
-  L = seGlow(normalize(vec3(d.x, max(d.y, 0.0), d.z))) * (1.0 - T);
+  vec3 Ta = exp(-od * vec3(0.9, 1.0, 1.1));
+  float Tm = exp(-SE_FA * seExp(max(o.y - SE_Y, 0.0), d.y, dist, SE_FH));
+  T = Ta * Tm;
+  L = seGlow(normalize(vec3(d.x, max(d.y, 0.0), d.z))) * (1.0 - Ta) * Tm + seMistC(d) * (1.0 - Tm);
 }
 // through the water (o under the sea): the light from above at depth z falls as exp(-KD z); the murk scatters it -
 // the integral along the ray in closed form, a little more looking up toward the moon's light coming down
@@ -160,6 +169,20 @@ vec3 seTrans(vec3 o, vec3 p, float lvl) {
     tr = exp(-SE_KW * (dist - s)) * seTop(o + d * s, d, dist - s);
   }
   return tr;
+}
+// how much of what lies at p is seen from o through the air, the mist and the water between (the fog chunk's T)
+vec3 seFogT(vec3 o, vec3 p, float lvl) {
+  vec3 r = p - o, T, L, T2, L2;
+  float dist = length(r);
+  vec3 d = r / max(dist, 1e-3);
+  float s = abs(d.y) > 1e-5 ? (lvl - o.y) / d.y : -1.0;
+  bool cross = s > 0.0 && s < dist;
+  if (o.y < lvl) {
+    if (cross) { seWater(o, d, s, T, L); seAir(o + d * s, d, dist - s, T2, L2); return T * T2; }
+    seWater(o, d, dist, T, L); return T;
+  }
+  if (cross) { seAir(o, d, s, T, L); seWater(o + d * s, d, dist - s, T2, L2); return T * T2; }
+  seAir(o, d, dist, T, L); return T;
 }
 // the moon's light reaching depth z under the sea (its ray bent steeper going in), rippled by caustics near the top
 float seCaustic(vec2 p, float t) {
@@ -328,6 +351,10 @@ const DOME_BAKE = /* glsl */`
     }
     vec3 c = skSky(d);
     float hide = max(skCloud(d).x * 0.97, 1.0 - exp(-SE_BA * SE_HA / max(d.y, 0.01)));
+    // the sea mist low over the horizon (looking up out of it from near the water: its whole depth over the ray)
+    float mist = 1.0 - exp(-SE_FA * SE_FH / max(d.y, 0.008));
+    c = mix(c, seMistC(d), mist);
+    hide = max(hide, mist);
     gl_FragColor = vec4(c, hide);
   }`;
 

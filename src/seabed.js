@@ -156,8 +156,16 @@ function pinnacleGeometry({ x, z, y0, y1, r, seed }) {
     const a = i * NU + j, b = i * NU + (j + 1) % NU, c = a + NU, d = b + NU;
     idx.push(a, c, b, b, c, d);
   }
-  const ci = pos.length / 3, last = (rows.length - 1) * NU;
-  pos.push(x, y1 - h * 0.02, z);
+  const ci = pos.length / 3, last = (rows.length - 1) * NU, yc = y1 - h * 0.02;
+  pos.push(x, yc, z);
+  // a point on its top (a: the angle round it, f: 0 the middle .. 1 the top ring's edge), on the rock itself: the crown is
+  // ragged, up to an eighth of its height down from the highest - set at that height, the weed and grass on it floated
+  const top = (a, f) => {
+    const u = ((a / TAU) % 1 + 1) % 1 * NU, j0 = Math.floor(u) % NU, j1 = (j0 + 1) % NU, w = u - Math.floor(u);
+    const c = Math.cos(a), sn = Math.sin(a), lobe = 1 + 0.4 * (fbm(c * 1.4 + s1, sn * 1.4 + s2 + 2, 4) - 0.5) + 0.12 * Math.sin(y1 * 0.07 + a * 3);
+    const R = r * lobe * 0.75, yr = crown[j0] * (1 - w) + crown[j1] * w;
+    return [x + c * R * f, yc + (yr - yc) * f, z + sn * R * f];
+  };
   for (let j = 0; j < NU; j++) idx.push(last + j, ci, last + (j + 1) % NU);
   // its ambient, baked: darker down where it stands in the floor (the AO's own on its steep sides drew squares)
   const ao = new Uint8Array(pos.length / 3);
@@ -167,7 +175,7 @@ function pinnacleGeometry({ x, z, y0, y1, r, seed }) {
   g.setAttribute('canyonAO', new THREE.Uint8BufferAttribute(ao, 1, true));
   g.setIndex(idx);
   g.computeVertexNormals();
-  return { g, topR: r * 0.75 };
+  return { g, topR: r * 0.75, top };
 }
 
 // ---------------------------------------------------------------- the life round the way
@@ -195,7 +203,7 @@ export class Seabed {
       const r = 14 + rnd() * 26, P = pinnacleGeometry({ x, z, y0, y1, r, seed: 900 + rocks.length });
       if (grid.geometryClear(P.g, 8, 3) < 0) continue;
       rocks.push(P.g);
-      tops.push({ x, z, y: y1, r: P.topR });
+      tops.push({ x, z, y: y1, r: P.topR, top: P.top });
       last = s;
     }
     if (rocks.length) {
@@ -211,9 +219,9 @@ export class Seabed {
     for (const T of tops) {
       const n = Math.round((20 + T.r * 1.2) * D);
       for (let k = 0; k < n; k++) {
-        const a = rnd() * TAU, rr = Math.sqrt(rnd()) * T.r;
-        frond(T.x + Math.cos(a) * rr, T.y - 2 - rnd() * 8, T.z + Math.sin(a) * rr, 8 + rnd() * 26, 1.2 + rnd() * 1.6);
-        near.push([T.x + Math.cos(a) * rr * 0.9, T.y - 1.5, T.z + Math.sin(a) * rr * 0.9]);
+        const a = rnd() * TAU, ff = Math.sqrt(rnd()) * 0.92, p = T.top(a, ff);
+        frond(p[0], p[1] - 0.6, p[2], 8 + rnd() * 26, 1.2 + rnd() * 1.6);
+        near.push([p[0], p[1], p[2], T, a, ff]);
       }
     }
     if (keeper) for (let k = 0; k < Math.round(260 * D); k++) {
@@ -262,8 +270,9 @@ export class Seabed {
   transformed = iA.xyz + q;
   objectNormal = vec3(normal.x * c - normal.z * s, normal.y, normal.x * s + normal.z * c);`,
         color: `diffuseColor.rgb = mix(vec3(0.05, 0.09, 0.03), vec3(0.18, 0.24, 0.06), vAl) * (0.75 + 0.5 * fract(vSeed.x * 3.7));`,
-        // (light through the frond's thin tip, faintly)
-        emissive: `totalEmissiveRadiance += vec3(0.0, 0.012, 0.006) * vAl;`,
+        // (a faint glow of its own, more toward the tip: the beds read out of the dark from afar and come up gradually -
+        // as dark as the water round them, they were seen only once the headlights reached them, close)
+        emissive: `totalEmissiveRadiance += vec3(0.004, 0.034, 0.02) * (0.35 + 0.65 * vAl);`,
       });
       this.kelp = new THREE.Mesh(g, mat);
       this.kelp.frustumCulled = false;
@@ -274,9 +283,12 @@ export class Seabed {
     {
       const per = Math.round(26 * D), n = near.length * per, A = new Float32Array(n * 4), B = new Float32Array(n * 4);
       let i = 0;
-      for (const [x, y, z] of near) for (let k = 0; k < per; k++, i++) {
-        const a = rnd() * TAU, r = Math.sqrt(rnd()) * 9;
-        A.set([x + Math.cos(a) * r, y - 0.3, z + Math.sin(a) * r, 0.9 + rnd() * 2.6], i * 4);
+      for (const [x, y, z, T, a0, f0] of near) for (let k = 0; k < per; k++, i++) {
+        // (each tuft on the ground under it: on a spire's top by its crown, on the floor by the floor's height)
+        let p;
+        if (T) p = T.top(a0 + (rnd() - 0.5) * 0.7, Math.min(0.95, Math.max(0, f0 + (rnd() - 0.5) * 0.35)));
+        else { const a = rnd() * TAU, r = Math.sqrt(rnd()) * 9, qx = x + Math.cos(a) * r, qz = z + Math.sin(a) * r; p = [qx, basin.height(qx, qz), qz]; }
+        A.set([p[0], p[1] - 0.3, p[2], 0.9 + rnd() * 2.6], i * 4);
         B.set([rnd() * TAU, rnd() * TAU, rnd(), 0], i * 4);
       }
       const g = inst(tuftGeometry(), { iA: A, iB: B }, n);
@@ -293,6 +305,7 @@ export class Seabed {
   transformed = iA.xyz + q;
   objectNormal = vec3(normal.x * c - normal.z * s, normal.y, normal.x * s + normal.z * c);`,
         color: `diffuseColor.rgb = mix(vec3(0.04, 0.07, 0.03), vec3(0.14, 0.2, 0.07), vAl) * (0.8 + 0.4 * vSeed.y);`,
+        emissive: `totalEmissiveRadiance += vec3(0.003, 0.026, 0.015) * (0.3 + 0.7 * vAl);`,
       });
       this.grass = new THREE.Mesh(g, mat);
       this.grass.frustumCulled = false;
@@ -303,8 +316,8 @@ export class Seabed {
     {
       const list = [];
       for (const T of tops) for (let k = 0; k < Math.round(10 * D); k++) {
-        const a = rnd() * TAU, r = Math.sqrt(rnd()) * T.r;
-        list.push([T.x + Math.cos(a) * r, T.y - 1 - rnd() * 4, T.z + Math.sin(a) * r, 0.5 + rnd() * 1.1, rnd() * TAU, rnd(), 0, 0]);
+        const p = T.top(rnd() * TAU, Math.sqrt(rnd()) * 0.9);
+        list.push([p[0], p[1] - 0.2, p[2], 0.5 + rnd() * 1.1, rnd() * TAU, rnd(), 0, 0]);
       }
       const n = list.length, A = new Float32Array(n * 4), B = new Float32Array(n * 4);
       list.forEach((q, i) => { A.set(q.slice(0, 4), i * 4); B.set(q.slice(4), i * 4); });
@@ -330,7 +343,7 @@ export class Seabed {
     // ---- vents: bubbles rising slowly out of the rock and the floor, many up past the deck
     {
       const cols = [];
-      for (const T of tops) for (let k = 0; k < 2; k++) { const a = rnd() * TAU, r = rnd() * T.r; cols.push([T.x + Math.cos(a) * r, T.y - 1, T.z + Math.sin(a) * r]); }
+      for (const T of tops) for (let k = 0; k < 2; k++) cols.push(T.top(rnd() * TAU, rnd() * 0.9));
       for (const [x, y, z] of near) if (rnd() < 0.25) cols.push([x, y, z]);
       for (const s of under) {
         if (rnd() > 0.06) continue;

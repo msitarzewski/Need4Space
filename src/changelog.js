@@ -2,6 +2,15 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.5.2', date: '16 Oct 2026', name: 'Sea mist',
+    notes: [
+      'A low mist lies over the sea all round: the far stacks, causeways and the edge of the world fade into it',
+      'Under the sea the city’s lamps are baked onto the road: it lies lit ahead as it comes into sight, not lit up only as you get there',
+      'No more parts of the deep popping in as you move',
+      'Weed, grass and anemones sit on the rock spires instead of floating over them, and the kelp beds glow faintly so they come out of the dark gradually',
+    ],
+  },
+  {
     version: '1.5.1', date: '16 Oct 2026', name: 'Steady walls',
     notes: [
       'Under the sea the walls of the abyss, the rock spires and the Keeper’s pedestal no longer show dark squares that slide as you move: their shading is baked in, as on the desert’s canyons',

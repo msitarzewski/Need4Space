@@ -292,6 +292,7 @@ export class OceanWorld {
     scene.add(cm.glow, cm.halo, cm.street);
     this.noAO.push(cm.halo, cm.street);
     this.cityMeshes = cm;
+    this.bakeTrackLight();
     lap('city');
     this.buildStacks(scene);
     lap('stacks');
@@ -340,6 +341,53 @@ export class OceanWorld {
       this.aoOccluders.push(...ground);
     }
     console.info(`ocean built (ms): ${times.join(', ')}`);
+  }
+
+  // The city's lamps' light on the track under the sea, baked into its vertices (deck, belly, walls, girders) as on the
+  // city's own stone: the road ahead lies lit in the lamps' pools as it comes into sight. Lit before only by the four
+  // nearest lamps as real lights, the light came on round the ship as it got there
+  bakeTrackLight() {
+    const lamps = this.city.lamps, CELL = 60, grid = new Map(), tp = this.track.parts;
+    for (const L of lamps) {
+      const r = L.reach;
+      for (let x = Math.floor((L.p.x - r) / CELL); x <= Math.floor((L.p.x + r) / CELL); x++)
+        for (let y = Math.floor((L.p.y - r) / CELL); y <= Math.floor((L.p.y + r) / CELL); y++)
+          for (let z = Math.floor((L.p.z - r) / CELL); z <= Math.floor((L.p.z + r) / CELL); z++) {
+            const k = `${x},${y},${z}`;
+            (grid.get(k) || grid.set(k, []).get(k)).push(L);
+          }
+    }
+    const bake = (g) => {
+      const P = g.attributes.position.array, N = g.attributes.normal.array, n = P.length / 3, out = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        const px = P[i * 3], py = P[i * 3 + 1], pz = P[i * 3 + 2];
+        if (py > SEA_Y - 2) continue;
+        let r = 0, gg = 0, b = 0;
+        for (const L of grid.get(`${Math.floor(px / CELL)},${Math.floor(py / CELL)},${Math.floor(pz / CELL)}`) || []) {
+          const lx = L.p.x - px, ly = L.p.y - py, lz = L.p.z - pz, d2 = lx * lx + ly * ly + lz * lz, rr = L.reach * L.reach;
+          if (d2 > rr) continue;
+          const nl = Math.min(1, Math.max(0, (N[i * 3] * lx + N[i * 3 + 1] * ly + N[i * 3 + 2] * lz) / Math.sqrt(d2 + 1e-6) * 0.85 + 0.15));
+          const q = 1 - d2 / rr, k = (L.I * 2.2 * nl * q * q) / (d2 + L.size * L.size) / Math.PI;
+          r += L.col[0] * k; gg += L.col[1] * k; b += L.col[2] * k;
+        }
+        out[i * 3] = r; out[i * 3 + 1] = gg; out[i * 3 + 2] = b;
+      }
+      g.setAttribute('seaLit', new THREE.BufferAttribute(out, 3));
+    };
+    const meshes = [tp.deck, tp.under, ...tp.walls, ...tp.girders.filter((m) => !m.isInstancedMesh)];
+    for (const m of meshes) bake(m.geometry);
+    // the deck's and the hull plates' materials add it (other meshes of theirs read none: 0)
+    for (const mat of new Set(meshes.map((m) => m.material))) {
+      const ob = mat.onBeforeCompile, key = mat.customProgramCacheKey;
+      mat.onBeforeCompile = (sh, r) => {
+        ob.call(mat, sh, r);
+        sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec3 seaLit;\nvarying vec3 vSeaLit;')
+          .replace('#include <fog_vertex>', '#include <fog_vertex>\n  vSeaLit = seaLit;');
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vSeaLit;')
+          .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += diffuseColor.rgb * vSeaLit;');
+      };
+      mat.customProgramCacheKey = () => key.call(mat) + '-sealit';
+    }
   }
 
   // The Keeper (assets/keeper.glb): an old hooded colossus of basalt and green bronze, worn and broken, its raised
@@ -833,11 +881,17 @@ export class OceanWorld {
     if (this.beam) this.beam.rotation.y = -t * (Math.PI * 2 / 10);
     // the city's nearest big lamps as real lights (only under the sea, and only near)
     {
-      const near = cp.y < this.level + 5 ? this.bigLamps.map((L) => ({ L, d: L.p.distanceToSquared(cp) })).filter((e) => e.d < 250 * 250).sort((a, b) => a.d - b.d).slice(0, 4) : [];
+      // (each kept on its lamp while that stays near, and faded in and out by its distance: they came on at full the
+      // moment a lamp was among the four nearest)
+      const near = cp.y < this.level + 5 ? this.bigLamps.map((L) => ({ L, d: L.p.distanceTo(cp) })).filter((e) => e.d < 250).sort((a, b) => a.d - b.d).slice(0, 6) : [];
+      const held = (this._held ||= [null, null, null, null]);
+      for (let k = 0; k < 4; k++) if (held[k] && !near.some((e) => e.L === held[k])) held[k] = null;
+      for (const e of near) if (!held.includes(e.L)) { const k = held.indexOf(null); if (k >= 0) held[k] = e.L; }
       this.cityLights.forEach((l, k) => {
-        const e = near[k];
-        if (!e) { l.intensity = 0; return; }
-        l.position.copy(e.L.p); l.color.setRGB(...e.L.col); l.distance = e.L.reach * 1.2; l.intensity = e.L.I * 2.2;
+        const L = held[k];
+        if (!L) { l.intensity = 0; return; }
+        const d = L.p.distanceTo(cp);
+        l.position.copy(L.p); l.color.setRGB(...L.col); l.distance = L.reach * 1.2; l.intensity = L.I * 2.2 * (1 - smoothstep(150, 245, d));
       });
     }
     // the city's chunks: drawn only as far as the water lets them be seen (from above the sea: what shows through it)
