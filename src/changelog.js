@@ -2,6 +2,13 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.2.3', date: '15 Oct 2026', name: 'Derelict lights from afar',
+    notes: [
+      'The lamps in the space derelict light it from any distance, no more lights popping in as you come close',
+      'Their lenses shine from 1.8 km instead of 500 m',
+    ],
+  },
+  {
     version: '1.2.2', date: '15 Oct 2026', name: 'Smooth preset switching',
     notes: [
       'Changing the graphics quality mid-session no longer stutters in the race',

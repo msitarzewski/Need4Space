@@ -337,8 +337,9 @@ const _r0 = new THREE.Vector3(), _r1 = new THREE.Vector3();
 // flickering - worked out here from each lamp's number, as lampFlicker) is added per pixel; the sky's light is scaled
 // by each vertex's view of the sky (an instance's: iSky). An instance's colour tints its paint.
 export function wreckMaterial() {
-  const U = { wTime: { value: 0 }, wLampP: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, -1e6, 0, 1)) },
-    wLampC: { value: Array.from({ length: 8 }, () => new THREE.Vector3()) }, wLampS: { value: new Float32Array(8).fill(4) }, wFx: { value: 1 }, wGlow: { value: 1 },
+  const U = { wNear: { value: new THREE.Vector2(1e5, 1e5) }, wBake: { value: 1 }, wTime: { value: 0 },
+    wLampP: { value: Array.from({ length: 16 }, () => new THREE.Vector4(0, -1e6, 0, 1)) },
+    wLampC: { value: Array.from({ length: 16 }, () => new THREE.Vector3()) }, wLampS: { value: new Float32Array(16).fill(4) }, wFx: { value: 1 }, wGlow: { value: 1 },
     hullNoise: { value: null }, wSway: { value: 1 } };
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.4 });
   mat.onBeforeCompile = (sh) => {
@@ -347,9 +348,11 @@ export function wreckMaterial() {
     sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>
 attribute vec2 wUV; attribute vec3 wT; attribute vec4 wA; attribute vec3 wC;
 #ifdef USE_INSTANCING
-attribute float iSky;
+attribute float iSky; attribute vec3 iBakeB, iBakeS;
+#else
+attribute vec3 wBakeB, wBakeS;
 #endif
-varying vec2 vWUV; varying vec3 vWT; varying vec4 vWA; varying vec3 vWC;
+varying vec2 vWUV; varying vec3 vWT; varying vec4 vWA; varying vec3 vWC; varying vec3 vBakeB, vBakeS;
 uniform float wTime, wSway, wFx, wGlow;
 float wIh( int n ) { uint h = uint( n ) * 374761393u ^ 0x5bd1e995u; h = ( h ^ ( h >> 13u ) ) * 1274126177u; return float( h ^ ( h >> 16u ) ) * 2.3283064e-10; }
 float wFlicker( float id ) {
@@ -376,13 +379,16 @@ float wFlicker( float id ) {
   #ifdef USE_INSTANCING
     ht = mat3( instanceMatrix ) * ht;
     vWA.y *= iSky;
+    vBakeB = iBakeB; vBakeS = iBakeS;
+  #else
+    vBakeB = wBakeB; vBakeS = wBakeS;
   #endif
     vWT = normalize( ( viewMatrix * vec4( mat3( modelMatrix ) * ht, 0.0 ) ).xyz );
   }
   if ( wA.x > 5.5 && wA.x < 6.5 ) vWC *= wA.w > 65000.0 ? wGlow : wFlicker( wA.w );`);
     sh.fragmentShader = (Q.lite ? '#define WRECK_LITE\n' : '') + sh.fragmentShader.replace('#include <common>', `#include <common>
-uniform sampler2D hullNoise; uniform vec4 wLampP[8]; uniform vec3 wLampC[8]; uniform float wLampS[8];
-varying vec2 vWUV; varying vec3 vWT; varying vec4 vWA; varying vec3 vWC;
+uniform sampler2D hullNoise; uniform vec4 wLampP[16]; uniform vec3 wLampC[16]; uniform float wLampS[16]; uniform vec2 wNear; uniform float wBake;
+varying vec2 vWUV; varying vec3 vWT; varying vec4 vWA; varying vec3 vWC; varying vec3 vBakeB, vBakeS;
 float wHash( vec2 p ) { vec3 q = fract( vec3( p.xyx ) * 0.1031 ); q += dot( q, q.yzx + 33.33 ); return fract( ( q.x + q.y ) * q.z ); }
 // a seam of half-width hw at distance d (>= 0) from its line, box-filtered over a pixel fp m wide: how much of the
 // pixel it covers (a seam thinner than the pixel fades instead of drawing a pixel-wide line: no brick pattern far off)
@@ -531,10 +537,15 @@ float wRelief( vec2 uv, float kind, float fp, float W, out vec2 id, out vec3 fea
 	#endif
 	}
 #include <lights_fragment_end>
-	// the emergency lamps (the eight nearest): a pool of light each, wrapped a little round the surface (a flood's
-	// light from an area as big as its size: even across a hall, not a hot spot)
+	// the emergency lamps: a pool of light each, wrapped a little round the surface (a flood's light from an area as
+	// big as its size: even across a hall, not a hot spot). Per pixel and flickering the eight floodlights and the eight
+	// small lamps whose light comes nearest the camera: within wNear (x the floods', y the small lamps') of the camera
+	// no other lamp's light reaches; past it every lamp's light baked at load (Wreck.bakeLamps), crossfaded over 40 m
 	vec3 wNw = ( vec4( normal, 0.0 ) * viewMatrix ).xyz;
-	for ( int i = 0; i < 8; i ++ ) {
+	float wDist = length( vCaveW - cameraPosition );
+	float wKB = 1.0 - smoothstep( wNear.x - 40.0, wNear.x, wDist ), wKS = 1.0 - smoothstep( wNear.y - 40.0, wNear.y, wDist );
+	reflectedLight.directDiffuse += ( vBakeB * ( 1.0 - wKB ) + vBakeS * ( 1.0 - wKS ) ) * wBake * BRDF_Lambert( material.diffuseColor );
+	for ( int i = 0; i < 16; i ++ ) {
 		vec3 L = wLampP[ i ].xyz - vCaveW;
 		float d2 = dot( L, L ), r = abs( wLampP[ i ].w );
 		if ( d2 > r * r ) continue;
@@ -543,7 +554,7 @@ float wRelief( vec2 uv, float kind, float fp, float W, out vec2 id, out vec3 fea
 		vec3 l = L * inversesqrt( d2 );
 		float nl = dot( wNw, l );
 		float fall = 1.0 / ( d2 + wLampS[ i ] ) * pow( clamp( 1.0 - d2 / ( r * r ), 0.0, 1.0 ), 2.0 );
-		reflectedLight.directDiffuse += wLampC[ i ] * fall * wIn * clamp( nl * 0.85 + 0.15, 0.0, 1.0 ) * BRDF_Lambert( material.diffuseColor );
+		reflectedLight.directDiffuse += wLampC[ i ] * fall * wIn * ( i < 8 ? wKB : wKS ) * clamp( nl * 0.85 + 0.15, 0.0, 1.0 ) * BRDF_Lambert( material.diffuseColor );
 	}`);
   };
   mat.customProgramCacheKey = () => `wreck2-${Q.lite}`;
@@ -618,6 +629,7 @@ export class Wreck {
     for (const H of this.hulls) H.bounds();
     this.skyLight();
     this.buildMeshes();
+    this.bakeLamps();
     this.debris();
     this.sparks = new Sparks(this.sparkSites());
     // the asteroids and towers keep clear of it (spheres along each piece; the great ship's a wide berth: round it only
@@ -1210,7 +1222,9 @@ export class Wreck {
     const F = Wreck.F(p.clone(), ax, new THREE.Vector3().crossVectors(az, ax), az), c = LAMP[col] || col;
     const layer = o.layer ?? (size >= 1.4 ? 'main' : 'detail');
     this.box(H, F, 1.4 * size, 0.5 * size, 0.45 * size, { kind: K_MACH, paint: PAINT_MACH, layer, sky: o.sky ?? 0 });
-    this.box(H, Wreck.F(p.clone().addScaledVector(az, 0.5 * size), F.ax, F.ay, F.az), 1.15 * size, 0.3 * size, 0.1 * size, { kind: K_LAMP, paint: c, seed: i, b: 0.03, layer });
+    // (its lit lens drawn as far as the plating it hangs on: in the detail layer it lit up only within 500 m)
+    this.box(H, Wreck.F(p.clone().addScaledVector(az, 0.5 * size), F.ax, F.ay, F.az), 1.15 * size, 0.3 * size, 0.1 * size,
+      { kind: K_LAMP, paint: c, seed: i, b: 0.03, layer: layer === 'detail' ? 'main' : layer });
     if (size >= 0.8) for (const k of [-1, 0, 1]) this.box(H, Wreck.F(p.clone().addScaledVector(az, 0.62 * size).addScaledVector(F.ax, k * 0.55 * size), F.ax, F.ay, F.az), 0.05 * size, 0.42 * size, 0.06 * size, { kind: K_FRAME, paint: PAINT_FRAME, layer: 'detail' });
     const w = H.toWorld(p.clone().addScaledVector(az, 1.5 * size), new THREE.Vector3());
     // its light: how far it reaches (m) and how bright; inside a hull it lights only what is inside
@@ -1435,8 +1449,8 @@ export class Wreck {
       if (H && !out.has(H)) out.set(H, isOut(H, 10));
       m.visible = d < (H && out.get(H) ? Math.min(300, m.userData.range) : m.userData.range);
     }
-    const near = this.nearLamps(cam, 8, 450, t);
-    for (let k = 0; k < 8; k++) {
+    const near = this.lightingLamps(cam, t);
+    for (let k = 0; k < 16; k++) {
       const e = near[k];
       if (!e) { U.wLampP.value[k].set(0, -1e6, 0, 1); U.wLampC.value[k].set(0, 0, 0); continue; }
       const L = e.L;
@@ -1460,7 +1474,99 @@ export class Wreck {
     const U = this.mat.userData.U;
     U.wSway.value = on ? 1 : 0;
     U.wFx.value = on ? 1 : 0;
+    U.wBake.value = on ? 1 : this.bakeSteady || 1;
     if (!on) this.placeDebris(0, null);
+  }
+
+  // The material's sixteen per-pixel lamps: in slots 0-7 the floodlights (reach over 200 m), in 8-15 the small lamps
+  // (a spark's flash counts as one while it lasts), each eight those whose light comes nearest the camera (its edge:
+  // the distance less the reach), and wNear: the ninth one's edge - inside it no other lamp of that kind reaches, so
+  // the eight are all of its light; past it the baked light. (It moves smoothly: the ninth edge's distance changes
+  // smoothly as the camera moves.)
+  lightingLamps(p, t) {
+    if (!this.lgrid) this.nearLamps(p, 1, 1, t);
+    const small = [], cx = Math.floor(p.x / 200), cy = Math.floor(p.y / 200), cz = Math.floor(p.z / 200);
+    for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++) for (let c = -3; c <= 3; c++) {
+      for (const L of this.lgrid.get(`${cx + a},${cy + b},${cz + c}`) || []) small.push({ L, d: L.p.distanceTo(p) });
+    }
+    if (this.effects) for (const e of this.sparks?.sites || []) if (e.flash > 0.02) small.push({ L: { p: e.p, col: [1.0, 0.62, 0.3], I: 900, reach: 75, f: e.flash, spark: true }, d: e.p.distanceTo(p) });
+    const big = this.big.map((L) => ({ L, d: L.p.distanceTo(p) }));
+    const edge = (e) => e.d - e.L.reach, byEdge = (x, y) => edge(x) - edge(y);
+    big.sort(byEdge); small.sort(byEdge);
+    const U = this.mat.userData.U;
+    U.wNear.value.set(big[8] ? Math.max(0, edge(big[8])) : 1e5, small[8] ? Math.max(0, edge(small[8])) : 1e5);
+    const out = [];
+    for (let k = 0; k < 8; k++) out[k] = big[k];
+    for (let k = 0; k < 8; k++) out[8 + k] = small[k];
+    for (const e of out) if (e && !e.L.spark && !e.L.fixed) e.L.f = lampFlicker(e.L.i, t, this.effects);
+    return out;
+  }
+
+  // Every lamp's light worked out once at load - per vertex of the plating, per instance of the machinery - by the
+  // material's own formula at each lamp's average brightness through its flicker: the floodlights' and the small
+  // lamps' apart (each fades in past its own wNear). The eight lamps nearest the camera were all the lamplight there
+  // was: in a hall with sixty lamps the rest stayed dark until each came into the eight, and nothing past 450 m lit at
+  // all ("the lights appear so late").
+  bakeLamps() {
+    const t0 = performance.now(), CELL = 100, grid = new Map();
+    let mean = 0, steady = 0;
+    for (const L of this.lamps) {
+      let m = 1, st = 1;                                 // its average brightness through the flicker (with / without outages)
+      if (!L.fixed) {
+        m = 0; st = 0;
+        for (let k = 0; k < 600; k++) { m += lampFlicker(L.i, k * 0.2, true); st += lampFlicker(L.i, k * 0.2, false); }
+        m /= 600; st /= 600;
+      }
+      L.mean = m; mean += m; steady += st;
+      const r = L.reach, x0 = Math.floor((L.p.x - r) / CELL), x1 = Math.floor((L.p.x + r) / CELL), y0 = Math.floor((L.p.y - r) / CELL),
+        y1 = Math.floor((L.p.y + r) / CELL), z0 = Math.floor((L.p.z - r) / CELL), z1 = Math.floor((L.p.z + r) / CELL);
+      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) {
+        const k = `${x},${y},${z}`;
+        (grid.get(k) || grid.set(k, []).get(k)).push(L);
+      }
+    }
+    this.bakeSteady = mean > 0 ? steady / mean : 1;   // (effects off: the steady lamps' light, near enough)
+    const half = THREE.DataUtils.toHalfFloat, v6 = new Float32Array(6);
+    // a point's light from each kind: v6 = floodlights rgb, small lamps rgb
+    const light = (px, py, pz, nx, ny, nz, sky) => {
+      let br = 0, bg = 0, bb = 0, sr = 0, sg = 0, sb = 0;
+      for (const L of grid.get(`${Math.floor(px / CELL)},${Math.floor(py / CELL)},${Math.floor(pz / CELL)}`) || []) {
+        const lx = L.p.x - px, ly = L.p.y - py, lz = L.p.z - pz, d2 = lx * lx + ly * ly + lz * lz, rr = L.reach * L.reach;
+        if (d2 > rr) continue;
+        const wIn = L.inside ? 1 - smoothstep(0.72, 0.98, sky) : 1;
+        if (wIn <= 0) continue;
+        const nl = nx === null ? 0.5 : clamp((nx * lx + ny * ly + nz * lz) / Math.sqrt(d2 + 1e-6) * 0.85 + 0.15, 0, 1);
+        const q = 1 - d2 / rr, k = L.I * L.mean * wIn * nl * (q * q) / (d2 + (L.size || 2) ** 2);
+        if (L.reach > 200) { br += L.col[0] * k; bg += L.col[1] * k; bb += L.col[2] * k; }
+        else { sr += L.col[0] * k; sg += L.col[1] * k; sb += L.col[2] * k; }
+      }
+      v6[0] = br; v6[1] = bg; v6[2] = bb; v6[3] = sr; v6[4] = sg; v6[5] = sb;
+      return v6;
+    };
+    let nv = 0;
+    for (const m of this.meshes) {
+      const g = m.geometry, P = g.attributes.position.array, N = g.attributes.normal.array, A = g.attributes.wA.array, n = P.length / 3;
+      const B = new Uint16Array(n * 3), S = new Uint16Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        const v = light(P[i * 3], P[i * 3 + 1], P[i * 3 + 2], N[i * 3] / 127, N[i * 3 + 1] / 127, N[i * 3 + 2] / 127, A[i * 4 + 1] / 60000);
+        for (let c = 0; c < 3; c++) { B[i * 3 + c] = half(v[c]); S[i * 3 + c] = half(v[3 + c]); }
+      }
+      g.setAttribute('wBakeB', new THREE.Float16BufferAttribute(B, 3));
+      g.setAttribute('wBakeS', new THREE.Float16BufferAttribute(S, 3));
+      nv += n;
+    }
+    const M = new THREE.Matrix4(), q = new THREE.Vector3();
+    for (const m of this.instMeshes) {
+      const B = new Float32Array(m.count * 3), S = new Float32Array(m.count * 3), sky = m.geometry.attributes.iSky.array;
+      for (let i = 0; i < m.count; i++) {
+        m.getMatrixAt(i, M); q.setFromMatrixPosition(M);
+        const v = light(q.x, q.y, q.z, null, null, null, sky[i]);
+        for (let c = 0; c < 3; c++) { B[i * 3 + c] = v[c]; S[i * 3 + c] = v[3 + c]; }
+      }
+      m.geometry.setAttribute('iBakeB', new THREE.InstancedBufferAttribute(B, 3));
+      m.geometry.setAttribute('iBakeS', new THREE.InstancedBufferAttribute(S, 3));
+    }
+    console.info(`wreck lamps baked: ${this.lamps.length} lamps, ${nv} vertices, ${this.instMeshes.length} instance groups, ${Math.round(performance.now() - t0)} ms`);
   }
 
   // the lamps nearest p (within `within` m, the far-reaching ones always counted), their brightness now (for the
