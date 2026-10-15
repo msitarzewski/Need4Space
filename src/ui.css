@@ -166,6 +166,9 @@ body.lite .hp { background: linear-gradient(115deg, rgba(9, 13, 19, 0.86), rgba(
 #hud-speed.boost .bar.boost i { background: #c8e6ff; box-shadow: 0 0 0.8rem var(--boost); }
 #hud-speed.low .bar.boost { animation: low 0.7s steps(2) infinite; }
 .bar.thr { height: 0.3rem; }
+.bar.air { height: 0.3rem; }
+.bar.air i { background: rgba(140, 170, 205, 0.55); }
+.bar.air.ready i { background: #7fd4ff; box-shadow: 0 0 0.5rem #3fa9ff; }
 /* the drift's charge: there while drifting, its colour the step reached */
 .meter.drift { opacity: 0; transition: opacity 0.25s; }
 #hud-speed.drifting .meter.drift { opacity: 1; transition: opacity 0.08s; }

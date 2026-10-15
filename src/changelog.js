@@ -2,6 +2,14 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.6.0', date: '16 Oct 2026', name: 'Airbrake charge',
+    notes: [
+      'An airbrake is now one shot: press and it fires (held, up to a second), then it takes 3 seconds to charge again - a new Airbrake meter shows it',
+      'The drift setting is gone (drifting stays off)',
+      'Ship screen: no more black block under the Comet R1 seen from behind (the Feather\'s trail, left behind in the studio)',
+    ],
+  },
+  {
     version: '1.5.9', date: '16 Oct 2026', name: 'Rain',
     notes: [
       'Rain over the ocean planet: it slants down in the wind and rushes past as you race, lit up in the headlights; drops splash on the track and ring the sea, and you hear it',

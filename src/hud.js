@@ -16,7 +16,7 @@ export const CONTROLS = [
     [['A', 'D'], 'Steer'],
     [['↑', '↓'], 'In the air: ↓ nose down, ↑ nose up'],
     [['Shift'], 'Boost (orange pads on the track kick too)'],
-    [['←', '→'], 'Airbrakes left / right: sharper turns (Z / X too)'],
+    [['←', '→'], 'Airbrakes left / right: sharper turns (Z / X too) - one at a time, 3 s to charge'],
     [['Mouse'], 'Click to steer (Esc releases)'],
   ]],
   ['Ship and track', [
@@ -221,6 +221,14 @@ export class HUD {
     const over = Math.max(0, Math.min(1, (s.boostEnergy - 1) / 0.5));
     if (over !== this.over) { $('bstx').style.transform = `scaleX(${over})`; this.over = over; }
     $('thr').style.transform = `scaleX(${Math.max(0, Math.min(1, s.throttle))})`;
+    // the airbrake charging (one every 3 s): lit when ready
+    const ab = Math.round((s.airCharge ?? 1) * 100) / 100;
+    if (ab !== this.ab) {
+      $('abr').style.transform = `scaleX(${ab})`;
+      const ready = ab >= 1;
+      if (ready !== this.abReady) { $('abr').parentElement.classList.toggle('ready', ready); this.abReady = ready; }
+      this.ab = ab;
+    }
     // the drift's charge: shown while drifting, coloured by the step it has reached
     const dr = !!s.drifting;
     if (dr !== this.drifting) { $('hud-speed').classList.toggle('drifting', dr); this.drifting = dr; }

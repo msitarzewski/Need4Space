@@ -30,7 +30,7 @@ Click or press a key once to start the sound and music (browsers block audio unt
 | W / S | Throttle up / down |
 | A / D | Steer |
 | ↑ / ↓ | In the air: nose up / down (float further or land sooner) |
-| ← / → (or Z / X) | Left / right airbrake |
+| ← / → (or Z / X) | Left / right airbrake (one at a time, 3 s to charge) |
 | Shift | Boost |
 | E | Start or stop the engines |
 | V | Change camera (chase, far chase, canopy, fly-by, orbit) |

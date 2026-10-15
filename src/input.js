@@ -2,6 +2,8 @@
 // per frame.
 import { clamp } from './noise.js';
 
+export const AIRBRAKE_HOLD = 1, AIRBRAKE_WAIT = 3;       // an airbrake: on for a second at most, ready again 3 s after it fired
+
 export class Input {
   constructor(canvas) {
     this.keys = new Set();
@@ -101,6 +103,19 @@ export class Input {
         if (t.rx > 0.55) s.airR = 1;
       }
       s.boost = s.boost || t.boost;
+    }
+    // the airbrakes (keys, bumpers, the touch stick): a press fires one - on while held, a second at most - and the next
+    // is ready three seconds after it fired ("once every 3 seconds"); pressed a little early and held, it fires the
+    // moment it is ready; one held on past its second does not fire again until let go. airCharge: 0 just fired .. 1
+    // ready (the HUD's meter)
+    {
+      const want = s.airL > 0.5 ? -1 : s.airR > 0.5 ? 1 : 0;
+      this.abT = (this.abT ?? AIRBRAKE_WAIT) + dt;
+      if (!want) this.abSpent = false;
+      if (this.abOn && (want !== this.abOn || this.abT > AIRBRAKE_HOLD)) { this.abOn = 0; if (want) this.abSpent = true; }
+      else if (!this.abOn && want && !this.abSpent && this.abT >= AIRBRAKE_WAIT) { this.abOn = want; this.abT = 0; }
+      s.airL = this.abOn < 0 ? 1 : 0; s.airR = this.abOn > 0 ? 1 : 0;
+      s.airCharge = Math.min(1, this.abT / AIRBRAKE_WAIT);
     }
     if (this.invert) s.pitch = -s.pitch;
     s.pitch = clamp(s.pitch, -1, 1);

@@ -538,7 +538,7 @@ async function boot() {
     world.setOptions?.(v);                           // (a world's own effects: the ice planet's weather, its aurora)
     world.wreck?.setEffects(v.wreckFx !== false);       // the derelict's sparks, flickering lamps, drifting debris, arcs
     world.wreck?.setMist(v.wreckMist !== false);        // the coolant mist in its reactor and machinery halls
-    TrackRacer.drifting = v.drift !== false;
+    TrackRacer.drifting = false;                        // (drifting is off: no longer a setting)
     TrackRacer.airPitch = v.airPitch !== false;
     bloom.enabled = v.bloom;
     heat.enabled = v.engineHeat !== false;
@@ -1045,7 +1045,7 @@ async function boot() {
     else if (ship.power > 0.01) { state = 'SHUTTING DOWN'; cls = 'warn'; }
     const f = ctl.forward;
     hud.update(dt, { speed: ctl.speed, agl: MAP !== 'meadow' && mode === 'free' ? NaN : ctl.agl, throttle: ctl.throttle,
-      boostEnergy: ctl.boostEnergy, boosting: ctl.boosting, state, stateClass: cls, camera: rig.name, assist: ctl.assist,
+      boostEnergy: ctl.boostEnergy, boosting: ctl.boosting, airCharge: inp.airCharge, state, stateClass: cls, camera: rig.name, assist: ctl.assist,
       drifting: mode === 'race' && !!ctl.drift, driftCharge: ctl.driftCharge, driftTier: ctl.driftTier || 0, driftChain: ctl.chain || 0,
       invert: input.invert, lapTime: lap.started ? lap.time : NaN, lastLap: lap.last, bestLap: lap.best, lap: lap.lap,
       x: ctl.pos.x, z: ctl.pos.z, fx: f.x, fz: f.z, race: race ? race.hud() : null, mode });

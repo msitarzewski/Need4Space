@@ -5,7 +5,7 @@ const KEY = 'feather.settings.v4';
 export const DEFAULTS = { ship: 'feather', tonemap: 'aces', ao: true, bloom: true, shadows: 'high', scale: 1, exposure: 0, fps: true,
   blur: true, reflections: true, streaks: true, ai: 'easy', music: 'high', sfx: 'high', aa: 'smaa', aoRes: 'auto',
   brakeLights: true, laptop: false, touch: 'auto', map: 'space', shafts: true, lensWater: true, iceSnow: true, iceDust: true, aurora: true,
-  iceStorm: true, iceGeysers: true, wreckFx: true, wreckMist: true, drift: false, airPitch: true, sandFx: true, dustDevils: true, heatHaze: true,
+  iceStorm: true, iceGeysers: true, wreckFx: true, wreckMist: true, airPitch: true, sandFx: true, dustDevils: true, heatHaze: true,
   sandstorm: true, caveFx: true, canyonAO: true, engineHeat: true, engineTrails: 'puffs', colossus: true, nozzleMotion: true, showroom: true,
   deckLight: true, hullShadows: true, engineFaces: 'dark', shipPaint: 'gloss', shipTrim: 'dark', shipAccents: true,
   seaLife: true, seaReflect: true, oceanStorm: true, shipWet: true, kraken: true, oceanRain: true };
@@ -31,7 +31,6 @@ export const presetOf = (v) => Object.keys(PRESETS).find((p) => PRESET_KEYS.ever
 const ROWS = [
   ['quality', 'Graphics quality', [['low', 'Low (laptop)'], ['balanced', 'Balanced'], ['high', 'High'], ['custom', 'Custom']]],
   ['ai', 'AI difficulty', [['easy', 'Easy'], ['normal', 'Normal'], ['hard', 'Hard'], ['brutal', 'Brutal']]],
-  ['drift', 'Drift (touch the brake, turn hard)', [[true, 'On'], [false, 'Off']]],
   ['airPitch', 'Nose control in the air', [[true, 'On'], [false, 'Off']]],
   ['music', 'Music', [['off', 'Off'], ['low', 'Low'], ['mid', 'Medium'], ['high', 'High']]],
   ['sfx', 'Sound effects', [['low', 'Low'], ['mid', 'Medium'], ['high', 'High']]],
@@ -108,9 +107,7 @@ export class Settings {
     if (!this.v.aiPicked) this.v.ai = DEFAULTS.ai;
     // and the music's level High, unless one was chosen
     if (!this.v.musicPicked) this.v.music = DEFAULTS.music;
-    // ("skip drifting for now": braking into a bend with the stick over slid the ship where the rivals just brake -
-    // off unless the player turns it on)
-    if (!this.v.driftPicked) this.v.drift = DEFAULTS.drift;
+    delete this.v.drift; delete this.v.driftPicked;    // (drifting is no longer a setting: off)
     this.focus = 0;                                  // the row the keyboard / gamepad is on
     this.onSet = null;                               // (k, value) after every change (menu.js: the difficulty accent)
     this.el = document.getElementById('settings');
@@ -134,7 +131,6 @@ export class Settings {
     this.v.quality = presetOf(this.v);
     if (k === 'ai') this.v.aiPicked = true;
     if (k === 'music') this.v.musicPicked = true;
-    if (k === 'drift') this.v.driftPicked = true;
     try { localStorage.setItem(KEY, JSON.stringify(this.v)); } catch { /* storage blocked */ }
     this.apply(this.v);
     this.draw();
