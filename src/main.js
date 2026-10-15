@@ -33,6 +33,7 @@ import { compileAll, deferBakes, runBakes, gpuIdle, postJobs } from './bake.js';
 import { Q, setLite, integratedGPU, liteFiltering, memoryTier } from './quality.js';
 import { preloadBakedTextures } from './bakedtextures.js';
 import { beginLoadJobs, finishLoadJobs, stopLoadJobs } from './load-jobs.js';
+import { Showroom } from './showroom.js';
 
 // the map: the circuit chosen in the menu (saved), or ?map=space / forest / ice / desert / meadow (the meadow: the old test range)
 const MAP = { meadow: 'meadow', forest: 'forest', space: 'space', ice: 'ice', desert: 'desert' }[new URLSearchParams(location.search).get('map') || savedSettings().map] || 'space';
@@ -299,9 +300,10 @@ async function boot() {
   let aoHalf = false;
   gtao.setSize = (w, h) => { gtao.fullSize = [w, h]; gtaoSetSize(aoHalf ? Math.max(1, w >> 1) : w, aoHalf ? Math.max(1, h >> 1) : h); };
   const tp = track ? track.parts : null;
+  let showroom = null;                                   // the Ship screen's studio (showroom.js; made below)
   const noAO = () => [...(world.noAO || []), ...ship.fxObjects(), ...fx.pools.map((p) => p.points), fx.streaks.lines, fx.ring, fx.marks.mesh, fx.trails.mesh,
     ...(tp ? [...tp.fields, ...tp.pads, ...tp.lanes, ...tp.gates.filter((m) => m.material.isShaderMaterial), ...(tp.flips || []).filter((m) => m.material.transparent), tp.tunnel[0]].filter(Boolean) : []), ...(race ? race.noAO() : []), ...fx.waves,
-    ...(world.dust ? [world.dust] : [])];
+    ...(world.dust ? [world.dust] : []), ...(showroom && showroom.active ? showroom.fxObjects() : [])];
   gtao.render = (renderer, writeBuffer, readBuffer, ...args) => { // glows, plumes, trails, particles, fields and decals must not occlude anything
     const hide = noAO().filter((o) => o.visible);
     hide.forEach((o) => (o.visible = false));
@@ -597,7 +599,41 @@ async function boot() {
   const _sprayV = new THREE.Vector3();
   const _sunP = new THREE.Vector3(), _camF = new THREE.Vector3();
   let acc = 0, last = performance.now();
-  const render = () => { scene.updateMatrixWorld(); shipLook(); composer.render(); };
+  // the Ship screen's showroom (showroom.js): its studio through the same picture - the scene pass pointed at it, the
+  // passes that only belong on a circuit off - and everything put back after
+  const circuitOnly = () => [ssr, shafts, heat, streaks, blur, world.heat, grade, lens].filter(Boolean);
+  const drawShowroom = () => {
+    showroom.update();
+    const keepPass = { sky: scenePass.sky, skyCam: scenePass.skyCam, scene: scenePass.scene, camera: scenePass.camera };
+    const off = circuitOnly(), was = off.map((p) => p.enabled);
+    Object.assign(scenePass, { sky: null, skyCam: null, scene: showroom.scene, camera: showroom.camera });
+    gtao.scene = showroom.scene; gtao.camera = showroom.camera;
+    off.forEach((p) => (p.enabled = false));
+    renderer.shadowMap.needsUpdate = true;
+    try { composer.render(); } finally {
+      Object.assign(scenePass, keepPass);
+      gtao.scene = scene; gtao.camera = camera;
+      off.forEach((p, i) => (p.enabled = was[i]));
+      renderer.shadowMap.needsUpdate = true;
+    }
+  };
+  const makeShowroom = () => (showroom ||= new Showroom(renderer, { player: ship, playerId: SHIP,
+    others: rivalShip !== ship ? { feather: rivalShip } : {}, tier: RIVAL_TIER[Q.tier], layers: camera.layers.mask }));
+  const showcase = (on, id) => {
+    if (!on || settings.v.showroom === false) { if (showroom) showroom.active = false; return; }
+    makeShowroom().active = true;
+    if (id) showroom.show(id);
+  };
+  // made ready in the background a few seconds into the title: the first open no longer stalls on it all at once
+  setTimeout(() => {
+    if (settings.v.showroom === false || showroom) return;
+    const go = () => makeShowroom().prepare();
+    if (window.requestIdleCallback) requestIdleCallback(go, { timeout: 4000 }); else go();
+  }, 3500);
+  const render = () => {
+    if (showroom && showroom.active) { drawShowroom(); return; }
+    scene.updateMatrixWorld(); shipLook(); composer.render();
+  };
   // drawn between the last two physics steps: at 144 Hz a frame got 0, 1 or 2 steps of 8.3 ms, and everything that
   // moves juddered against the camera
   const keep = (m) => {
@@ -668,7 +704,7 @@ async function boot() {
   };
   const heroOrbit = () => { rig.mode = 'orbit'; Object.assign(rig.orbit, { yaw: 2.35, pitch: 0.16, dist: 22 }); rig.anchor = null; rig.idle = 0; };
   let pilot = null;                                      // past the flag the rivals' AI flies the player's cool-down lap
-  const menu = new Menu({ settings, hud, input, rig, camera, race, track, ship, world, map: MAP, shipId: SHIP,
+  const menu = new Menu({ settings, hud, input, rig, camera, race, track, ship, world, map: MAP, shipId: SHIP, showroom: showcase,
     mode: () => mode, engineOn: () => ship.engineOn, focus: () => ship.root.position,
     status: () => ({ race: race && mode === 'race' ? race.hud() : null }),
     startRace: () => { hud.hideResults(); setMode('race'); placeStart(false); resetLap(); heroOrbit(); engines(); },
@@ -689,6 +725,7 @@ async function boot() {
       rig.mode = 'orbit';
     } });
   window.__feather.menu = menu;
+  window.__feather.showroom = () => showroom;
   Object.defineProperty(window.__feather, 'paused', { get: () => menu.paused, enumerable: true });
   menu.showTitle();
 

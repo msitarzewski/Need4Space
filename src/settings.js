@@ -6,7 +6,7 @@ export const DEFAULTS = { ship: 'feather', tonemap: 'aces', ao: true, bloom: tru
   blur: true, reflections: true, streaks: true, ai: 'easy', music: 'high', sfx: 'high', aa: 'smaa', aoRes: 'auto',
   brakeLights: true, laptop: false, touch: 'auto', map: 'space', shafts: true, lensWater: true, iceSnow: true, iceDust: true, aurora: true,
   iceStorm: true, iceGeysers: true, wreckFx: true, wreckMist: true, drift: false, airPitch: true, sandFx: true, dustDevils: true, heatHaze: true,
-  sandstorm: true, caveFx: true, canyonAO: true, engineHeat: true, engineTrails: 'puffs', colossus: true };
+  sandstorm: true, caveFx: true, canyonAO: true, engineHeat: true, engineTrails: 'puffs', colossus: true, nozzleMotion: true, showroom: true };
 // Graphics quality presets ("low, which would be laptop, balanced in between, and high the actual default"): each sets
 // the rows below at once; a row changed by hand afterwards shows the preset as Custom. Low is Laptop mode (quality.js:
 // the lite shaders and fewer lights as well - tested on a Core Ultra 5 235U; the render scale stays at 100 %), High
@@ -44,6 +44,8 @@ const ROWS = [
   ['reflections', 'Deck reflections (needs AO)', [[true, 'On'], [false, 'Off']]],
   ['engineHeat', 'Engine heat shimmer', [[true, 'On'], [false, 'Off']]],
   ['engineTrails', 'Engine trails', [['puffs', 'Glowing gas'], ['ribbon', 'Light ribbons']]],
+  ['nozzleMotion', 'Rocket nozzle: spinning, folding teeth (Comet)', [[true, 'On'], [false, 'Off']]],
+  ['showroom', 'Ship screen: the ships in a showroom', [[true, 'On'], [false, 'Off']]],
   ['streaks', 'Light streaks', [[true, 'On'], [false, 'Off']]],
   ['blur', 'Speed blur', [[true, 'On'], [false, 'Off']]],
   ['shafts', 'Light shafts (forest moon, ice planet, desert)', [[true, 'On'], [false, 'Off']]],

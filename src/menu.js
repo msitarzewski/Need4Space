@@ -8,7 +8,7 @@ import { AI_LEVELS, LAPS, TEAMS } from './race.js';
 import { controlsHTML, GAMEPAD, fmt } from './hud.js';
 import { UPDATES, VERSION } from './changelog.js';
 import { Scoreboard } from './scoreboard.js';
-import { SHIPS, shipName } from './ships.js';
+import { SHIPS, HANDLING, shipName } from './ships.js';
 
 const ui = (name) => window.__feather?.audio?.ui?.(name);
 const wake = () => window.__feather?.audio?.start?.();          // audio needs a user gesture: any menu key or click
@@ -29,6 +29,19 @@ const LEVELS = [
     desc: 'The ideal line, every pad, perfect boost. They pass close, give way late and block you on every straight.' },
 ];
 const IDS = LEVELS.map((l) => l.id);
+// each ship's stat bars, from how it flies (ships.js HANDLING): the Feather at 6 of 10 on each, the others by how far
+// their numbers stand from its - top speed (the pull over the drag), acceleration, boost, handling, and toughness
+// (how little a knock costs it)
+const bars = (x) => Math.max(1, Math.min(10, Math.round(x)));
+const shipStats = (H) => [
+  ['Top speed', bars(6 + 50 * (Math.sqrt(H.thrust / H.drag) - 1))],
+  ['Acceleration', bars(6 + 40 * (H.thrust - 1))],
+  ['Boost', bars(6 + 20 * (H.boost - 1))],
+  ['Handling', bars(6 + 40 * (H.turn - 1))],
+  ['Toughness', bars(6 + 12 * (1 / H.impact - 1))],
+];
+const statRows = (list) => list.map(([n, v]) => `<div class="d-stat"><span>${n}</span><b class="d-bar">${
+  Array.from({ length: 10 }, (_, k) => `<i class="${k < v ? 'on' : ''}" style="--k:${k}"></i>`).join('')}</b></div>`).join('');
 const stats = (L) => [
   ['Rival pace', L.speed],
   ['Aggression', L.aggression],
@@ -160,6 +173,7 @@ export class Menu {
         <header><div class="m-kicker">What to fly</div><h2 class="m-h2">Ship</h2></header>
         <nav class="m-list">${SHIPS.map(([id, name]) => ['ship:' + id, name]).map(item).join('')}</nav>
         <div class="m-desc"></div>
+        <div class="d-stats s-stats"></div>
       </section>
       <section class="m-screen" data-s="settings">
         <header><div class="m-kicker">Options</div><h2 class="m-h2">Settings</h2></header>
@@ -213,6 +227,9 @@ export class Menu {
     this.el.classList.toggle('on', !!screen);
     document.body.dataset.ui = screen ? this.ctx : 'game';
     this.h.settings.el.classList.toggle('hidden', screen !== 'settings');
+    // (the Ship screen opens on the ship being flown)
+    if (screen === 'ship' && this.sel.ship == null) this.sel.ship = Math.max(0, SHIPS.findIndex(([id]) => id === (this.h.shipId || 'feather')));
+    this.h.showroom?.(screen === 'ship');
     this.board?.setOpen(screen === 'scoreboard');
     if (!screen) { document.getElementById('support-toast')?.classList.remove('on'); return; }   // (the last screen stays drawn while the menu fades out)
     this.el.dataset.ctx = this.ctx;
@@ -354,6 +371,12 @@ export class Menu {
     const i = Math.min(this.sel[s] || 0, items.length - 1);
     this.sel[s] = i;
     items.forEach((el, k) => el.classList.toggle('sel', k === i));
+    if (s === 'ship') {
+      const id = items[i].dataset.act.slice(5);
+      this.h.showroom?.(true, id);
+      const st = this.el.querySelector('.s-stats');
+      if (st && st.dataset.id !== id) { st.dataset.id = id; st.innerHTML = statRows(shipStats(HANDLING[id] || HANDLING.feather)); retrigger(st, 'swap'); }
+    }
     const d = this.el.querySelector(`.m-screen[data-s="${s}"] .m-desc`);
     if (d) {
       const t = this.describe(items[i].dataset.act);
@@ -369,7 +392,7 @@ export class Menu {
       controls: 'Keyboard, mouse and gamepad',
       support: 'Donate to keep Need4Space flying',
       circuit: 'Space, the forest moon, the ice planet or the desert planet',
-      ship: 'The Feather S1 or the Comet R1 - the same handling, a different machine',
+      ship: 'The Feather S1 or the Comet R1 - look them over in the showroom',
       scoreboard: 'The global top 10 for each circuit and difficulty',
       ...Object.fromEntries(CIRCUITS.map(([id, , d]) => ['map:' + id, d])),
       ...Object.fromEntries(SHIPS.map(([id, , d]) => ['ship:' + id, d])),

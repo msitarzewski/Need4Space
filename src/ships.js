@@ -4,7 +4,7 @@
 // hover and the chase camera treat them alike; HANDLING (below) is how each flies.
 export const SHIPS = [
   ['feather', 'Feather S1', 'Twin turbofan pods on swept wings: the original'],
-  ['rocket', 'Comet R1', 'One big rocket in the back of a titanium manta, riding two hover sponsons'],
+  ['rocket', 'Comet R1', 'A rocket in a tail cone, its toothed nozzle spinning up: a higher top speed and sharper in the turns, but every knock costs it half as much again'],
 ];
 
 // How each ship flies (track.js TrackRacer): thrust and boost - its engine's pull, cruising and boosting; drag - the

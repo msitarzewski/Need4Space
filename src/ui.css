@@ -395,6 +395,10 @@ body.lite .m-news { backdrop-filter: none; background: linear-gradient(115deg, r
 .d-bar { display: flex; gap: 3px; height: 0.55rem; }
 .d-bar i { flex: 1; background: rgba(255, 255, 255, 0.08); transform: skewX(-20deg); transition: background 0.25s, box-shadow 0.25s; }
 .d-bar i.on { background: rgba(255, 255, 255, 0.38); }
+/* the Ship screen: the ship under the selection, its stat bars (as the difficulty cards') */
+.s-stats { width: min(24rem, 100%); margin-top: 1.6rem; padding-left: 1.3rem; }
+.s-stats.swap { animation: fade-in 0.3s ease both; }
+.s-stats .d-bar i.on { background: var(--accent); box-shadow: 0 0 0.45rem color-mix(in srgb, var(--accent) 70%, transparent); }
 .d-slot.sel .d-bar i.on { background: var(--c); box-shadow: 0 0 0.45rem color-mix(in srgb, var(--c) 70%, transparent);
   transition-delay: calc(var(--k) * 35ms + 120ms); }
 .d-sweep { position: absolute; inset: 0; pointer-events: none; transform: translateX(-130%);
