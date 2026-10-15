@@ -451,7 +451,9 @@ export class Ocean {
       seRefl: { value: null }, seReflM: { value: new THREE.Matrix4() }, seReflOn: { value: 0 }, seReflPx: { value: 1 }, sePxA: { value: 0.002 } };
     // the mirror: the scene drawn from the camera reflected in the sea's mean level, at half size (Ocean.reflect)
     // (its mips: the reflection read blurred, smoothly - taps spread over it drew it as stripes)
-    this.rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter });
+    // (and 4x MSAA: drawn at half size without it, the thin bright lines in it - the barriers' strips, the rings, the
+    // lamps - crawled and flickered in the sea as the camera moved)
+    this.rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, samples: 4 });
     this.U.seRefl.value = this.rt.texture;
     this.mcam = new THREE.PerspectiveCamera();
     this.mskyCam = new THREE.PerspectiveCamera();
@@ -523,7 +525,12 @@ export class Ocean {
           vec4 r1 = texture2D(seDetail, sW.xz / 41.0 + seTime * vec2(0.012, -0.007));
           vec4 r2 = texture2D(seDetail, sW.xz / 14.0 + seTime * vec2(-0.009, -0.018));
           float far = smoothstep(120.0, 2600.0, dist);
-          vec2 sl = ((r1.xy - 0.5) * 0.9 + (r2.xy - 0.5) * 0.6) * (1.0 - 0.75 * far);
+          // (each layer only where its ripples span a few pixels: finer, the averaged slope left a mirror-sharp sea under
+          // a pixel that held a dozen ripples, and the glints shimmered as the camera moved - what they lose goes into
+          // the highlights' roughness instead: rLost)
+          float rk1 = 1.0 - smoothstep(0.25, 1.2, fpx), rk2 = 1.0 - smoothstep(0.08, 0.4, fpx);
+          vec2 sl = (r1.xy - 0.5) * 0.9 * rk1 + (r2.xy - 0.5) * 0.6 * rk2;
+          float rLost = 0.05 * (1.0 - rk1) + 0.03 * (1.0 - rk2);
           vec3 N = normalize(Ng + vec3(sl.x, 0.0, sl.y));
           float foamN = r1.a * 0.55 + r2.a * 0.45;
           float foam = smoothstep(0.62, 0.2, sJ) * smoothstep(0.42, 0.7, foamN);
@@ -566,7 +573,7 @@ export class Ocean {
               vec3 rm = textureLod(seRefl, rc, lod).rgb * 0.4 + (textureLod(seRefl, rc + dy, lod).rgb + textureLod(seRefl, rc - dy, lod).rgb) * 0.3;
               refl = mix(refl, rm, inScr);
             }
-            float rough = mix(0.17, 0.3, far), a2 = rough * rough * rough * rough;      // (the moon's glade a little broader: calmer)
+            float rough = mix(0.17, 0.3, far), a2 = min(rough * rough * rough * rough + rLost, 1.0);      // (the moon's glade a little broader: calmer)
             // the highlights ride the waves big on the screen and, near, the ripples: past ~100 m every finer slope put
             // the glints somewhere new with each step of the camera - the moon's glade and the lamps' streaks boiled
             vec3 Nh = normalize(vec3(sNC.x, 1.0, sNC.y) + vec3(sl.x, 0.0, sl.y) * (1.0 - smoothstep(40.0, 160.0, dist)));
