@@ -519,12 +519,12 @@ export class SeaLife {
     this.shoal.name = 'shoals';
     scene.add(this.shoal);
     // jellyfish drifting through the city's water, between the street and the surface, pulsing; their own light
-    const NJ = Math.round(150 * Math.max(0.5, this.dens)), gj = inst(jellyGeometry(), { iA: 4, iB: 4 }, NJ);
+    const NJ = Math.round(260 * Math.max(0.5, this.dens)), gj = inst(jellyGeometry(), { iA: 4, iB: 4 }, NJ);
     const R = this.city ? this.city.R : new THREE.Vector3(600, 0, 600);
     for (let i = 0; i < NJ; i++) {
       let x, z, y;
       for (let k = 0; k < 20; k++) {
-        x = C.x + (rnd() * 2 - 1) * R.x * 0.9; z = C.z + (rnd() * 2 - 1) * R.z * 0.9; y = SEA_Y - 8 - rnd() * 60;
+        x = C.x + (rnd() * 2 - 1) * R.x * 0.9; z = C.z + (rnd() * 2 - 1) * R.z * 0.9; y = SEA_Y - 15 - Math.pow(rnd(), 0.7) * 330;
         const n = tr.nearestIndex(new THREE.Vector3(x, y, z));
         if (tr.P[n].distanceTo(new THREE.Vector3(x, y, z)) > 40) break;
       }

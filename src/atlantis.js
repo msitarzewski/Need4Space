@@ -12,7 +12,7 @@ import { TRACK_W } from './track.js';
 import { SEA_Y, SEA_GLSL } from './sea.js';
 
 const TAU = Math.PI * 2;
-export const FLOOR = SEA_Y - 82;                     // the city's streets
+export const FLOOR = SEA_Y - 430;                    // the abyss's floor, the city's streets
 // face kinds
 const ASHLAR = 0, SMOOTH = 1, TRIM = 2, GLOW = 3, WINDOW = 4, ROOF = 5, FLUTED = 6, DARK = 7;
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -202,7 +202,7 @@ function domeTemple(B, rDome, lamps, M, rnd) {
       [colR - 2.6, pod + colH + 6.4, TRIM], [colR - 2.6, pod + colH, ASHLAR]], 72);
     // the cella's drum: windows between pilasters, lit; then the dome, ribbed, its tiles green
     const d0 = pod, d1 = pod + colH + 14;
-    q.lathe([[rDome, d0, ASHLAR], [rDome, d1, WINDOW], [rDome + 2.5, d1 + 1, TRIM], [rDome + 2.5, d1 + 2.6, TRIM], [rDome, d1 + 2.6, ROOF]], 64);
+    q.lathe([[rDome, d0, WINDOW], [rDome, d1, TRIM], [rDome + 2.5, d1 + 1, TRIM], [rDome + 2.5, d1 + 2.6, TRIM], [rDome, d1 + 2.6, ROOF]], 64);
     const dp = [];
     for (let i = 0; i <= 20; i++) { const a = (i / 20) * Math.PI / 2; dp.push([rDome * Math.cos(a) + (i === 20 ? 0 : 0), d1 + 2.6 + rDome * 0.92 * Math.sin(a), ROOF]); }
     dp[20][0] = 7.5;
@@ -265,11 +265,16 @@ function tower(B, r, h, lamps, M, rnd) {
     const secs = 3 + Math.floor(rnd() * 3);
     for (let i = 0; i < secs; i++) {
       const y0 = 5 + (h - 18) * (i / secs), y1 = 5 + (h - 18) * ((i + 1) / secs), rr = r * (1.1 - 0.25 * (i / secs));
-      prof.push([rr, y0, ASHLAR], [rr, y1 - 2.5, WINDOW], [rr + 1.6, y1 - 2, TRIM], [rr + 1.6, y1, TRIM], [rr * 0.95, y1, ASHLAR]);
+      prof.push([rr, y0, WINDOW], [rr, y1 - 2.5, TRIM], [rr + 1.6, y1 - 2, TRIM], [rr + 1.6, y1, TRIM], [rr * 0.95, y1, ASHLAR]);
     }
     const yc = h - 13;
     prof.push([r * 0.85, yc, TRIM], [r * 1.3, yc + 2, TRIM], [r * 0.9, yc + 2.4, GLOW], [r * 0.9, yc + 4, GLOW], [r * 1.25, yc + 4.4, TRIM], [r * 0.4, h, ROOF], [0, h + 0.6, TRIM]);
     q.lathe(prof, 20);
+    // four lines of light up the shaft, catching the eye from across the abyss
+    for (let k = 0; k < 4; k++) {
+      const a = (k / 4) * TAU + 0.4, rr = r * 1.1 + 0.1;
+      q.place(at(Math.cos(a) * rr, 5, Math.sin(a) * rr, -a), (c) => c.box(0.3, h - 24, 0.3, GLOW, { step: 6, top: false }));
+    }
     lamps.push({ p: V(0, yc + 3.2, 0).applyMatrix4(M), col: rnd() < 0.5 ? [0.25, 0.85, 1.0] : [1.0, 0.62, 0.25], I: 2600, reach: 90, size: r * 0.9, kind: 'crown' });
   });
 }
@@ -278,7 +283,7 @@ function tower(B, r, h, lamps, M, rnd) {
 function house(B, w, d, floors, M, rnd) {
   B.place(M, (q) => {
     const fh = 6;
-    q.box(w, floors * fh, d, ASHLAR, { step: 3, kTop: ASHLAR });
+    q.box(w, floors * fh, d, WINDOW, { step: 6, kTop: ASHLAR });
     for (let f = 0; f < floors; f++) {
       const y = f * fh + (f ? 2 : 0.2);
       for (const [sx, sz, len, rot] of [[0, d / 2 + 0.05, w, 0], [0, -d / 2 - 0.05, w, Math.PI], [w / 2 + 0.05, 0, d, -Math.PI / 2], [-w / 2 - 0.05, 0, d, Math.PI / 2]]) {
@@ -340,12 +345,18 @@ vec3 ctGlow = vec3(0.0); float ctRough = 0.7, ctWet = 0.0;`)
       // the inlaid lines: light running along them now and then
       c = vec3(0.05);
       float run = 0.6 + 0.4 * sin(m.x * 0.15 - fogColor.g * 1.3);
-      ctGlow = vec3(0.12, 0.85, 1.0) * 5.0 * run;
+      ctGlow = vec3(0.12, 0.85, 1.0) * 9.0 * run;
     } else if (kind < 4.5) {
-      // windows: dark, a few lit warm from within
-      float r = ctH(floor(vCW.xz / 3.0) + floor(vCW.y / 5.0) * 3.1);
-      c = vec3(0.02);
-      ctGlow = vec3(1.0, 0.55, 0.22) * 2.2 * step(0.82, r);
+      // windows: a grid of openings (2.4 x 3.6 m), more than a third of them lit from within - warm, white or sea-green -
+      // so a tower reads from far off as a column of lights; finer than the pixels, their average
+      vec2 wc = vec2((vCW.x + vCW.z) / 2.4, vCW.y / 3.6), wf = fract(wc), wid = floor(wc);
+      float waw = max(fwidth(wc.x), fwidth(wc.y));
+      float glass = smoothstep(0.1, 0.1 + waw, wf.x) * smoothstep(0.9, 0.9 - waw, wf.x) * smoothstep(0.14, 0.14 + waw, wf.y) * smoothstep(0.86, 0.86 - waw, wf.y);
+      glass = mix(glass, 0.55, smoothstep(0.25, 0.6, waw));
+      float r = ctH(wid + floor(vCW.xz / 40.0) * 7.3), hue = ctH(wid * 1.7 + 3.1);
+      vec3 wcol = hue < 0.5 ? vec3(1.0, 0.62, 0.3) : hue < 0.8 ? vec3(0.75, 0.9, 1.0) : vec3(0.35, 1.0, 0.85);
+      c = mix(vec3(0.14, 0.135, 0.12) * (0.8 + 0.4 * w2), vec3(0.015), glass);
+      ctGlow = wcol * 7.0 * step(0.62, r) * glass * (0.75 + 0.25 * ctH(wid + 9.0));
     } else if (kind < 5.5) {
       // the dome's tiles: scales of copper gone green
       vec2 sc = vec2(m.x / 1.4 + 0.5 * floor(m.y / 1.0), m.y / 1.0), f = fract(sc);
@@ -358,7 +369,7 @@ vec3 ctGlow = vec3(0.0); float ctRough = 0.7, ctWet = 0.0;`)
     // the sea's growth: silt on whatever looks up, weed and crust low down, darker toward the street
     float up = smoothstep(0.55, 0.9, n.y + (w2 - 0.5) * 0.3);
     c = mix(c, vec3(0.2, 0.21, 0.17) * (0.8 + 0.4 * w2), up * 0.65);
-    float low = 1.0 - smoothstep(${(FLOOR + 1).toFixed(1)}, ${(FLOOR + 14).toFixed(1)}, vCW.y + (w1 - 0.5) * 8.0);
+    float low = 1.0 - smoothstep(${(FLOOR + 2).toFixed(1)}, ${(FLOOR + 22).toFixed(1)}, vCW.y + (w1 - 0.5) * 10.0);
     c = mix(c, vec3(0.1, 0.16, 0.12) * (0.6 + 0.6 * w2), low * 0.7);
     c *= 0.85 + 0.15 * smoothstep(0.3, 0.7, ctN3(vCW * 0.015));
     diffuseColor.rgb = c;
@@ -373,20 +384,36 @@ vec3 ctGlow = vec3(0.0); float ctRough = 0.7, ctWet = 0.0;`)
 }
 
 // ---------------------------------------------------------------- the floor
-// a plateau of silt round the city (gentle swells, plazas flat), falling away into the deep beyond it
-export function floorHeight(x, z, C, R) {
-  const d = Math.hypot((x - C.x) / R.x, (z - C.z) / R.z);
-  const swell = (fbm(x / 260, z / 260, 4) - 0.5) * 7 + (fbm(x / 47, z / 47, 3) - 0.5) * 1.6;
-  const edge = smoothstep(0.85, 1.25, d);
-  return FLOOR - 1 + swell * (1 - 0.6 * smoothstep(0, 0.7, 1 - d)) - edge * (60 + 50 * fbm(x / 400, z / 400, 3));
+// The abyss: a basin ~430 m deep under the city, its walls climbing in terraces to a rim ~70 m down (the gate stands on
+// it), the open sea bed beyond falling away again; carved under the track wherever it runs low (never within 32 m
+// under its deck)
+export class Basin {
+  constructor(track, grid, C, R) { Object.assign(this, { track, grid, C, R }); this._p = new THREE.Vector3(); }
+  natural(x, z) {
+    const C = this.C, R = this.R, d = Math.hypot((x - C.x) / R.x, (z - C.z) / R.z);
+    const n1 = fbm(x / 320, z / 320, 4) - 0.5, n2 = fbm(x / 70, z / 70, 3) - 0.5;
+    const e = d + n1 * 0.14, wall = smoothstep(0.64, 1.0, e), steps = Math.floor(wall * 6 + 0.5) / 6;
+    const inside = FLOOR + n2 * 7 + (SEA_Y - 72 - FLOOR) * (wall * 0.4 + steps * 0.6);
+    const out = smoothstep(1.02, 1.4, e);
+    return inside * (1 - out) + (SEA_Y - 240 + n1 * 90) * out;
+  }
+  height(x, z) {
+    let y = this.natural(x, z);
+    const i = this.grid.nearest(this._p.set(x, y, z), 1e9);
+    if (i >= 0) {
+      const P = this.track.P[i], dl = Math.hypot(P.x - x, P.z - z);
+      y = Math.min(y, P.y - 32 + Math.max(0, dl - 50) * 1.2);
+    }
+    return y;
+  }
 }
 
-function floorGeometry(C, R) {
-  const W = R.x * 2.6, D = R.z * 2.6, step = 8, nx = Math.ceil(W / step), nz = Math.ceil(D / step);
+function floorGeometry(basin) {
+  const C = basin.C, R = basin.R, W = R.x * 2.7, D = R.z * 2.7, step = 9, nx = Math.ceil(W / step), nz = Math.ceil(D / step);
   const pos = new Float32Array((nx + 1) * (nz + 1) * 3), fac = new Float32Array((nx + 1) * (nz + 1) * 3), idx = [];
   for (let i = 0; i <= nz; i++) for (let j = 0; j <= nx; j++) {
     const x = C.x - W / 2 + j * step, z = C.z - D / 2 + i * step, k = (i * (nx + 1) + j) * 3;
-    pos[k] = x; pos[k + 1] = floorHeight(x, z, C, R); pos[k + 2] = z;
+    pos[k] = x; pos[k + 1] = basin.height(x, z); pos[k + 2] = z;
     fac[k] = x; fac[k + 1] = z; fac[k + 2] = 8;
   }
   for (let i = 0; i < nz; i++) for (let j = 0; j < nx; j++) {
@@ -486,7 +513,7 @@ export function lighthouseGeometry(x, y0, z, rot = 0) {
   const B = new Builder(), lamps = [], M = at(x, y0, z, rot);
   B.place(M, (q) => {
     q.lathe([[17, -2, TRIM], [17, 3, TRIM], [14, 3, TRIM], [14, 6, TRIM], [11, 6, ASHLAR]], 32);
-    q.lathe([[11, 6, ASHLAR], [10, 28, WINDOW], [11.6, 29, TRIM], [11.6, 31, TRIM], [9.6, 31, ASHLAR], [8.8, 52, WINDOW], [10.4, 53, TRIM], [10.4, 55, TRIM],
+    q.lathe([[11, 6, WINDOW], [10, 28, TRIM], [11.6, 29, TRIM], [11.6, 31, TRIM], [9.6, 31, WINDOW], [8.8, 52, TRIM], [10.4, 53, TRIM], [10.4, 55, TRIM],
       [8.6, 55, ASHLAR], [8, 66, ASHLAR], [8.4, 66.5, GLOW], [8.4, 67.2, GLOW], [8, 67.2, ASHLAR], [8, 69, ASHLAR], [11.5, 70.5, TRIM], [11.5, 72, TRIM], [0, 72, TRIM]], 32);
     for (let k = 0; k < 10; k++) { const a = (k / 10) * TAU; q.place(at(Math.cos(a) * 7.6, 72, Math.sin(a) * 7.6), (c) => column(c, 11, 0.55)); }
     q.place(at(0, 83, 0), (c) => c.lathe([[10, 0, TRIM], [10, 1.6, TRIM], [8, 3.5, ROOF], [1.4, 12, ROOF], [0.7, 15, TRIM], [0, 15.5, TRIM]], 32));
@@ -503,100 +530,119 @@ export class City {
     this.track = track; this.grid = grid;
     const tr = track, rnd = mulberry32(8080), f = {}, lamps = [], B = new Builder();
     this.lamps = lamps;
-    // where it lies: round the way from the gate to the surge
-    const s0 = tr.at('gate', -120), s1 = tr.at('surge', 60), pts = [];
+    // where it lies: the abyss round the way from the gate down and back up the climb
+    const s0 = tr.at('gate', -60), s1 = tr.at('surge', -60), pts = [];
     for (let s = s0; tr.inSpan(s, s0, s1); s = tr.wrap(s + 20)) pts.push(tr.frame(s, {}).P.clone());
     const box = new THREE.Box3().setFromPoints(pts);
     this.C = box.getCenter(new THREE.Vector3());
-    this.R = V(Math.max(520, (box.max.x - box.min.x) / 2 + 380), 0, Math.max(520, (box.max.z - box.min.z) / 2 + 380));
-    const ground = (x, z) => floorHeight(x, z, this.C, this.R);
-    const occupied = [];                             // footprints (x, z, r) the fabric keeps out of
+    this.R = V((box.max.x - box.min.x) / 2 + 420, 0, (box.max.z - box.min.z) / 2 + 420);
+    const basin = (this.basin = new Basin(tr, grid, this.C, this.R));
+    const ground = (x, z) => basin.height(x, z);
+    const inside = (x, z) => Math.hypot((x - this.C.x) / this.R.x, (z - this.C.z) / this.R.z);
+    const occupied = [];
     const clear = (g, margin) => grid.geometryClear(g, margin, 3);
     const side = (s, lat) => { tr.frame(s, f); const R = f.R.clone().setY(0).normalize(); return { x: f.P.x + R.x * lat, z: f.P.z + R.z * lat, y: f.P.y, R, T: f.T.clone().setY(0).normalize() }; };
+    // (lamps added by a part built at scale s: their light and reach scaled with it)
+    const scaleLamps = (from, s) => { for (let i = from; i < lamps.length; i++) { lamps[i].I *= s * s; lamps[i].reach *= s; lamps[i].size *= s; } };
 
-    // the great gate: over the way 20 m before the named point, its piers clear of the track, its springing over the slab
+    // the great gate on the rim: over the way 20 m before the named point
     {
       const s = tr.at('gate', -20), p = side(s, 0), span = TRACK_W + 34, g0 = ground(p.x, p.z);
-      const spring = p.y + 6 - g0;
-      const rot = Math.atan2(-p.R.z, p.R.x);
-      gateArch(B, span, spring, 13, 18, lamps, at(p.x, g0 - 2, p.z, rot));
+      gateArch(B, span, p.y + 6 - g0, 13, 18, lamps, at(p.x, g0 - 2, p.z, Math.atan2(-p.R.z, p.R.x)));
       occupied.push({ x: p.x, z: p.z, r: span / 2 + 20 });
     }
-    // the avenue: colonnades both sides, a column every 14 m, their tops ~16 m over the deck; lamps on every other one
+    // the colonnade down the lip of the abyss: a column every 16 m both sides, their tops 16 m over the deck - until the
+    // floor falls away under it
     {
-      const a0 = tr.at('gate', 40), a1 = tr.at('dome', -60), lat = TRACK_W / 2 + 15;
+      const a0 = tr.at('gate', 40), a1 = tr.at('dome', -80), lat = TRACK_W / 2 + 15;
       for (const sd of [-1, 1]) {
         let prev = null, k = 0;
-        for (let s = a0; tr.inSpan(s, a0, a1); s = tr.wrap(s + 14), k++) {
+        for (let s = a0; tr.inSpan(s, a0, a1); s = tr.wrap(s + 16), k++) {
           const p = side(s, sd * lat), g0 = ground(p.x, p.z), h = p.y + 16 - g0;
-          B.place(at(p.x, g0 - 1, p.z), (q) => column(q, h + 1, 1.6));
+          if (h > 140) { prev = null; continue; }
+          B.place(at(p.x, g0 - 1, p.z), (q) => column(q, h + 1, 1.6 + h * 0.008));
           const top = V(p.x, g0 + h, p.z);
           if (prev) entablature(B, prev, top, Math.min(prev.y, top.y), 4.2);
           if (k % 2 === 0) {
             B.place(at(p.x, g0 + h + 4.3, p.z), (q) => q.lathe([[0.9, 0, TRIM], [0.5, 0.6, TRIM], [0.4, 2.2, SMOOTH], [1.1, 2.8, TRIM], [0, 3.2, TRIM]], 10));
-            lamps.push({ p: V(p.x, g0 + h + 8.6, p.z), col: k % 4 === 0 ? [1.0, 0.6, 0.24] : [0.3, 0.85, 1.0], I: 1300, reach: 70, size: 1.4, kind: 'orb' });
+            lamps.push({ p: V(p.x, g0 + h + 8.6, p.z), col: k % 4 === 0 ? [1.0, 0.6, 0.24] : [0.3, 0.85, 1.0], I: 2200, reach: 80, size: 1.4, kind: 'orb' });
           }
           prev = top;
-          occupied.push({ x: p.x, z: p.z, r: 5 });
+          occupied.push({ x: p.x, z: p.z, r: 6 });
         }
       }
     }
-    // the great dome, inside the turn round the named point
+    // the great dome, inside the turn round the named point: the temple of before at 2.4 times the size, standing on the
+    // abyss's floor and rising past the track
     {
-      const s = tr.at('dome', 40), sd = tr.kh[Math.round(s / tr.step) % tr.n] > 0 ? 1 : -1;
-      const rDome = 44, out = TRACK_W / 2 + 16 + rDome + 34, p = side(s, sd * out), g0 = ground(p.x, p.z);
-      const M = at(p.x, g0 - 2, p.z);
-      const tmp = new Builder();
-      domeTemple(tmp, rDome, [], M, rnd);
-      const ok = clear(tmp.geometry(), 4) >= 0;
-      domeTemple(B, rDome, lamps, ok ? M : at(p.x + p.R.x * sd * 30, g0 - 2, p.z + p.R.z * sd * 30), rnd);
-      occupied.push({ x: p.x, z: p.z, r: rDome + 30 });
-      console.info(`dome: ${ok ? 'clear' : 'moved out 30 m'}`);
+      const s = tr.at('dome', 40), sd = tr.kh[Math.round(s / tr.step) % tr.n] > 0 ? 1 : -1, S = 2.4;
+      for (const extra of [0, 60, 120]) {
+        const p = side(s, sd * (TRACK_W / 2 + 40 + 158 + extra)), g0 = ground(p.x, p.z), M = at(p.x, g0 - 4, p.z, 0, S);
+        const tmp = new Builder();
+        domeTemple(tmp, 44, [], M, rnd);
+        if (clear(tmp.geometry(), 6) < 0 && extra < 120) continue;
+        const n0 = lamps.length;
+        domeTemple(B, 44, lamps, M, rnd);
+        scaleLamps(n0, S);
+        occupied.push({ x: p.x, z: p.z, r: 170 });
+        this.dome = p;
+        break;
+      }
     }
-    // the hall: the temple the way runs through - two rows of columns a side, walls with lit niches, a roof 30 m over
-    // the deck; portals at each end
+    // the hall on the temple mount: the way runs through a hypostyle hall standing on a stepped platform built up from
+    // the floor - two rows of columns a side, walls with lit niches, a roof 30 m over the deck; pylons at each end
     {
       const h0 = tr.at('hallIn', -26), h1 = tr.at('hallOut', 26);
       const in1 = TRACK_W / 2 + 9, in2 = TRACK_W / 2 + 22, wall = TRACK_W / 2 + 34;
-      let prevTop = null;
       for (let s = h0, k = 0; tr.inSpan(s, h0, h1); s = tr.wrap(s + 12), k++) {
         tr.frame(s, f);
-        const R = f.R.clone().setY(0).normalize(), rot = Math.atan2(-R.z, R.x), roofY = f.P.y + 30;
+        const R = f.R.clone().setY(0).normalize(), rot = Math.atan2(-R.z, R.x), roofY = f.P.y + 30, base = f.P.y - 14;
+        // the mount under it: three tiers out from the hall, a glowing band along each tier's edge
+        const g0 = Math.min(ground(f.P.x, f.P.z), base - 40);
+        B.place(at(f.P.x, 0, f.P.z, rot), (q) => {
+          for (const [w, top] of [[wall * 2 + 120, base - 110], [wall * 2 + 70, base - 50], [wall * 2 + 24, base]]) {
+            if (top <= g0) continue;
+            q.place(at(0, g0, 0), (r) => r.box(w, top - g0, 12.4, ASHLAR, { step: 6, kTop: TRIM }));
+            for (const sd2 of [-1, 1]) q.place(at(sd2 * (w / 2 + 0.05), top - 2.2, 0), (r) => r.box(0.12, 0.45, 12.4, GLOW, { step: 6, top: false }));
+          }
+        });
         for (const sd of [-1, 1]) {
           for (const lat of [in1, in2]) {
-            const x = f.P.x + R.x * sd * lat, z = f.P.z + R.z * sd * lat, g0 = ground(x, z);
-            B.place(at(x, g0 - 1, z), (q) => column(q, roofY - g0 + 1, lat === in1 ? 2.2 : 1.9));
+            const x = f.P.x + R.x * sd * lat, z = f.P.z + R.z * sd * lat;
+            B.place(at(x, base - 1, z), (q) => column(q, roofY - base + 1, lat === in1 ? 2.2 : 1.9));
           }
-          // the wall, a niche with a light in every other bay
-          const x = f.P.x + R.x * sd * wall, z = f.P.z + R.z * sd * wall, g0 = ground(x, z);
-          B.place(at(x, g0 - 1, z, rot), (q) => {
-            q.box(4, roofY - g0 + 5, 12.4, ASHLAR, { step: 3 });
+          const x = f.P.x + R.x * sd * wall, z = f.P.z + R.z * sd * wall;
+          B.place(at(x, base - 1, z, rot), (q) => {
+            q.box(4, roofY - base + 5, 12.4, ASHLAR, { step: 3 });
             if (k % 2 === 0) {
-              q.place(at(-sd * 2.05, f.P.y - g0 + 2, 0), (r) => r.box(0.12, 9, 4, DARK, { top: false }));
-              lamps.push({ p: V(x - R.x * sd * 3.2, f.P.y + 7, z - R.z * sd * 3.2), col: [1.0, 0.58, 0.22], I: 700, reach: 45, size: 1.2, kind: 'niche' });
+              q.place(at(-sd * 2.05, f.P.y - base + 2, 0), (r) => r.box(0.12, 9, 4, DARK, { top: false }));
+              lamps.push({ p: V(x - R.x * sd * 3.2, f.P.y + 7, z - R.z * sd * 3.2), col: [1.0, 0.58, 0.22], I: 1400, reach: 55, size: 1.2, kind: 'niche' });
             }
           });
+          // lamps along the mount's top edge outside the walls
+          if (k % 3 === 0) {
+            const lx = f.P.x + R.x * sd * (wall + 9), lz = f.P.z + R.z * sd * (wall + 9);
+            B.place(at(lx, base, lz), (q) => q.lathe([[0.8, 0, TRIM], [0.4, 1, TRIM], [0.35, 6, SMOOTH], [0.9, 6.4, TRIM], [0, 7, TRIM]], 8));
+            lamps.push({ p: V(lx, base + 7.6, lz), col: [0.3, 0.85, 1.0], I: 1500, reach: 70, size: 1.0, kind: 'orb' });
+          }
         }
-        // the roof: a slab across from wall to wall, coffered underneath (beams across every bay)
         B.place(at(f.P.x, roofY + 2.5, f.P.z, rot), (q) => {
           q.box(wall * 2 + 4, 4, 12.4, ASHLAR, { step: 3 });
           q.place(at(0, -1.2, 0), (r) => r.box(wall * 2, 1.2, 1.6, TRIM, { step: 3 }));
         });
-        // hanging lanterns over the way, between the rows
         if (k % 2 === 1) for (const sd of [-1, 1]) {
           const x = f.P.x + R.x * sd * (in1 + in2) / 2, z = f.P.z + R.z * sd * (in1 + in2) / 2;
           B.place(at(x, roofY - 7, z), (q) => q.lathe([[0, 7, TRIM], [0.25, 7, TRIM], [0.25, 2.4, TRIM], [1.1, 2, TRIM], [1.1, 0.4, DARK], [0.4, 0, TRIM], [0, 0, TRIM]], 8));
-          lamps.push({ p: V(x, roofY - 6, z), col: [0.3, 0.85, 1.0], I: 900, reach: 55, size: 1.3, kind: 'lantern' });
+          lamps.push({ p: V(x, roofY - 6, z), col: [0.3, 0.85, 1.0], I: 1800, reach: 60, size: 1.3, kind: 'lantern' });
         }
-        occupied.push({ x: f.P.x, z: f.P.z, r: wall + 6 });
+        occupied.push({ x: f.P.x, z: f.P.z, r: wall + 66 });
       }
-      // the portals: a pylon either side at each end, a glowing band across the lintel, lamps on top
       for (const [nm, off] of [['hallIn', -26], ['hallOut', 26]]) {
-        const s = tr.at(nm, off), p = side(s, 0), roofY = p.y + 30, rot = Math.atan2(-p.R.z, p.R.x);
+        const s = tr.at(nm, off), p = side(s, 0), roofY = p.y + 30, base = p.y - 14, rot = Math.atan2(-p.R.z, p.R.x);
         for (const sd of [-1, 1]) {
-          const x = p.x + p.R.x * sd * (wall + 12), z = p.z + p.R.z * sd * (wall + 12), g0 = ground(x, z), h = roofY + 16 - g0;
-          B.place(at(x, g0 - 2, z, rot + Math.PI / 4), (q) => q.lathe([[22, 0, TRIM], [22, 3, TRIM], [19, 3, ASHLAR], [14, h - 4, ASHLAR], [16, h - 3, TRIM], [16, h, TRIM], [0, h, TRIM]], 4));
-          lamps.push({ p: V(x, g0 - 2 + h + 3, z), col: [1.0, 0.55, 0.2], I: 4500, reach: 110, size: 2.6, kind: 'brazier' });
+          const x = p.x + p.R.x * sd * (wall + 12), z = p.z + p.R.z * sd * (wall + 12), h = roofY + 16 - base;
+          B.place(at(x, base - 2, z, rot + Math.PI / 4), (q) => q.lathe([[22, 0, TRIM], [22, 3, TRIM], [19, 3, ASHLAR], [14, h - 4, ASHLAR], [16, h - 3, TRIM], [16, h, TRIM], [0, h, TRIM]], 4));
+          lamps.push({ p: V(x, base - 2 + h + 3, z), col: [1.0, 0.55, 0.2], I: 9000, reach: 140, size: 2.6, kind: 'brazier' });
         }
         B.place(at(p.x, roofY + 6.5, p.z, rot), (q) => {
           q.box(wall * 2 + 24, 6, 14, ASHLAR, { step: 3 });
@@ -604,91 +650,125 @@ export class City {
         });
       }
     }
-    // the aqueduct: an arcade across the way near the named point, its middle arch over the track, a channel on top
+    // the aqueduct: arcades stacked from the floor of the abyss up to a top tier whose middle arch spans the track, a
+    // channel on top
     {
       const s = tr.at('aqueduct'), p = side(s, 0), g0 = ground(p.x, p.z);
-      const dir = p.R.clone().applyAxisAngle(V(0, 1, 0), 0.35), len = 900, big = 100, small = 26, pier = 6;
-      const top = (p.y - 6) - (g0 - 2) + big / 2 + 9;      // (its middle arch sprung 6 m under the deck: clear of the slab)
-      const rot = Math.atan2(-dir.z, dir.x);
-      B.place(at(p.x, g0 - 2, p.z, rot), (q) => {
+      const dir = p.R.clone().applyAxisAngle(V(0, 1, 0), 0.35), len = 1100, big = 100, small = 30, pier = 8;
+      const O = g0 - 2, top = (p.y - 6) - O + big / 2 + 9;
+      const rot = Math.atan2(-dir.z, dir.x), M = at(p.x, O, p.z, rot);
+      const ring = (q, c, R, spring, d) => {
+        const frames = [];
+        for (let i = 0; i <= 24; i++) { const t = Math.PI * (i / 24); frames.push({ P: V(c + Math.cos(t) * R, spring + Math.sin(t) * R, 0), R: V(Math.cos(t), Math.sin(t), 0), U: V(0, 0, 1) }); }
+        q.sweep(frames, hard([[0, -d], [0, d], [3.4, d], [3.4, -d]]), ASHLAR);
+      };
+      const localGround = (x) => ground(p.x + dir.x * x, p.z + dir.z * x) - 2 - O;
+      B.place(M, (q) => {
         const spans = [];
         for (let x = big / 2 + pier; x < len / 2; x += small + pier) spans.push([x, x + small]);
         const all = [[-big / 2, big / 2], ...spans, ...spans.map(([a, b]) => [-b, -a])];
         for (const [a, b] of all) {
           const span = b - a, c = (a + b) / 2, R = span / 2, spring = top - 9 - R;
-          // the piers either side, the arch ring, the wall over it
-          for (const x of [a - pier / 2, b + pier / 2]) q.place(at(x, 0, 0), (r) => r.box(pier, spring + 2, 7, ASHLAR, { step: 3, top: false }));
-          const frames = [];
-          for (let i = 0; i <= 24; i++) { const t = Math.PI * (i / 24); frames.push({ P: V(c + Math.cos(t) * R, spring + Math.sin(t) * R, 0), R: V(Math.cos(t), Math.sin(t), 0), U: V(0, 0, 1) }); }
-          q.sweep(frames, hard([[0, -3.5], [0, 3.5], [3, 3.5], [3, -3.5]]), ASHLAR);
-          for (const sd of [-1, 1]) q.place(at(c + sd * (R * 0.75 + 1.5), spring + R * 0.3, 0), (r) => r.box(R * 0.5 + 3 + pier / 2, top - (spring + R * 0.3) - 6, 7, ASHLAR, { step: 3, top: false }));
+          const gb = Math.min(localGround(a - pier / 2), localGround(b + pier / 2), localGround(c));
+          if (gb > spring - 6) continue;                          // (the floor up the wall is over it here)
+          for (const x of [a - pier / 2, b + pier / 2]) q.place(at(x, gb, 0), (r) => r.box(pier, spring + 2 - gb, 9, ASHLAR, { step: 6, top: false }));
+          ring(q, c, R, spring, 4.5);
+          for (const sd of [-1, 1]) q.place(at(c + sd * (R * 0.75 + 1.5), spring + R * 0.3, 0), (r) => r.box(R * 0.5 + 3 + pier / 2, top - (spring + R * 0.3) - 6, 9, ASHLAR, { step: 4, top: false }));
+          // the tiers below: arches between the same piers every 70 m down, a glowing band at each
+          for (let lv = spring - 70; lv > gb + R + 10; lv -= 70) {
+            ring(q, c, R, lv, 4.5);
+            q.place(at(c, lv + R + 3.4, 0), (r) => r.box(span + pier, 4, 9, TRIM, { step: 4 }));
+            for (const fz of [-1, 1]) q.place(at(c, lv + R + 5.2, fz * 4.56), (r) => r.box(span + pier, 0.4, 0.12, GLOW, { step: 6, top: false }));
+          }
         }
-        // the channel and its walls, a glowing band along it, lamps
         q.place(at(0, top - 6, 0), (r) => {
-          r.box(len, 3, 9, TRIM, { step: 4 });
-          for (const sd of [-1, 1]) r.place(at(0, 3, sd * 4), (w) => w.box(len, 2.6, 1, ASHLAR, { step: 4 }));
-          for (const sd of [-1, 1]) r.place(at(0, 1.2, sd * 4.55), (w) => w.box(len, 0.35, 0.12, GLOW, { step: 4 }));
+          r.box(len, 3, 11, TRIM, { step: 4 });
+          for (const sd of [-1, 1]) r.place(at(0, 3, sd * 5), (w) => w.box(len, 2.6, 1, ASHLAR, { step: 4 }));
+          for (const sd of [-1, 1]) r.place(at(0, 1.2, sd * 5.56), (w) => w.box(len, 0.35, 0.12, GLOW, { step: 6 }));
         });
       });
-      for (let x = -len / 2 + 40; x < len / 2; x += 64) {
-        const w = V(x, top - 6 + 5.6 + 1.5, 0).applyMatrix4(at(p.x, g0 - 2, p.z, rot));
-        lamps.push({ p: w, col: [1.0, 0.6, 0.25], I: 1100, reach: 60, size: 1.4, kind: 'orb' });
+      for (let x = -len / 2 + 40; x < len / 2; x += 60) {
+        if (localGround(x) > top - 20) continue;
+        lamps.push({ p: V(x, top - 6 + 5.6 + 1.5, 0).applyMatrix4(M), col: [1.0, 0.6, 0.25], I: 2400, reach: 80, size: 1.4, kind: 'orb' });
       }
-      occupied.push({ x: p.x, z: p.z, r: 30 });
+      occupied.push({ x: p.x, z: p.z, r: 40 });
       this.aqueduct = { p, dir, len };
     }
-    // ziggurats and towers in the blocks; houses packed round them; all clear of the track and of each other
-    const place = (r, tries, fn) => {
+    // the city on the floor: towers with lit windows and crowns, ziggurats, buildings packed in blocks, lamps along the
+    // streets - clear of the track, of each other and of the aqueduct's line
+    const place = (r, tries, fn, dMax = 0.86) => {
       for (let t = 0; t < tries; t++) {
-        const x = this.C.x + (rnd() * 2 - 1) * this.R.x * 0.95, z = this.C.z + (rnd() * 2 - 1) * this.R.z * 0.95;
-        if (Math.hypot((x - this.C.x) / this.R.x, (z - this.C.z) / this.R.z) > 0.95) continue;
+        const x = this.C.x + (rnd() * 2 - 1) * this.R.x, z = this.C.z + (rnd() * 2 - 1) * this.R.z;
+        if (inside(x, z) > dMax) continue;
         if (occupied.some((o) => Math.hypot(o.x - x, o.z - z) < o.r + r)) continue;
-        // (the aqueduct's line)
-        if (this.aqueduct) { const a = this.aqueduct, d = V(x - a.p.x, 0, z - a.p.z); if (Math.abs(d.dot(V(-a.dir.z, 0, a.dir.x))) < r + 10 && Math.abs(d.dot(a.dir)) < a.len / 2 + r) continue; }
+        if (this.aqueduct) { const a = this.aqueduct, d = V(x - a.p.x, 0, z - a.p.z); if (Math.abs(d.dot(V(-a.dir.z, 0, a.dir.x))) < r + 14 && Math.abs(d.dot(a.dir)) < a.len / 2 + r) continue; }
         if (fn(x, z)) { occupied.push({ x, z, r }); return true; }
       }
       return false;
     };
-    const test = (build) => { const tb = new Builder(); build(tb, []); return clear(tb.geometry(), 3) >= 0; };
-    for (let k = 0; k < 5; k++) {
-      const w = 60 + rnd() * 40, tiers = 5 + Math.floor(rnd() * 3), th = 6 + rnd() * 2.5, rot = rnd() * TAU;
-      place(w * 0.75, 200, (x, z) => {
-        const M = at(x, ground(x, z) - 1.5, z, rot);
+    const test = (build) => { const tb = new Builder(); build(tb, []); return clear(tb.geometry(), 4) >= 0; };
+    let nz = 0, nt = 0, nh = 0;
+    for (let k = 0; k < 7; k++) {
+      const w = 140 + rnd() * 90, tiers = 6 + Math.floor(rnd() * 3), th = 13 + rnd() * 5, rot = rnd() * TAU;
+      if (place(w * 0.75, 300, (x, z) => {
+        const M = at(x, ground(x, z) - 3, z, rot);
         if (!test((tb, l) => ziggurat(tb, w, tiers, th, l, M))) return false;
-        ziggurat(B, w, tiers, th, lamps, M); return true;
-      });
+        const n0 = lamps.length; ziggurat(B, w, tiers, th, lamps, M); scaleLamps(n0, 2.2); return true;
+      })) nz++;
     }
-    for (let k = 0; k < 14; k++) {
-      const r = 5 + rnd() * 4, h = 45 + rnd() * 50;
-      place(r * 2.5 + 6, 200, (x, z) => {
-        const M = at(x, ground(x, z) - 1.5, z, rnd() * TAU);
-        if (!test((tb, l) => tower(tb, r, h, l, M, mulberry32(k)))) return false;
-        tower(B, r, h, lamps, M, mulberry32(k)); return true;
-      });
-    }
-    let nh = 0;
-    for (let k = 0; k < Math.round(320 * Math.max(0.5, dens)); k++) {
-      const w = 9 + rnd() * 16, d = 9 + rnd() * 14, floors = 1 + Math.floor(rnd() * 3);
-      place(Math.max(w, d) * 0.62 + 2, 12, (x, z) => {
-        const M = at(x, ground(x, z) - 1, z, Math.round(rnd() * 4) * Math.PI / 2 + (rnd() - 0.5) * 0.3);
-        if (!test((tb) => house(tb, w, d, floors, M, mulberry32(k)))) return false;
-        house(B, w, d, floors, M, mulberry32(k)); nh++; return true;
-      });
-    }
-    // street lamps on posts through the fabric
-    for (let k = 0; k < 70; k++) {
-      place(4, 20, (x, z) => {
+    const nearTrack = (r) => {                       // a spot 50 - 260 m off the way's underwater stretch
+      for (let k = 0; k < 40; k++) {
+        const s = tr.wrap(s0 + rnd() * tr.wrap(s1 - s0)), p = side(s, (rnd() < 0.5 ? -1 : 1) * (TRACK_W / 2 + 30 + r * 2 + rnd() * 210));
+        if (inside(p.x, p.z) < 0.95) return p;
+      }
+      return null;
+    };
+    for (let k = 0; k < Math.round(120 * Math.max(0.6, dens)); k++) {
+      const r = 8 + rnd() * 12, h = 150 + Math.pow(rnd(), 0.8) * 240, close = k % 2 === 0;
+      if (place(r * 2.2 + 10, 120, (x, z) => {
+        if (close) { const p = nearTrack(r); if (!p) return false; x = p.x; z = p.z; if (occupied.some((o) => Math.hypot(o.x - x, o.z - z) < o.r + r * 2.2 + 10)) return false; }
         const g0 = ground(x, z);
-        B.place(at(x, g0 - 0.5, z), (q) => q.lathe([[0.8, 0, TRIM], [0.6, 1, TRIM], [0.3, 1.4, SMOOTH], [0.25, 7, SMOOTH], [0.7, 7.4, TRIM], [0.7, 7.8, DARK], [0, 8.2, TRIM]], 8));
-        lamps.push({ p: V(x, g0 + 8.6, z), col: rnd() < 0.7 ? [1.0, 0.6, 0.24] : [0.3, 0.85, 1.0], I: 380, reach: 34, size: 0.9, kind: 'street' });
+        if (g0 > FLOOR + 120) return false;
+        const M = at(x, g0 - 3, z, rnd() * TAU);
+        if (!test((tb, l) => tower(tb, r, h, l, M, mulberry32(k)))) return false;
+        const n0 = lamps.length; tower(B, r, h, lamps, M, mulberry32(k)); scaleLamps(n0, r / 6);
+        if (close) occupied.push({ x, z, r: r * 2.2 + 10 });
         return true;
-      });
+      }, close ? 1.2 : 0.86)) nt++;
+    }
+    for (let k = 0; k < Math.round(650 * Math.max(0.5, dens)); k++) {
+      const w = 12 + rnd() * 22, d = 12 + rnd() * 20, floors = 2 + Math.floor(rnd() * 5);
+      if (place(Math.max(w, d) * 0.62 + 3, 10, (x, z) => {
+        const M = at(x, ground(x, z) - 2, z, Math.round(rnd() * 4) * Math.PI / 2 + (rnd() - 0.5) * 0.3);
+        if (!test((tb) => house(tb, w, d, floors, M, mulberry32(k)))) return false;
+        house(B, w, d, floors, M, mulberry32(k)); return true;
+      }, 0.8)) nh++;
+    }
+    for (let k = 0; k < 220; k++) {
+      place(5, 20, (x, z) => {
+        const g0 = ground(x, z);
+        B.place(at(x, g0 - 0.5, z), (q) => q.lathe([[1, 0, TRIM], [0.8, 1.2, TRIM], [0.4, 1.6, SMOOTH], [0.35, 10, SMOOTH], [0.9, 10.5, TRIM], [0.9, 11, DARK], [0, 11.5, TRIM]], 8));
+        lamps.push({ p: V(x, g0 + 12, z), col: rnd() < 0.65 ? [1.0, 0.6, 0.24] : [0.3, 0.85, 1.0], I: 900, reach: 45, size: 1.0, kind: 'street' });
+        return true;
+      }, 0.8);
+    }
+    {
+      const pts = [], cols = [], step = 58, C = this.C, R = this.R;
+      for (let gx = -R.x; gx <= R.x; gx += step) for (let z = -R.z; z <= R.z; z += 11) {
+        for (const [x, zz] of [[C.x + gx + (rnd() - 0.5) * 3, C.z + z], [C.x + z * R.x / R.z, C.z + gx * R.z / R.x + (rnd() - 0.5) * 3]]) {
+          if (inside(x, zz) > 0.62 || rnd() < 0.18) continue;
+          pts.push(x, ground(x, zz) + 5, zz);
+          const warm = rnd() < 0.7;
+          cols.push(...(warm ? [1.0, 0.62, 0.3] : [0.4, 0.9, 1.0]).map((c) => c * (0.6 + 0.6 * rnd())));
+        }
+      }
+      this.street = { pts: new Float32Array(pts), cols: new Float32Array(cols) };
     }
     this.stone = B.geometry();
     bakeLamps(this.stone, lamps);
-    this.floor = floorGeometry(this.C, this.R);
+    this.floor = floorGeometry(basin);
     bakeLamps(this.floor, lamps);
-    console.info(`city: ${nh} houses, ${lamps.length} lamps, ${(this.stone.index.count / 3 / 1000).toFixed(0)}k tris (stone), floor ${(this.floor.index.count / 3 / 1000).toFixed(0)}k`);
+    console.info(`city: ${nz} ziggurats, ${nt} towers, ${nh} buildings, ${lamps.length} lamps, ${(this.stone.index.count / 3 / 1000).toFixed(0)}k tris (stone), floor ${(this.floor.index.count / 3 / 1000).toFixed(0)}k`);
   }
 
   // the meshes: the stone and the floor in chunks, the lamps' glowing bodies (an orb each, sized by kind), their halos
@@ -704,7 +784,7 @@ export class City {
       const s = { brazier: 2.6, crystal: 2.4, crown: 1.6, orb: 1.0, lantern: 0.75, niche: 0.7, street: 0.55 }[L.kind] || 1;
       M.compose(L.p, new THREE.Quaternion(), V(s, L.kind === 'brazier' ? s * 0.6 : s, s));
       glow.setMatrixAt(i, M);
-      const k = L.kind === 'brazier' ? 16 : L.kind === 'crystal' ? 18 : 10;
+      const k = L.kind === 'brazier' ? 12 : L.kind === 'crystal' ? 9 : 10;
       glow.setColorAt(i, c.setRGB(L.col[0] * k, L.col[1] * k, L.col[2] * k));
     });
     glow.name = 'city-lamps';
@@ -743,9 +823,31 @@ export class City {
         }`,
     }));
     halo.name = 'city-halos';
+    // the street lights: points of light along the streets far below, dimmed by the water between
+    const sg = new THREE.BufferGeometry();
+    sg.setAttribute('position', new THREE.BufferAttribute(this.street.pts, 3));
+    sg.setAttribute('col', new THREE.BufferAttribute(this.street.cols, 3));
+    const street = new THREE.Points(sg, new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { lvl: halo.material.uniforms.lvl, pr: { value: 1 } },
+      vertexShader: /* glsl */`
+        uniform float lvl, pr; attribute vec3 col; varying vec3 vC;
+        ${SEA_GLSL}
+        void main() {
+          vec4 mv = viewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mv;
+          float d = -mv.z;
+          gl_PointSize = clamp(2.2 * pr * projectionMatrix[1][1] * 360.0 / d, 1.5, 14.0);
+          vC = col * 6.0 * seTrans(cameraPosition, position, lvl) * clamp(2.2 * projectionMatrix[1][1] * 360.0 / d / 1.5, 0.2, 1.0);
+        }`,
+      fragmentShader: /* glsl */`
+        varying vec3 vC;
+        void main() { vec2 q = gl_PointCoord * 2.0 - 1.0; float r2 = dot(q, q); if (r2 > 1.0) discard; gl_FragColor = vec4(vC * exp(-r2 * 4.0), 1.0); }`,
+    }));
+    street.name = 'city-streets';
+    street.frustumCulled = false;
     halo.frustumCulled = false;
     halo.renderOrder = 2;
     this.haloMat = halo.material;
-    return { stone, floor, glow, halo };
+    return { stone, floor, glow, halo, street };
   }
 }

@@ -11,9 +11,10 @@
 // mirror of the deep outside it.
 import * as THREE from 'three';
 import { bakeLater } from './bake.js';
+import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 export const SUN_DIR = new THREE.Vector3(0.42, 0.3, -0.86).normalize();     // toward the moon: north-north-east, ~17 deg up
-export const SUN_E = 1.9;                                                   // its light (three units)
+export const SUN_E = 2.9;                                                   // its light (three units)
 export const SUN_COL = new THREE.Color(0.6, 0.72, 1.0);                     // cold silver
 export const SEA_Y = 0;                                                     // the mean sea level
 const WIND = new THREE.Vector2(0.86, -0.51).normalize();                    // where the swell runs (east-north-east)
@@ -48,7 +49,7 @@ export function waveHeight(x, z, t) {
 }
 
 // ---------------------------------------------------------------- the air and the water (every lit material)
-const KW = [0.055, 0.028, 0.02];          // the water's extinction (per m): red first, blue-green slowest
+const KW = [0.012, 0.0062, 0.0046];       // the water's extinction (per m): clear - the city's lights show from far off
 const KD = [0.1, 0.034, 0.025];           // how fast the light from above fades with depth (per m of depth)
 const MURK = [0.004, 0.022, 0.03];        // the murk's own radiance near the top, in equilibrium (dark teal)
 export const SEA_GLSL = /* glsl */`
@@ -60,6 +61,9 @@ const vec3 SE_KW = vec3(${KW.map(f).join(', ')});
 const vec3 SE_KD = vec3(${KD.map(f).join(', ')});
 const vec3 SE_MURK = vec3(${MURK.map(f).join(', ')});
 const float SE_Y = ${f(SEA_Y)};
+// the deep's own glow (the drowned city's light scattered through the water), and the fill it throws on what is down there
+const vec3 SE_DEEP = vec3(0.004, 0.02, 0.045);
+const vec3 SE_FILL = vec3(0.012, 0.045, 0.085);
 const float SE_HA = 360.0;          // the night haze's scale height (m)
 const float SE_BA = 1.5e-4;         // its extinction over the sea (per m)
 // the optical depth of a density exp(-y / H) along o + d t, t in [0, dist]
@@ -71,7 +75,7 @@ float seExp(float oy, float dy, float dist, float H) {
 // glow round it, the dusk's last red low in the west
 vec3 seGlow(vec3 d) {
   float h = max(d.y, 0.0);
-  vec3 c = mix(vec3(0.02, 0.027, 0.045), vec3(0.003, 0.004, 0.009), pow(h, 0.45));
+  vec3 c = mix(vec3(0.03, 0.042, 0.07), vec3(0.005, 0.007, 0.015), pow(h, 0.45));
   float mu = max(dot(d, SE_SUN), 0.0);
   c += SE_SUNRAD * (0.006 * pow(mu, 5.0) + 0.03 * pow(mu, 48.0));
   vec2 dh = d.xz / max(length(d.xz), 1e-4);
@@ -93,6 +97,8 @@ void seWater(vec3 o, vec3 d, float dist, out vec3 T, out vec3 L) {
   T = exp(-SE_KW * dist);
   float ph = 1.0 + 1.8 * pow(max(dot(d, normalize(SE_SUN * vec3(0.75, 1.0, 0.75))), 0.0), 6.0);
   L = SE_MURK * SE_KW * ph * exp(-SE_KD * z0) * (exp(a * dist) - 1.0) / a;
+  float zm = SE_Y - (o.y + d.y * dist * 0.5);
+  L += SE_DEEP * smoothstep(60.0, 260.0, zm) * (1.0 - T);
 }
 // how much of a light at p reaches the camera at o through the air and the water (lvl: the sea at the camera)
 vec3 seTrans(vec3 o, vec3 p, float lvl) {
@@ -172,8 +178,11 @@ export function seaLight() {
 	vec3 seAmb = seSkyUnder( vFogWorld );
 	irradiance *= seAmb;
 	iblIrradiance *= seAmb;
+	// deep down, the city's light all round: a blue fill (shapes read against the dark)
+	vec3 seFill = SE_FILL * smoothstep( 50.0, 220.0, SE_Y - vFogWorld.y );
+	irradiance += seFill;
 	#if defined( RE_IndirectSpecular )
-		radiance *= seAmb;
+		radiance = radiance * seAmb + seFill * 0.35;
 		clearcoatRadiance *= seAmb;
 	#endif
 }
@@ -210,7 +219,7 @@ vec3 skSky(vec3 d) {
   c += vec3(0.55, 0.62, 0.8) * star * smoothstep(0.03, 0.25, h) * (1.0 - smoothstep(0.6, 0.98, mu));
   vec2 cl = skCloud(d);
   // the cloud: dark, its body faintly lit, its edges silver toward the moon
-  vec3 cloud = vec3(0.006, 0.008, 0.013) + SE_SUNRAD * (0.004 * pow(mu, 3.0) + (0.02 + 0.5 * cl.y) * pow(mu, 22.0));
+  vec3 cloud = vec3(0.01, 0.013, 0.02) + SE_SUNRAD * (0.006 * pow(mu, 3.0) + (0.02 + 0.5 * cl.y) * pow(mu, 22.0));
   return mix(c, cloud, cl.x);
 }`;
 
@@ -441,5 +450,35 @@ export class Ocean {
     // the grid follows the camera in whole metres (the swell itself stays where it is)
     this.U.seCenter.value.set(Math.round(camera.position.x), 0, Math.round(camera.position.z));
     this.U.seTime.value = t;
+  }
+}
+
+// Under the sea, the picture itself: a slow wobble (the water's own refraction moving), darker toward the edges. On only
+// while the camera is under (on at first, so the warm-up compiles it)
+export class UnderPass extends Pass {
+  constructor() {
+    super();
+    this.needsSwap = true;
+    this.quad = new FullScreenQuad(new THREE.ShaderMaterial({
+      uniforms: { tDiffuse: { value: null }, time: { value: 0 }, aspect: { value: 1 }, deep: { value: 1 } },
+      vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+      fragmentShader: /* glsl */`
+        uniform sampler2D tDiffuse; uniform float time, aspect, deep; varying vec2 vUv;
+        void main() {
+          vec2 q = vUv * vec2(aspect, 1.0);
+          vec2 o = vec2(sin(q.y * 23.0 + time * 1.9 + sin(q.x * 7.0 + time * 0.7)), cos(q.x * 19.0 + time * 1.6 + sin(q.y * 9.0 - time * 0.5))) * 0.0016 * deep;
+          vec3 c = texture2D(tDiffuse, vUv + o).rgb;
+          vec2 e = vUv - 0.5;
+          c *= 1.0 - 0.4 * deep * smoothstep(0.15, 0.75, dot(e, e) * 2.4);
+          gl_FragColor = vec4(c, 1.0);
+        }`,
+    }));
+  }
+  render(renderer, writeBuffer, readBuffer) {
+    const u = this.quad.material.uniforms;
+    u.tDiffuse.value = readBuffer.texture;
+    u.aspect.value = readBuffer.width / Math.max(1, readBuffer.height);
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    this.quad.render(renderer);
   }
 }

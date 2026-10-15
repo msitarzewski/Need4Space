@@ -10,7 +10,7 @@ import { hullMaps } from './hull.js';
 import { bakeLater } from './bake.js';
 import { Q } from './quality.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { SUN_DIR, SUN_E, SUN_COL, SEA_Y, seaSkyDome, seaLight, Ocean, waveHeight } from './sea.js';
+import { SUN_DIR, SUN_E, SUN_COL, SEA_Y, seaSkyDome, seaLight, Ocean, waveHeight, UnderPass } from './sea.js';
 import { mesaGeometry, archGeometry } from './sandstone.js';
 import { sunOnly, setCave } from './look.js';
 import { City, lighthouseGeometry, stoneMaterial } from './atlantis.js';
@@ -41,19 +41,20 @@ pt(1840, 58, 300); pt(1830, 60, 520, 0, 'breach');
 // a long descending left-hander, banked
 pt(1760, 54, 760, 18); pt(1580, 44, 930, 26); pt(1330, 30, 1010, 22); pt(1080, 16, 1000, 8);
 // the dive: into the sea and down to the city's gate
-pt(860, 4, 950, 0, 'diveIn'); pt(660, -16, 890); pt(470, -38, 830, 0, 'gate');
-// the drowned city: its avenue, round its great dome, through the temple's hall, under the aqueduct
-pt(250, -50, 780, 0, 'avenue'); pt(20, -56, 730, -6); pt(-200, -60, 640, -16);
-pt(-370, -62, 470, -24, 'dome'); pt(-440, -64, 250, -16); pt(-410, -66, 30, -4);
-pt(-360, -66, -170, 0, 'hallIn'); pt(-310, -64, -390, 0, 'hallOut');
-pt(-220, -60, -600, 10, 'aqueduct'); pt(-60, -54, -790, 18); pt(170, -46, -890, 10);
-// the surge: up out of the sea and off the kicker
-pt(420, -30, -930); pt(640, -10, -945, 0, 'surge'); pt(830, 10, -950, 0, 'crest2');
-pt(1060, 6, -955); pt(1270, 9, -975, -8);
+pt(860, 4, 950, 0, 'diveIn'); pt(660, -18, 890); pt(470, -40, 830, 0, 'gate');
+// over the lip of the abyss and down its wall, the drowned city spread out on its floor 400 m down: round its great
+// dome, through the hall on the temple mount, under the aqueduct's top arcade
+pt(260, -72, 790, 0, 'avenue'); pt(40, -118, 740, -8); pt(-190, -165, 655, -16);
+pt(-370, -200, 480, -24, 'dome'); pt(-445, -224, 255, -16); pt(-418, -238, 30, -4);
+pt(-368, -244, -170, 0, 'hallIn'); pt(-318, -242, -390, 0, 'hallOut');
+pt(-228, -232, -600, 10, 'aqueduct'); pt(-68, -214, -790, 18); pt(170, -186, -905, 10);
+// the long climb up out of the abyss, bursting out of the sea and off the kicker
+pt(430, -150, -955); pt(690, -106, -972); pt(940, -60, -978, 0, 'surge'); pt(1170, -18, -980); pt(1360, 10, -982, 0, 'crest2');
+pt(1580, 8, -990);
 // a barrel roll over the swell
-pt(1480, 12, -1000, 0, 'rollIn'); pt(1650, 12, -1015, 120); pt(1820, 12, -1030, 240); pt(1990, 12, -1045, 0, 'rollOut');
+pt(1760, 12, -1005, 0, 'rollIn'); pt(1920, 12, -1018, 120); pt(2080, 12, -1031, 240); pt(2240, 12, -1044, 0, 'rollOut');
 // the long sweep south past the lighthouse
-pt(2250, 16, -980, 14); pt(2440, 20, -780, 24); pt(2520, 24, -480, 12, 'light'); pt(2540, 26, -150); pt(2520, 22, 200, -6);
+pt(2420, 16, -940, 14); pt(2520, 20, -760, 24); pt(2560, 24, -480, 12, 'light'); pt(2560, 26, -150); pt(2520, 22, 200, -6);
 pt(2440, 18, 560, -14); pt(2380, 16, 900, -18); pt(2200, 14, 1180, -24); pt(1900, 12, 1340, -14);
 // west along the south, the loop
 pt(1500, 10, 1420, 0); pt(1150, 10, 1440, 0, 'preLoop');
@@ -195,7 +196,7 @@ export class OceanWorld {
       this.moon.visible = true;
       scene.environment = this.env;
     });
-    scene.environmentIntensity = 1.0;
+    scene.environmentIntensity = 1.8;
     this.exposure = 1.0;
     this.grade = { contrast: 1.1, saturation: 1.12 };
     // (on: the sea's own chunk does the work, sea.js; its colour carries the clock and the sea's level at the camera)
@@ -232,7 +233,7 @@ export class OceanWorld {
     // the sea: its surface, and the deep under it (a floor far down that the water hides entirely)
     this.ocean = new Ocean(renderer, this.dome.userData.cube);
     scene.add(this.ocean.mesh);
-    const abyss = new THREE.Mesh(new THREE.PlaneGeometry(80000, 80000).rotateX(-Math.PI / 2).translate(0, -420, 0), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+    const abyss = new THREE.Mesh(new THREE.PlaneGeometry(80000, 80000).rotateX(-Math.PI / 2).translate(0, -700, 0), new THREE.MeshBasicMaterial({ color: 0x000000 }));
     abyss.name = 'abyss';
     abyss.frustumCulled = false;
     scene.add(abyss);
@@ -242,8 +243,8 @@ export class OceanWorld {
     this.city = new City(this.track, this.grid, { dens: this.dens });
     const cm = this.city.meshes();
     for (const m of [...cm.stone, ...cm.floor]) { m.layers.set(2); m.receiveShadow = true; scene.add(m); }
-    scene.add(cm.glow, cm.halo);
-    this.noAO.push(cm.halo);
+    scene.add(cm.glow, cm.halo, cm.street);
+    this.noAO.push(cm.halo, cm.street);
     this.cityMeshes = cm;
     lap('city');
     this.buildStacks(scene);
@@ -267,6 +268,12 @@ export class OceanWorld {
     this.minimap = this.track;
     this.startIndex = this.track.start;
     this.level = SEA_Y;
+    this.nightLights = true;                         // (main.js: the ships' own lights on all the way round)
+    // four real lights following the city's nearest big lamps: they light the ships and the deck going past
+    this.cityLights = [0, 1, 2, 3].map(() => { const l = new THREE.PointLight(0xffffff, 0, 100, 2); scene.add(l); return l; });
+    this.bigLamps = this.city.lamps.filter((L) => L.I >= 1300);
+    // the picture under the sea (main.js adds a map's own pass)
+    this.heat = new UnderPass();
     lap('lights');
     console.info(`ocean built (ms): ${times.join(', ')}`);
   }
@@ -480,9 +487,16 @@ export class OceanWorld {
     if (Math.abs(x) < TRACK_W_HALF + 4 && y > -6 && y < 6.5) p.addScaledVector(tr.U[i], 6.5 - y);
   }
 
+  // the camera coming up out of the sea: water on the lens (main.js)
+  wetCheck(p) {
+    const under = p.y < this.level, hit = this.camUnder === true && !under;
+    this.camUnder = under;
+    return hit;
+  }
+
   // what the cameras and free flight stay over: the sea bed far down
-  surface() { return SEA_Y - 400; }
-  height() { return SEA_Y - 400; }
+  surface(x, z) { return this.city.basin.height(x, z); }
+  height(x, z) { return this.city.basin.height(x, z); }
   hit() { return null; }
 
   follow(p, camera) {
@@ -514,12 +528,27 @@ export class OceanWorld {
     this.level = waveHeight(cp.x, cp.z, t);
     this.fog.color.setRGB(1, t % 1000, this.level);
     this.dome.material.uniforms.under.value = Math.max(0, this.level - cp.y);
+    const deep = smoothstep(0, 1.5, this.level - cp.y);
+    // the eye opening up in the dark of the deep (main.js: the exposure times this)
+    this.exposureK = 1 + 1.1 * smoothstep(10, 220, this.level - cp.y);
+    this.heat.enabled = deep > 0;
+    this.heat.quad.material.uniforms.time.value = t;
+    this.heat.quad.material.uniforms.deep.value = deep;
     this.city.haloMat && (this.cityMeshes.halo.material.uniforms.lvl.value = this.level);
     this.ocean.update(t, camera);
     if (this.beam) this.beam.rotation.y = -t * (Math.PI * 2 / 10);
+    // the city's nearest big lamps as real lights (only under the sea, and only near)
+    {
+      const near = cp.y < this.level + 5 ? this.bigLamps.map((L) => ({ L, d: L.p.distanceToSquared(cp) })).filter((e) => e.d < 250 * 250).sort((a, b) => a.d - b.d).slice(0, 4) : [];
+      this.cityLights.forEach((l, k) => {
+        const e = near[k];
+        if (!e) { l.intensity = 0; return; }
+        l.position.copy(e.L.p); l.color.setRGB(...e.L.col); l.distance = e.L.reach * 1.2; l.intensity = e.L.I * 2.2;
+      });
+    }
     // the city's chunks: drawn only as far as the water lets them be seen (from above the sea: what shows through it)
     {
-      const reach = cp.y < this.level ? 520 : 700;
+      const reach = cp.y < this.level ? 1700 : 1100;
       for (const m of this.city.parts) {
         const sp = m.geometry.boundingSphere;
         m.visible = sp.center.distanceTo(cp) - sp.radius < reach;

@@ -444,13 +444,15 @@ async function boot() {
   };
   addEventListener('resize', resize);
   const fpsEl = document.getElementById('fps');
+  let expBase = 1;                                       // (the setting's exposure; a map may vary it as it goes: exposureK)
   const sunLights = world.sun ? [world.sun, world.sunMid, world.sunFar] : [world.sunL.sun];
   const settings = new Settings((v) => {
     agx.enabled = v.tonemap !== 'aces';
     agx.setLook(v.tonemap === 'agx' ? 1 : 0);
     output.enabled = !agx.enabled;
-    agx.uniforms.exposure.value = Math.pow(2, v.exposure) * (world.exposure ?? 1);       // (a map can set its own)
-    renderer.toneMappingExposure = 0.95 * Math.pow(2, v.exposure) * (world.exposure ?? 1);
+    expBase = Math.pow(2, v.exposure) * (world.exposure ?? 1);
+    agx.uniforms.exposure.value = expBase;       // (a map can set its own)
+    renderer.toneMappingExposure = 0.95 * expBase;
     gtao.enabled = v.ao;
     canyonAO.value = v.canyonAO ? 1 : 0;
     smaa.enabled = v.aa !== 'msaa';
@@ -853,10 +855,10 @@ async function boot() {
     blur.enabled = sb > 0.001;
     rig.kick = fx.kick;
     if (track) {
-      const dark = 1 - track.caveLight(ship.root.position);
+      const dark = world.nightLights ? 1 : 1 - track.caveLight(ship.root.position);   // (a night map: the ships' own lights on all the way)
       headlight.intensity = ship.power * 16000 * dark;          // only in the meteorite ("start flashlights only in the meteorite")
       for (const l of ship.exhaustLights) l.intensity *= 1 + 4 * dark;
-      const inCave = race ? race.entries.filter((e) => !e.player && track.caveLight(e.ship.root.position) < 0.7)
+      const inCave = race ? race.entries.filter((e) => !e.player && (world.nightLights || track.caveLight(e.ship.root.position) < 0.7))
         .sort((a, b) => a.ship.root.position.distanceToSquared(camera.position) - b.ship.root.position.distanceToSquared(camera.position)) : [];
       rivalLights.forEach((l, k) => {
         const e = inCave[k];
@@ -865,13 +867,14 @@ async function boot() {
         // 900 cd it lit its own hull white, "a very bright colour ... coming from the top of the ship")
         l.position.set(0, RIVAL_LIGHT.y, RIVAL_LIGHT.z).applyMatrix4(e.ship.root.matrixWorld);
         l.color.copy(e.ship.engineColor).lerp(new THREE.Color(1, 1, 1), 0.35);
-        l.intensity = RIVAL_LIGHT.cd * e.ship.power * (1 - track.caveLight(e.ship.root.position));
+        l.intensity = RIVAL_LIGHT.cd * e.ship.power * (world.nightLights ? 1 : 1 - track.caveLight(e.ship.root.position));
       });
     }
     rig.update(dt, view, inp, ctl.boosting);
     menu.camera(dt);                                     // the title's shots, or a blend between two camera views
     world.follow(ctl.rPos, camera);
     world.update?.(t, camera, ship.root.position, racer ? racer.s : 0, renderer);
+    if (world.exposureK) { agx.uniforms.exposure.value = expBase * world.exposureK; renderer.toneMappingExposure = 0.95 * expBase * world.exposureK; }
     // the sun's place on screen for the shafts (fading out as it goes behind the camera)
     if (shafts.enabled) {
       const sp = _sunP.copy(camera.position).addScaledVector(world.sunDir, 5000).project(camera);
