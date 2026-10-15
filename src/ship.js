@@ -49,10 +49,15 @@ export async function loadShip(url, onProgress) {
   return ship;
 }
 
+// Dark engine faces ("big round pods with dark faces and ONLY the ring glowing"): the jets' cones, their white-hot
+// bases and the halo sprite sat over the nozzle and the core glowed, so from behind each face read as a milky disc
+// with the ring lost in it. darkFace 1: the jet fades in behind the face, no white-hot base, no halo, the core a
+// dim ember, the ring a little hotter - the ring alone lights the face. 0: as before. (Settings: one for every ship.)
+const DARK_FACE = { value: 1 };
 function plumeMaterial(colour, core, inner) {
   return new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    uniforms: { time: { value: 0 }, power: { value: 0 }, boost: { value: 0 }, len: { value: 1 },
+    uniforms: { time: { value: 0 }, power: { value: 0 }, boost: { value: 0 }, len: { value: 1 }, darkFace: DARK_FACE,
       colour: { value: colour }, core: { value: core }, inner: { value: inner ? 1 : 0 },
       tailC: { value: colour.clone().multiplyScalar(0.55).lerp(new THREE.Color(0.35, 0.2, 1.0), 0.25) } },
     vertexShader: /* glsl */`
@@ -64,7 +69,7 @@ function plumeMaterial(colour, core, inner) {
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: /* glsl */`
-      uniform float time, power, boost, len, inner; uniform vec3 colour, core, tailC;
+      uniform float time, power, boost, len, inner, darkFace; uniform vec3 colour, core, tailC;
       varying vec2 vUv; varying vec3 vN; varying vec3 vV;
       float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
       float vnoise(vec2 p) {
@@ -85,10 +90,13 @@ function plumeMaterial(colour, core, inner) {
         float knots = pow(0.5 + 0.5 * cos(t * len * 5.5 - time * 3.0), 6.0) * smoothstep(0.75, 0.0, t);
         float a = pow(face, 1.6) * pow(u, 1.25) * smoothstep(0.0, 0.05, t + 0.01) * turb;
         a *= 1.0 + knots * (0.35 + 1.2 * boost) * inner;
+        // (dark faces: the jet shows from about a radius behind the nozzle, clear of the face, and its hot inner cone
+        // - seen from behind it lies over the face - burns lower)
+        a *= mix(1.0, smoothstep(0.2, 1.4, t * len), darkFace) * (1.0 - 0.65 * inner * darkFace);
         // white-hot at the nozzle, through cyan to deep blue, violet in the thin tail
         vec3 tail = tailC;
         vec3 c = mix(colour, tail, smoothstep(0.35, 1.0, t));
-        c = mix(c, core, pow(u, 4.0) * face);
+        c = mix(c, core, pow(u, 4.0) * face * (1.0 - 0.85 * darkFace));
         c = mix(c, core, boost * 0.35 * u);                // boost: hotter, whiter
         gl_FragColor = vec4(max(c * a * power, vec3(0.0)), 1.0);
       }`,
@@ -136,6 +144,8 @@ class Plume {
     this.halo.material.color.copy(eng).lerp(white, 0.45);
     this.halo.position.copy(at).add(new THREE.Vector3(0, 0, reverse ? -0.15 : 0.15));
     this.halo.renderOrder = 3;
+    this.haloA = 0;
+    this.halo.onBeforeRender = () => { this.halo.material.opacity = this.haloA * (1 - DARK_FACE.value); };
     parent.add(this.halo);
     this.r = r;
     this.scale = scale;
@@ -155,10 +165,10 @@ class Plume {
       u.len.value = L / this.r;
       m.visible = power > 0.01;
     }
-    const h = this.r * (2.2 + 1.6 * thrust + 1.2 * boost);
+    const h = this.r * (this.haloK ?? 1) * (2.2 + 1.6 * thrust + 1.2 * boost);
     this.halo.scale.set(h, h, 1);
-    this.halo.material.opacity = Math.min(0.7, power * (0.2 + 0.35 * thrust + 0.3 * boost));
-    this.halo.visible = power > 0.01;
+    this.haloA = Math.min(0.7, power * (0.2 + 0.35 * thrust + 0.3 * boost));
+    this.halo.visible = power > 0.01 && DARK_FACE.value < 1;
   }
 }
 
@@ -504,8 +514,11 @@ const BAY_FILL = ['Chip', 'PCB', 'Cable', 'CableOrange', 'Copper', 'Gold'];
 // the brake lights: the engine glow's long bars under the wings turn this red with the brake (linear; any green and
 // ACES burns the core orange)
 const BRAKE_RED = new THREE.Color(1, 0, 0.014), BRAKE_I = 1.15, _brakeC = new THREE.Color();
-// the engine glow rings: [centre-line radius, width] (m), in each ring's own space (its own xy plane)
-const RINGS = { InletGlow: [0.51, 0.03], ExhaustGlow: [0.54, 0.035], TailGlow: [0.15, 0.016] };
+// the engine glow rings: [centre-line radius, width] (m), in each ring's own space (its own xy plane) - ThroatGlow:
+// the rocket's throat insert, a band down the bell's wall whose glow fades from the throat toward the exit
+// the side exits' shimmer: wider than the exit (x its radius) and reaching further behind (x the marker's reach)
+const VENT_WIDTH = 1.5, VENT_REACH = 2.2;
+const RINGS = { InletGlow: [0.51, 0.03], ExhaustGlow: [0.54, 0.035], TailGlow: [0.15, 0.016], ThroatGlow: [0.40, 0.05] };
 const MAPS = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap', 'bumpMap', 'lightMap', 'displacementMap'];
 const IDENTITY = new THREE.Matrix4();
 
@@ -519,12 +532,13 @@ function partsMaterial(n, U) {
   const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, emissive: 0x000000 });
   m.name = 'Parts';
   m.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, U);
+    Object.assign(sh.uniforms, U, { darkFace: DARK_FACE });
+    deckPatch(sh, U);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float partId;\nattribute vec2 ringP;\nvarying float vPartId;\nvarying vec2 vRingP;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vPartId = partId;\n  vRingP = ringP;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying float vPartId;\nvarying vec2 vRingP;\nuniform vec4 partA[${n}];\nuniform vec4 partB[${n}];\nuniform vec2 partR[${n}];\nuniform vec3 ringEng, ringHot;`)
+      .replace('#include <common>', `#include <common>\nvarying float vPartId;\nvarying vec2 vRingP;\nuniform vec4 partA[${n}];\nuniform vec4 partB[${n}];\nuniform vec2 partR[${n}];\nuniform vec3 ringEng, ringHot;\nuniform float ringK;\nuniform float darkFace;`)
       .replace('vec4 diffuseColor = vec4( diffuse, opacity );',
         'int partI = int( vPartId + 0.5 );\n\tvec4 partCA = partA[ partI ], partCB = partB[ partI ];\n\tvec4 diffuseColor = vec4( partCA.rgb, opacity );')
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = partCA.a;')
@@ -536,8 +550,9 @@ function partsMaterial(n, U) {
   if (partRW.y > 0.0) {
     float uu = (length(vRingP) - partRW.x) / partRW.y, core = exp(-uu * uu);
     float gain = dot(totalEmissiveRadiance, vec3(0.2126, 0.7152, 0.0722)) / max(dot(partCB.rgb, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
-    totalEmissiveRadiance = mix(ringEng, ringHot, core * core) * (0.35 + 6.0 * core) * gain * 0.9;
-  }`);
+    totalEmissiveRadiance = mix(ringEng, ringHot, core * core) * (0.35 + 6.0 * core) * gain * 0.9 * ringK;
+    totalEmissiveRadiance *= 1.0 + 0.25 * darkFace;               // (dark faces: the ring a little hotter)
+  } else if (partRW.x < 0.0) totalEmissiveRadiance *= 1.0 - 0.97 * darkFace;     // (and the core an ember)`);
   };
   m.customProgramCacheKey = () => 'feather-parts-' + n;
   return m;
@@ -552,11 +567,250 @@ function partsGeometry(G, index) {
   return g;
 }
 
+// The deck's light on the hull. Each map's reflections are its sky alone, so a hull lit by the sun from one side was
+// black on the other and underneath (the ice planet's night, space), and its paint, metal and glass had nothing to
+// mirror below the horizon - where Cycles had its floor and studio. The deck under a ship is a big lit plane filling the
+// lower half of what the hull sees: its light (the deck's colour x the sun, sky, lamps and engines lighting it round
+// the ship - setDeckLight, every frame) takes the sky's place below the deck's horizon in the image-based light: in the
+// diffuse by the share of the hemisphere round the normal the deck fills, in the reflections where the reflected ray
+// meets the deck (the horizon softer the rougher the finish). deckK 0: as before.
+const DECK_PARS = /* glsl */`
+uniform vec3 deckUp;
+uniform vec3 deckAlbedo;
+uniform vec3 deckDirect;
+uniform float deckSky;
+uniform float deckK;
+float deckShare( const in vec3 nW ) { return deckK * ( 0.5 - 0.5 * dot( nW, deckUp ) ); }
+float deckSeen( const in vec3 rW, const in float roughness ) {
+	float s = 0.02 + 0.6 * roughness * roughness;
+	return deckK * ( 1.0 - smoothstep( - s, s, dot( rW, deckUp ) ) );
+}
+`;
+const DECK_FNS = /* glsl */`
+#if defined( USE_ENVMAP ) && defined( ENVMAP_TYPE_CUBE_UV )
+	vec3 deckRadiance() {
+		vec3 sky = PI * textureCubeUV( envMap, envMapRotation * deckUp, 1.0 ).rgb * envMapIntensity;
+		return deckAlbedo * RECIPROCAL_PI * ( deckDirect + sky * deckSky );
+	}
+	vec3 deckReflect( const in vec3 viewDir, const in vec3 normal, const in float roughness ) {
+		vec3 r = normalize( mix( reflect( - viewDir, normal ), normal, roughness * roughness ) );
+		return inverseTransformDirection( r, viewMatrix );
+	}
+#endif
+`;
+// (after the cave's dark, which the deck's own light already carries: a deck lit only by the engines in the meteorite)
+const DECK_ADD = /* glsl */`
+#if defined( USE_ENVMAP ) && defined( ENVMAP_TYPE_CUBE_UV )
+	if ( deckK > 0.0 ) {
+		vec3 deckL = deckRadiance();
+		iblIrradiance += PI * deckL * deckShare( inverseTransformDirection( geometryNormal, viewMatrix ) );
+		#if defined( RE_IndirectSpecular )
+			radiance += deckL * deckSeen( deckReflect( geometryViewDir, geometryNormal, material.roughness ), material.roughness );
+			#ifdef USE_CLEARCOAT
+				clearcoatRadiance += deckL * deckSeen( deckReflect( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness ), material.clearcoatRoughness );
+			#endif
+		#endif
+	}
+#endif
+`;
+const ENV_IRR = 'return PI * envMapColor.rgb * envMapIntensity;', ENV_RAD = 'return envMapColor.rgb * envMapIntensity;';
+const IND_DIFF = '#if defined( RE_IndirectDiffuse )';
+function deckPatch(sh, U) {
+  const C = THREE.ShaderChunk, pars = C.envmap_physical_pars_fragment;
+  if (!pars.includes(ENV_IRR) || !pars.includes(ENV_RAD) || !C.lights_fragment_end.includes(IND_DIFF)) {
+    if (!deckPatch.warned) console.warn('light chunks changed: the deck light on the ships not applied');
+    deckPatch.warned = true;
+    return;
+  }
+  Object.assign(sh.uniforms, U);
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <envmap_physical_pars_fragment>', DECK_PARS + pars
+      .replace(ENV_IRR, 'return PI * envMapColor.rgb * envMapIntensity * ( 1.0 - deckShare( worldNormal ) );')
+      .replace(ENV_RAD, 'return envMapColor.rgb * envMapIntensity * ( 1.0 - deckSeen( reflectVec, roughness ) );') + DECK_FNS)
+    .replace('#include <lights_fragment_end>', C.lights_fragment_end.replace(IND_DIFF, DECK_ADD + IND_DIFF));
+}
+
+// The hull's baked occlusion on the sun too (micro-shadowing - Chan 2018, as Filament has it). three applies an AO map
+// to the sky's light only, so the panel seams, vents, hatches and the corners where parts meet were as bright as open
+// panel under the sun, and the hull read flat beside the Cycles renders (where real geometry shadows them). The AO
+// becomes a cone of open sky: light from inside it reaches the surface, light from lower down fades out - so a seam
+// darkens where the sun grazes it, and open panel (AO ~1) is untouched. hullMicro 0: as before. The map is read once
+// for this and the sky's AO both.
+const MICRO_PARS = /* glsl */`
+uniform float hullMicro;
+float hullAperture = 1e4;
+#ifdef HULL_FLAKE
+	// the paint's metal flakes in a light (FLAKE_PARS): the flake under the pixel glints where it faces the half
+	// vector; flakes smaller than a pixel are their average, a soft metallic sheen round the highlight
+	void hullFlake( const in IncidentLight l, const in vec3 n, const in vec3 v, inout ReflectedLight rl ) {
+		if ( hullFlakeK <= 0.0 ) return;
+		vec3 h = normalize( l.direction + v );
+		float nl = saturate( dot( n, l.direction ) );
+		// (a flake disc is 1/8 of its cell: the glints average out to the sheen)
+		float glint = min( ( D_GGX( 0.07, saturate( dot( hullFlakeN, h ) ) ) * hullFlakeW
+			+ D_GGX( 0.07, saturate( dot( hullFlakeN2, h ) ) ) * hullFlakeW2 ) * 0.2, 6.0 );
+		float sheen = D_GGX( 0.34, saturate( dot( n, h ) ) ) * hullFlakeS * 0.05;
+		rl.directSpecular += l.color * nl * hullFlakeC * ( glint + sheen ) * hullFlakeK;
+	}
+#endif
+void RE_Direct_Hull( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight ) {
+	IncidentLight hullLight = directLight;
+	float ms = saturate( dot( geometryNormal, hullLight.direction ) * hullAperture );
+	hullLight.color *= ms * ms;
+	RE_Direct_Physical( hullLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
+	#ifdef HULL_FLAKE
+		hullFlake( hullLight, geometryNormal, geometryViewDir, reflectedLight );
+	#endif
+}
+#undef RE_Direct
+#define RE_Direct RE_Direct_Hull
+`;
+const AO_READ = 'texture2D( aoMap, vAoMapUv ).r';
+const HULL_MICRO = { value: 1 };          // (Settings: one switch for every ship)
+function microPatch(sh) {
+  const C = THREE.ShaderChunk;
+  if (!C.aomap_fragment.includes(AO_READ) || !/#define RE_Direct\s+RE_Direct_Physical/.test(C.lights_physical_pars_fragment)) {
+    if (!microPatch.warned) console.warn('light chunks changed: the hull micro-shadowing not applied');
+    microPatch.warned = true;
+    return;
+  }
+  sh.uniforms.hullMicro = HULL_MICRO;
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <lights_physical_pars_fragment>', '#include <lights_physical_pars_fragment>\n#ifdef USE_AOMAP\n' + MICRO_PARS + '#endif\n')
+    .replace('#include <lights_fragment_begin>', `#ifdef USE_AOMAP
+	float hullAO = ${AO_READ};
+	hullAperture = hullMicro > 0.0 ? inversesqrt( 1.0 - min( mix( 1.0, hullAO, hullMicro ), 0.9999 ) ) : 1e4;
+#endif
+#include <lights_fragment_begin>`)
+    .replace('#include <aomap_fragment>', C.aomap_fragment.replace(AO_READ, 'hullAO'));
+}
+
+// The hull's finish ("the ship looks way worse than in blender cycles" - and after the light alone: "i really cant
+// see much"). Read from the baked maps: paint is what is neither metal nor rough ceramic, trim is the metal.
+//  - paint (hullPaintK): a deep clear coat, full strength and near-mirror, over a metallic-flake base - flakes on a
+//    grid picked by the pixel's footprint (cells ~3 px, from ~4 mm up to ~1.7 cm) that glint where one faces the half
+//    vector; where even the coarsest is under ~1.5 px (the chase camera) only their average is left, a soft metallic
+//    sheen, so nothing sparkles or shimmers at a distance. Flakes come with the clear coat (none in Laptop mode).
+//  - trim (hullTrimK): the metal - casings, the tail housing, the turbine blades - dark satin, so the livery and the
+//    engine rings stand off it.
+//  - accent lights (hullAccentK): thin light strips in the ship's own engine colour, most of them set in the livery's
+//    charcoal pinstripes (look_racer.py's object-space masks, the same numbers): round each pod next to its red
+//    bands, along the front of each wing's trailing-edge band and on the wing's trailing edge itself, and down both
+//    spine rails beside the canopy. ~3 cm wide, their coverage box-filtered over the pixel's footprint (a strip
+//    under a pixel dims instead of crawling, and is gone far off). Lit with the avionics, a little dimmer parked.
+// Each 0: as before. (Settings: one switch each, for every ship.)
+const HULL_LOOK = { paint: { value: 1 }, trim: { value: 1 }, accent: { value: 1 } };
+const PARTS_A = { value: null }, TRIM_PARTS = [];      // (the atlas's colour rows and its aluminium parts: trimFinish)
+const L_NAC_X = 4.0, L_NAC_Z = -0.65;     // the pods' axis (racer_layout.py NAC_X, NAC_Z)
+const FLAKE_PARS = /* glsl */`
+#ifdef USE_CLEARCOAT
+	#define HULL_FLAKE
+#endif
+uniform float hullPaintK, hullTrimK, hullAccentK, accentOn;
+uniform vec3 accentCol;
+varying vec3 vShipP, vShipN;
+float hullPaint = 0.0, hullTrim = 0.0;
+vec3 hullFlakeN = vec3( 0.0, 0.0, 1.0 ), hullFlakeN2 = vec3( 0.0, 0.0, 1.0 ), hullFlakeC = vec3( 0.0 );
+float hullFlakeW = 0.0, hullFlakeW2 = 0.0, hullFlakeS = 1.0, hullFlakeK = 0.0;
+vec2 hullH22( vec2 p ) { vec3 q = fract( vec3( p.xyx ) * vec3( 0.1031, 0.1030, 0.0973 ) ); q += dot( q, q.yzx + 33.33 ); return fract( ( q.xx + q.yz ) * q.zy ); }
+// a strip |x| < hw, box-filtered over the pixel's footprint along x - and gone once it is under ~a quarter of a
+// pixel (far off: a hairline of light there only twinkles)
+float hullStrip( float x, float hw ) {
+	float w = max( fwidth( x ), 1e-4 );
+	return clamp( ( min( x + 0.5 * w, hw ) - max( x - 0.5 * w, - hw ) ) / w, 0.0, 1.0 ) * smoothstep( 0.15, 0.4, 2.0 * hw / w );
+}
+// one level of the flake grid (cells 2^lv as wide as the finest): the glinting flake's normal, and how much of the
+// pixel it fills - none once a cell is under ~1.5 px
+vec3 hullFlakeLevel( vec2 fp, float cpp, float lv, vec3 n, out float w ) {
+	float k = exp2( lv );
+	vec2 q = fp / k, fc = floor( q ), fo = q - fc - 0.5 - ( hullH22( fc + lv * 31.7 ) - 0.5 ) * 0.6;
+	float c = max( cpp / k, 0.02 );
+	w = ( 1.0 - smoothstep( 0.2 - 0.5 * c, 0.2 + 0.5 * c, length( fo ) ) ) * ( 1.0 - smoothstep( 0.35, 0.7, c ) );
+	vec2 tilt = ( hullH22( fc + 17.31 + lv * 5.3 ) - 0.5 ) * 0.7;
+	vec3 ta = normalize( cross( n, abs( n.y ) < 0.9 ? vec3( 0.0, 1.0, 0.0 ) : vec3( 1.0, 0.0, 0.0 ) ) ), tb = cross( n, ta );
+	return normalize( n + tilt.x * ta + tilt.y * tb );
+}
+`;
+function finishPatch(sh, U) {
+  Object.assign(sh.uniforms, { hullPaintK: HULL_LOOK.paint, hullTrimK: HULL_LOOK.trim, hullAccentK: HULL_LOOK.accent,
+    accentCol: U.accentCol, accentOn: U.accentOn });
+  sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vShipP, vShipN;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvShipP = position;\n\tvShipN = objectNormal;');
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <lights_physical_pars_fragment>', FLAKE_PARS + '#include <lights_physical_pars_fragment>')
+    // the masks, from the maps as baked (a rival's paint is recoloured, its finish is not)
+    .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+	hullTrim = smoothstep( 0.5, 0.8, metalnessFactor );
+	hullPaint = ( 1.0 - smoothstep( 0.3, 0.6, metalnessFactor ) ) * ( 1.0 - smoothstep( 0.5, 0.56, roughnessFactor ) );
+	diffuseColor.rgb *= 1.0 - 0.58 * hullTrimK * hullTrim;
+	roughnessFactor = mix( roughnessFactor, clamp( roughnessFactor, 0.3, 0.42 ), hullTrimK * hullTrim );`)
+    .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
+#ifdef USE_CLEARCOAT
+	// (the sun's own glint off it a little softer than the reflections, and held to a bright point below: a mirror
+	// coat on the flat wing tops threw the whole sun into the bloom as a white blob)
+	float hullCcIBL = mix( material.clearcoatRoughness, 0.06 + geometryRoughness, hullPaintK * hullPaint );
+	material.clearcoat = mix( material.clearcoat, hullPaint, hullPaintK );
+	material.clearcoatRoughness = mix( material.clearcoatRoughness, 0.13 + geometryRoughness, hullPaintK * hullPaint );
+	// (under the coat the pigment's own broad grey sheen is mostly gone - the coat does the reflecting - so the colour
+	// reads deep and saturated instead of plastic)
+	material.specularColor *= 1.0 - 0.7 * hullPaintK * hullPaint;
+	material.specularF90 *= 1.0 - 0.7 * hullPaintK * hullPaint;
+	#ifdef HULL_FLAKE
+		material.diffuseColor *= 1.0 - 0.12 * hullPaintK * hullPaint;      // (what the flakes reflect, the pigment doesn't)
+	#endif
+#endif
+#ifdef HULL_FLAKE
+	{
+		// the grid level whose cells are ~3 px (the finest ~4 mm, the coarsest 4x that: up close and in the title's
+		// fly-by a flake is a glint of a few pixels; further off the coarsest is under a pixel and only the sheen is
+		// left), two levels cross-faded so nothing pops as the camera moves
+		vec2 fp = vMapUv * 5000.0;
+		float cpp = max( length( dFdx( fp ) ), length( dFdy( fp ) ) );        // finest cells a pixel
+		float lod = clamp( log2( max( cpp, 1e-4 ) ) + 1.6, 0.0, 2.0 ), l0 = min( floor( lod ), 1.0 ), lf = lod - l0;
+		float w0, w1;
+		hullFlakeN = hullFlakeLevel( fp, cpp, l0, normal, w0 );
+		hullFlakeN2 = hullFlakeLevel( fp, cpp, l0 + 1.0, normal, w1 );
+		hullFlakeW = w0 * ( 1.0 - lf );
+		hullFlakeW2 = w1 * lf;
+		hullFlakeS = 1.0 - mix( 1.0 - smoothstep( 0.35, 0.7, cpp / exp2( l0 ) ), 1.0 - smoothstep( 0.35, 0.7, cpp / exp2( l0 + 1.0 ) ), lf );
+		// (the flakes the paint's own colour: mixed toward white they glinted as white sparks along the dark ink paint up
+		// close - at the start, in the showroom - "white sparkles")
+		hullFlakeC = diffuseColor.rgb * 1.15;
+		hullFlakeK = hullPaintK * hullPaint;
+	}
+#endif`)
+    .replace('#include <lights_fragment_maps>', `#ifdef USE_CLEARCOAT
+	clearcoatSpecularDirect = mix( clearcoatSpecularDirect, min( clearcoatSpecularDirect, vec3( 5.0 ) ), hullPaintK );
+	material.clearcoatRoughness = hullCcIBL;
+#endif
+#include <lights_fragment_maps>`)
+    .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+	{
+		// look_racer.py's livery in its own frame (Blender: x starboard, y forward, z up)
+		vec3 b = vec3( vShipP.x, - vShipP.z, vShipP.y );
+		float ax = abs( b.x );
+		// the pods: the pinstripe on the far side of the red band at each end (bands -0.10 .. 0.17, -4.42 .. -4.12)
+		float rr = length( vec2( ax - ${L_NAC_X.toFixed(2)}, b.z - (${L_NAC_Z.toFixed(2)}) ) );
+		float skin = smoothstep( 0.86, 0.9, rr ) * ( 1.0 - smoothstep( 0.99, 1.03, rr ) );
+		float pod = max( hullStrip( b.y + 4.106, 0.016 ), hullStrip( b.y + 0.114, 0.016 ) ) * skin;
+		// the wings: the pinstripe along the front of the trailing-edge band (d 0.36 .. 0.388 m)
+		float d = ( b.y - ( -4.639 + 0.8019 * ( ax - 0.8713 ) ) ) * 0.78;
+		float wing = ( hullStrip( d - 0.374, 0.016 ) + hullStrip( d - 0.018, 0.014 ) * smoothstep( 0.2, 0.5, vShipN.y ) )
+			* smoothstep( 1.0, 1.06, ax ) * ( 1.0 - smoothstep( 3.12, 3.18, ax ) );
+		// the spine rails: the pinstripe on the inner edge of each rail, from beside the canopy to the tail
+		float bs = 0.8 - 0.16 * smoothstep( -3.0, -6.29, b.y );
+		float rail = hullStrip( ax - bs + 0.084, 0.016 ) * smoothstep( 0.26, 0.32, b.z ) * ( 1.0 - smoothstep( 1.0, 1.12, b.y ) )
+			* smoothstep( -5.62, -5.5, b.y );
+		float strip = max( pod, max( wing, rail ) ) * ( 1.0 - hullTrim );
+		totalEmissiveRadiance += accentCol * ( strip * hullAccentK * accentOn );
+	}`);
+}
+
 // Glass that reads as glass. three.js scales a transparent surface's reflection by its opacity as well, so the canopy
 // and the bay windows were a flat grey film ("the glass on the engine looks so bad"). Here the reflection goes on at
 // full strength (premultiplied blending: the glass adds its reflection and dims what is behind by its opacity), and
 // grazing angles reflect more and let less through (fresnel).
-function glassify(m, tint, opacity) {
+function glassify(m, tint, opacity, deckU) {
   m.color.set(tint);
   m.opacity = opacity;
   m.transparent = true;
@@ -570,6 +824,7 @@ function glassify(m, tint, opacity) {
   m.blendSrcAlpha = THREE.OneFactor;
   m.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
   m.onBeforeCompile = (sh) => {
+    if (deckU) deckPatch(sh, deckU);
     sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>', `
       float glassF = 0.04 + 0.96 * pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 5.0);
       gl_FragColor = vec4(totalDiffuse * diffuseColor.a + totalSpecular + totalEmissiveRadiance,
@@ -670,6 +925,11 @@ export class Ship {
     this.root = new THREE.Group();     // the flight transform (physics)
     this.visual = new THREE.Group();   // hover bob and shake, never fed back to the physics
     this.root.add(this.visual);
+    // the deck's light on this ship's materials (setDeckLight)
+    this.deckU = { deckUp: { value: new THREE.Vector3(0, 1, 0) }, deckAlbedo: { value: new THREE.Color(0.25, 0.25, 0.25) },
+      deckDirect: { value: new THREE.Color(0, 0, 0) }, deckSky: { value: 1 }, deckK: { value: 0 } };
+    // the accent lights' colour (this ship's engines) and how lit they are (finishPatch)
+    this.lookU = { accentCol: { value: new THREE.Color(0, 0, 0) }, accentOn: { value: 0 } };
     const base = opts.cloneOf;
     this.model = base ? base.model.clone(true) : gltf.scene;
     if (base) {                        // each rival owns its materials: its glows follow its own engines
@@ -683,6 +943,7 @@ export class Ship {
     this.visual.add(this.model);
     this.clips = gltf ? gltf.animations : [];
     this.rotors = [];
+    this.folds = [];
     this.canopy = null;
     this.mats = {};
     this.tris = 0;
@@ -690,7 +951,10 @@ export class Ship {
       let m = o.userData && o.userData.motion;
       if (typeof m === 'string') m = JSON.parse(m);
       if (m && m.type === 'spin') {
-        this.rotors.push({ node: o, axis: toThree(m.axis), rps: m.rpm / 60, base: o.quaternion.clone(), angle: 0 });
+        this.rotors.push({ node: o, axis: toThree(m.axis), rps: m.rpm / 60, base: o.quaternion.clone(), angle: 0,
+          idle: m.idle || 0, spool: m.spool || 0, w: 0 });
+      } else if (m && m.type === 'fold') {      // a nozzle tooth: folded out with the engine off, closed in running
+        this.folds.push({ node: o, axis: toThree(m.axis), deg: m.deg, base: o.quaternion.clone() });
       } else if (m && m.type === 'hinge') {
         this.canopy = { node: o, axis: toThree(m.axis), deg: m.deg, base: o.quaternion.clone() };
       }
@@ -701,9 +965,18 @@ export class Ship {
         if (o.userData.parts == null) this.mats[o.material.name] = o.material;
       }
     });
+    // a copy made while the original's canopy stood open (or its nozzle's teeth folded out, its rotor turned) took that
+    // pose as its rest: closing the canopy left it open. Every moving part's rest is the original's own.
+    if (base) {
+      const rest = new Map([...base.rotors, ...(base.folds || []), ...(base.canopy ? [base.canopy] : [])].map((r) => [r.node.name, r.base]));
+      for (const r of [...this.rotors, ...this.folds, ...(this.canopy ? [this.canopy] : [])]) {
+        const q = rest.get(r.node.name);
+        if (q) { r.base.copy(q); r.node.quaternion.copy(q); }
+      }
+    }
     // the canopy: smoked; the bay windows: clear enough to see the electronics behind them
-    if (this.mats.Glass) glassify(this.mats.Glass, 0x1c2433, 0.5);
-    if (this.mats.BayGlass) glassify(this.mats.BayGlass, 0x223038, 0.12);
+    if (this.mats.Glass) glassify(this.mats.Glass, 0x1c2433, 0.5, this.deckU);
+    if (this.mats.BayGlass) glassify(this.mats.BayGlass, 0x223038, 0.12, this.deckU);
     // the bays' own light: in Cycles the bay lamps lit the electronics; here nothing reached them in the nacelle's
     // shade and the windows showed a black box. A fill in each part's own colour, on with the avionics.
     for (const n of BAY_FILL) {
@@ -726,27 +999,30 @@ export class Ship {
     this.engineColor = new THREE.Color(...(opts.engine || [0.1, 0.42, 1.0]));
     const white = new THREE.Color(1, 1, 1);
     if (this.mats.EngineGlow) this.mats.EngineGlow.emissive.copy(this.engineColor);
+    this.lookU.accentCol.value.copy(this.engineColor).multiplyScalar(12);
     if (this.mats.EngineCore) this.mats.EngineCore.emissive.copy(this.engineColor).lerp(white, 0.6);
     // the glow rings as HDR light: white-hot along the ring's centre line, the engine colour at its edges (the Cycles
     // look's ring shader: a gaussian across the ring); each ring its own radius
     // (a rival has none of its own: its rings are in the parts atlas it cloned, lit through setupParts)
     this.ringMats = [];
+    this.ringUs = [];
     this.model.traverse((o) => {
       const key = o.isMesh && Object.keys(RINGS).find((k) => o.name.startsWith(k));
       if (!key) return;
       const [rc, w] = RINGS[key], m = o.material.clone(), eng = this.engineColor.clone(), hot = eng.clone().lerp(white, 0.8);
       // (the ring's size and the team's colours as uniforms: one program for every ring of every ship)
-      const U = { ringRW: { value: new THREE.Vector2(rc, w) }, ringEng: { value: eng }, ringHot: { value: hot } };
+      const U = { ringRW: { value: new THREE.Vector2(rc, w) }, ringEng: { value: eng }, ringHot: { value: hot }, ringK: { value: 1 } };
+      this.ringUs.push(U);
       m.onBeforeCompile = (sh) => {
         Object.assign(sh.uniforms, U);
         sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vRingP;')
           .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vRingP = position;');
-        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vRingP;\nuniform vec2 ringRW;\nuniform vec3 ringEng, ringHot;')
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vRingP;\nuniform vec2 ringRW;\nuniform vec3 ringEng, ringHot;\nuniform float ringK;')
           .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
   {
     float uu = (length(vRingP.xy) - ringRW.x) / ringRW.y, core = exp(-uu * uu);
     float gain = dot(totalEmissiveRadiance, vec3(0.2126, 0.7152, 0.0722)) / max(dot(emissive, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
-    totalEmissiveRadiance = mix(ringEng, ringHot, core * core) * (0.35 + 6.0 * core) * gain * 0.9;
+    totalEmissiveRadiance = mix(ringEng, ringHot, core * core) * (0.35 + 6.0 * core) * gain * 0.9 * ringK;
   }`);
       };
       m.customProgramCacheKey = () => 'feather-ring';
@@ -760,7 +1036,28 @@ export class Ship {
       return this.nozzles[name];
     };
     this.plumes = [];
-    for (const [name, scale] of [['ExhaustGlow_R', 1], ['ExhaustGlow_L', 1], ['TailGlow', 1.4]]) {
+    // a model that marks its nozzles - empties named Plume_*, extras.plume = { r, halo } at the exit plane - has its
+    // flames started there (the rocket's bell: a core jet inside the dark bell, its halo kept small so the bell's wall
+    // and throat ring still read); the Feather's come from its glow rings below
+    const marks = [];
+    this.model.updateMatrixWorld(true);
+    this.model.traverse((o) => { if (/^Plume_/.test(o.name) && o.userData.plume) marks.push(o); });
+    // hot air out of side exits (the rocket's sponsons): marker empties Heat_*, extras.heat = { r, len, dir } - more
+    // shimmer behind them with speed and throttle
+    this.vents = [];
+    this.ventHeat = 0;
+    this.model.traverse((o) => {
+      if (!/^Heat_/.test(o.name) || !o.userData.heat) return;
+      const m = typeof o.userData.heat === 'string' ? JSON.parse(o.userData.heat) : o.userData.heat;
+      this.vents.push({ node: o, r: m.r, len: m.len, dir: toThree(m.dir) });
+    });
+    for (const o of marks) {
+      const m = typeof o.userData.plume === 'string' ? JSON.parse(o.userData.plume) : o.userData.plume;
+      const p = new Plume(this.visual, new THREE.Vector3().setFromMatrixPosition(o.matrixWorld), m.r, 1, this.engineColor);
+      p.haloK = m.halo ?? 1;
+      this.plumes.push(p);
+    }
+    for (const [name, scale] of marks.length ? [] : [['ExhaustGlow_R', 1], ['ExhaustGlow_L', 1], ['TailGlow', 1.4]]) {
       const b = nozzle(name);
       if (!b) { console.warn('no exhaust', name); continue; }
       const c = b.getCenter(new THREE.Vector3()), s = b.getSize(new THREE.Vector3());
@@ -816,6 +1113,42 @@ export class Ship {
       .concat(this.partMeshes.map((pm) => ({ mesh: pm.mesh, levels: pm.levels, parts: true }))) : [];
     this.lodErr = base ? base.lodErr : null;
     this.buildDetails();
+    // the rest of the lit materials (rotors, the canopy's frame) take the deck's light too
+    this.model.traverse((o) => {
+      for (const m of o.isMesh ? [].concat(o.material) : []) {
+        if (!m.isMeshStandardMaterial || m.onBeforeCompile !== THREE.Material.prototype.onBeforeCompile) continue;
+        m.onBeforeCompile = (sh) => deckPatch(sh, this.deckU);
+        m.customProgramCacheKey = () => 'feather-deck';
+      }
+    });
+  }
+
+  // the hull's occlusion on the sun and lamps (microPatch), for every ship: 0 off .. 1
+  static set microShadow(k) { HULL_MICRO.value = k; }
+  static get microShadow() { return HULL_MICRO.value; }
+  // dark engine faces (DARK_FACE), the deep gloss paint, the dark satin trim, the accent lights (finishPatch): 0 / 1
+  static set engineFace(k) { DARK_FACE.value = k; }
+  static get engineFace() { return DARK_FACE.value; }
+  static set paintFinish(k) { HULL_LOOK.paint.value = k; }
+  static get paintFinish() { return HULL_LOOK.paint.value; }
+  static set trimFinish(k) {
+    HULL_LOOK.trim.value = k;
+    // (the small aluminium parts in the atlas with it: their colour row, shared by every ship)
+    for (const p of TRIM_PARTS) PARTS_A.value?.set([p.c.r * (1 - 0.58 * k), p.c.g * (1 - 0.58 * k), p.c.b * (1 - 0.58 * k)], p.id * 4);
+  }
+  static get trimFinish() { return HULL_LOOK.trim.value; }
+  static set accentLights(k) { HULL_LOOK.accent.value = k; }
+  static get accentLights() { return HULL_LOOK.accent.value; }
+
+  // the deck's light this frame (main.js): up its normal under the ship (world), direct the irradiance the sun, lamps
+  // and engines put on it round the ship, sky the share of the sky's light reaching it, k 0 (off) .. 1
+  setDeckLight(up, albedo, direct, sky, k) {
+    const U = this.deckU;
+    U.deckUp.value.copy(up);
+    U.deckAlbedo.value.copy(albedo);
+    U.deckDirect.value.copy(direct);
+    U.deckSky.value = sky;
+    U.deckK.value = k;
   }
 
   // Parts thinner than a fraction of a pixel on screen are left out of every pass (the frame, both depth slices, the AO
@@ -848,7 +1181,8 @@ export class Ship {
     this.model.updateMatrixWorld(true);
     const inv = this.model.matrixWorld.clone().invert();
     this.model.traverse((o) => {
-      if (!o.isMesh || rings.has(o.material) || o.children.length) return;
+      // (named brake lights keep their names: buildParts finds them by it)
+      if (!o.isMesh || rings.has(o.material) || o.children.length || /^BrakeLight/.test(o.name)) return;
       for (let p = o; p && p !== this.model; p = p.parent) if (moving.has(p)) return;
       if (!groups.has(o.material)) groups.set(o.material, []);
       groups.get(o.material).push(o);
@@ -914,6 +1248,8 @@ export class Ship {
       eg.w = pieceWidth(bars[1], IDENTITY);
       eg.cull = eg.w < 0.6;
     }
+    // a model may name its brake lights (BrakeLight_*: the rocket's bars in its trailing edge) - red with the brake too
+    for (const p of list) if (/^BrakeLight/.test(p.name)) p.brake = true;
     const groups = [], key = (p) => (p.cull ? p.w / p.thr : Infinity);
     for (const [name, cast] of [['Parts_cast', true], ['Parts_glow', false]]) {
       const parts = list.filter((p) => p.cast === cast).sort((a, b) => (key(a) === key(b) ? 0 : key(b) - key(a)));
@@ -946,9 +1282,13 @@ export class Ship {
       groups.push({ name, cast, parts, attrs, sphere: bs.boundingSphere, levels: [new THREE.BufferAttribute(I, 1)], cum: [cum] });
     }
     const A = new Float32Array(list.length * 4), R = new Float32Array(list.length * 2);
+    PARTS_A.value = A;
+    TRIM_PARTS.length = 0;
     for (const p of list) {
       A.set([p.mat.color.r, p.mat.color.g, p.mat.color.b, p.mat.roughness], p.id * 4);
+      if (p.mat.name === 'Alu') TRIM_PARTS.push({ id: p.id, c: p.mat.color.clone() });
       if (p.ring) R.set(p.ring, p.id * 2);
+      else if (p.mat.name === 'EngineCore') R.set([-1, 0], p.id * 2);       // (the cores: dark faces dim them)
       p.mesh.removeFromParent();
       if (p.geo !== p.mesh.geometry) p.geo.dispose();
       p.mesh.geometry.dispose();
@@ -977,7 +1317,8 @@ export class Ship {
       else this.partE.push({ o: p.id * 4, kind: p.kind, base: p.base, e, brake: !!p.brake });
     }
     this.partU = { partA: { value: S.A }, partB: { value: B }, partR: { value: S.R },
-      ringEng: { value: this.engineColor.clone() }, ringHot: { value: this.engineColor.clone().lerp(white, 0.8) } };
+      ringEng: { value: this.engineColor.clone() }, ringHot: { value: this.engineColor.clone().lerp(white, 0.8) },
+      ringK: { value: 1 }, ...this.deckU };
     this.partMat = partsMaterial(S.n, this.partU);
     S.groups.forEach((G, gi) => {
       const levels = G.levels.map((idx) => partsGeometry(G, idx));
@@ -1102,6 +1443,9 @@ export class Ship {
       m.userData.clearcoat = 0.25;                     // (Laptop mode drops it: quality.js setLite)
       const rg = !!nm?.userData.rg;
       m.onBeforeCompile = (sh) => {
+        deckPatch(sh, this.deckU);
+        microPatch(sh);
+        finishPatch(sh, this.lookU);
         sh.fragmentShader = sh.fragmentShader.replace('#include <lights_physical_fragment>',
           '#include <lights_physical_fragment>\n#ifdef USE_CLEARCOAT\n  material.clearcoat *= clamp(1.0 - metalnessFactor, 0.0, 1.0);\n#endif');
         if (rg) sh.fragmentShader = rgNormalChunk(sh.fragmentShader);
@@ -1123,6 +1467,9 @@ export class Ship {
     const m = this.mats.RacerBaked;
     const A = new THREE.Color(...team.livery), B = new THREE.Color(...team.body);
     m.onBeforeCompile = (sh) => {
+      deckPatch(sh, this.deckU);
+      microPatch(sh);
+      finishPatch(sh, this.lookU);
       sh.uniforms.teamA = { value: A };
       sh.uniforms.teamB = { value: B };
       sh.fragmentShader = sh.fragmentShader
@@ -1222,10 +1569,31 @@ export class Ship {
     }
     // rotors: the 24-blade fans and turbines stay under ~1.2 rev/s so the blades never strobe (wagon-wheel) at 60 Hz
     const thr = ctrl.throttle, boost = ctrl.boost;
+    // (a rotor with a spool time has inertia: it starts turning slowly as the engine starts, then runs faster with the
+    // throttle, the speed and the boost - the rocket's nozzle rotor. Never past 7.5 deg a frame: beyond half its 20 deg
+    // tooth spacing the 18 teeth strobe and the spin reads backwards, so how fast it can look depends on the frame rate)
+    const thr1 = clamp(thr, 0, 1), boost1 = clamp(boost + this.boostKick, 0, 1), sp = smoothstep(30, 340, ctrl.speed || 0);
     for (const r of this.rotors) {
-      r.angle += r.rps * 2 * Math.PI * this.spin * (1 + 0.15 * thr + 0.05 * boost) * dt;
-      r.node.quaternion.copy(r.base).multiply(new THREE.Quaternion().setFromAxisAngle(r.axis, r.angle));
+      if (r.spool) {
+        const target = Ship.nozzleMotion === false ? 0 : this.spin * (r.idle + 0.35 * thr1 + 1.1 * sp + 0.8 * boost1);
+        r.w += (target - r.w) * (1 - Math.exp(-dt / (this.power < 0.99 ? r.spool : r.spool * 0.3)));
+        r.angle += Math.min(r.rps * r.w, 7.5 / 360 / Math.max(dt, 1 / 360)) * 2 * Math.PI * dt;
+      } else r.angle += r.rps * 2 * Math.PI * this.spin * (1 + 0.15 * thr + 0.05 * boost) * dt;
+      r.node.quaternion.copy(r.base).multiply(_lq.setFromAxisAngle(r.axis, r.angle));
     }
+    // the nozzle's teeth: folded out with the engine off, closing in as it starts; running, they fan out under the brake
+    // (an air brake) and pull in tight on the throttle and the boost, a little open when coasting - eased, never snapping
+    if (this.folds.length) {
+      const run = ease(clamp((this.power - 0.05) / 0.7, 0, 1));
+      const want = Ship.nozzleMotion === false ? 0
+        : 1 - run * (1 - clamp(0.9 * (ctrl.brake ?? ctrl.brakeLight ?? 0) + 0.25 * (1 - thr1) * (1 - boost1), 0, 1));
+      this.foldK = (this.foldK ?? 1) + (want - (this.foldK ?? 1)) * (1 - Math.exp(-dt / 0.16));
+      for (const f of this.folds) f.node.quaternion.copy(f.base).multiply(_lq.setFromAxisAngle(f.axis, THREE.MathUtils.degToRad(f.deg) * this.foldK));
+    }
+    // the side exits' hot air: with the engine running, rising with speed and throttle
+    // ("way more powerful": as strong as the main engine's at full throttle and spreading wider and further behind -
+    // the pass caps every bend at the main engine's own, so the engine's shimmer is as it was)
+    if (this.vents.length) this.ventHeat = this.power * smoothstep(5, 110, ctrl.speed || 0) * (0.9 + 0.8 * thr1 + 0.9 * boost1);
     // glows
     const brake = ctrl.brake || 0;
     const drive = (0.85 + 0.45 * thr + 0.6 * boost + 0.5 * this.boostKick) * (1 - 0.45 * brake);
@@ -1234,10 +1602,14 @@ export class Ship {
       this.mats[n].emissiveIntensity = this.glowBase[n] * (0.03 + 0.97 * this.spin) * drive;
     }
     for (const m of this.ringMats) m.emissiveIntensity = this.glowBase.EngineGlow * (0.03 + 0.97 * this.spin) * drive;
+    const ringK = 0.03 + 0.97 * this.spin;
+    for (const U of this.ringUs) U.ringK.value = ringK;
+    if (this.partU && this.partU.ringK) this.partU.ringK.value = ringK;
     for (const n of AVIONICS) {
       if (this.mats[n]) this.mats[n].emissiveIntensity = this.glowBase[n] * ease(this.avionics);
     }
     for (const n of BAY_FILL) if (this.mats[n]) this.mats[n].emissiveIntensity = ease(this.avionics);
+    this.lookU.accentOn.value = 0.6 + 0.4 * Math.max(this.spin, ease(this.avionics));
     // the brake lights: red with the brake (or what the caller says is braking), if the setting has them on
     const lamp = Ship.brakeLights !== false ? smoothstep(0.08, 0.6, ctrl.brakeLight ?? brake) : 0;
     if (this.partE.length) this.updateParts(0.03 + 0.97 * this.spin, drive, ease(this.avionics), lamp);     // (the same, atlased)
@@ -1381,6 +1753,13 @@ export class Ship {
       p.outer.localToWorld(b.set(0, 0, 1));
       p.outer.localToWorld(e.set(p.r * 1.02, 0, 0));
       add(a, b, e.distanceTo(a), p.heat);
+    }
+    if (this.ventHeat > 0.02) {           // the side exits: hot air streaming aft out of each
+      for (const v of this.vents) {
+        v.node.getWorldPosition(a);
+        b.copy(v.dir).transformDirection(v.node.matrixWorld).multiplyScalar(v.len * VENT_REACH).add(a);
+        add(a, b, v.r * VENT_WIDTH, this.ventHeat);
+      }
     }
   }
 

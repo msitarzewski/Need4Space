@@ -7,13 +7,14 @@ WebGLShader" - every shader after the loss). main.js loads the 2K ship on phones
 integrated GPUs and in Laptop mode, the 8K one elsewhere. Same meshes, same materials; only the images are resized.
 
 Run after every new export of racer_web.glb:  python tools/glb_variants.py
+Another ship's model: python tools/glb_variants.py assets/rocket_web.glb  (writes rocket_web_4k.glb, rocket_web_2k.glb)
 """
 import io, json, pathlib, struct, sys
 from PIL import Image
 
 ASSETS = pathlib.Path(__file__).resolve().parent.parent / 'assets'
-SRC = ASSETS / 'racer_web.glb'
-QUALITY = {'racer_albedo': 90, 'racer_normal': 94, 'racer_orm': 92}   # (WebP; normals keep the most)
+SRC = pathlib.Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ASSETS / 'racer_web.glb'
+QUALITY = {'albedo': 90, 'normal': 94, 'orm': 92}   # by the map's kind (its name's last part; WebP; normals keep the most)
 
 
 def read_glb(path):
@@ -51,14 +52,14 @@ def variant(size):
             if img.size[0] > size:
                 img = img.resize((size, size), Image.LANCZOS)
             buf = io.BytesIO()
-            img.save(buf, 'WEBP', quality=QUALITY.get(im.get('name'), 90), method=6)
+            img.save(buf, 'WEBP', quality=QUALITY.get(str(im.get('name', '')).rsplit('_', 1)[-1], 90), method=6)
             data = buf.getvalue()
         out += b'\0' * (-len(out) % 4)
         v['byteOffset'] = len(out)
         v['byteLength'] = len(data)
         out += data
     J['buffers'][0]['byteLength'] = len(out)
-    dst = ASSETS / f'racer_web_{size // 1024}k.glb'
+    dst = SRC.with_name(f'{SRC.stem}_{size // 1024}k.glb')
     write_glb(dst, J, bytes(out))
     # check: it reads back, every view inside the buffer, every image the size asked
     J2, B2 = read_glb(dst)

@@ -19,6 +19,7 @@ import { TrackRacer, TRACK_W, PERKS } from './track.js';
 import { patchShaders } from './look.js';
 import { smoothstep } from './noise.js';
 import { loadShip, Ship } from './ship.js';
+import { SHIP_URLS, RIVAL_TIER, HANDLING, shipChoice, shipName } from './ships.js';
 import { Flight } from './flight.js';
 import { CameraRig } from './camera.js';
 import { Input } from './input.js';
@@ -34,10 +35,12 @@ import { compileAll, deferBakes, runBakes, gpuIdle, postJobs } from './bake.js';
 import { Q, setLite, integratedGPU, liteFiltering, memoryTier } from './quality.js';
 import { preloadBakedTextures } from './bakedtextures.js';
 import { beginLoadJobs, finishLoadJobs, stopLoadJobs } from './load-jobs.js';
+import { Showroom } from './showroom.js';
 
 // the map: the circuit chosen in the menu (saved), or ?map=space / forest / ice / desert / ocean / meadow (the meadow: the old test range)
 const MAP = { meadow: 'meadow', forest: 'forest', space: 'space', ice: 'ice', desert: 'desert', ocean: 'ocean' }[new URLSearchParams(location.search).get('map') || savedSettings().map] || 'space';
-const SHIP_URL = { high: 'assets/racer_web.glb', mid: 'assets/racer_web_4k.glb', low: 'assets/racer_web_2k.glb' };   // (by memory tier)
+// the ship: the one chosen in the menu (saved), or ?ship=feather / rocket (ships.js); its model by memory tier
+const SHIP = shipChoice(savedSettings().ship), SHIP_URL = SHIP_URLS[SHIP], SHIP_NAME = shipName(SHIP);
 const LUTS = ['assets/agx_punchy_lut65.bin', 'assets/agx_mhc_lut65.bin'];   // Blender's AgX looks: Punchy, Medium High Contrast
 const status = (t) => (document.getElementById('loadtext').textContent = t);
 // The loading bar: each step's share of it (by how long it usually takes) and how far into it. The page's first script
@@ -102,9 +105,12 @@ async function boot() {
     if (!e.total) return;
     got = `  ${(e.loaded / 1e6).toFixed(1)} / ${(e.total / 1e6).toFixed(1)} MB`;
     gotF = e.loaded / e.total;
-    if (!baking) { status('Loading the Feather S1' + got); progress('ship', gotF); }
+    if (!baking) { status(`Loading the ${SHIP_NAME}` + got); progress('ship', gotF); }
   });
   shipLoad.catch(() => {});
+  // the rivals are Feathers whichever ship the player flies: another ship brings the Feather along for them
+  const rivalLoad = SHIP !== 'feather' ? loadShip(SHIP_URLS.feather[RIVAL_TIER[Q.tier]]) : null;
+  rivalLoad?.catch(() => {});
   status(MAP === 'meadow' ? 'Raising the hills' : 'Building the circuit');
   progress('circuit');
   await Promise.all([nextFrame(), bakedLoad, jobLoad]);
@@ -117,11 +123,13 @@ async function boot() {
   progress('circuit', 1);
   await runBakes(renderer, (what, k, n) => { status(`${what}  ${k} / ${n}`); progress(/Painting/.test(what) ? 'paint' : 'bakes', k / n); });
   baking = false;
-  status('Loading the Feather S1' + got);
+  status(`Loading the ${SHIP_NAME}` + got);
   progress('ship', gotF);
   const ship = await shipLoad;
+  const rivalShip = rivalLoad ? await rivalLoad : ship;
   await world.ready;                                   // (a world's own models: the space station's - before the warm-up)
   ship.upgradeMaterials(renderer.capabilities.getMaxAnisotropy(), renderer);
+  if (rivalShip !== ship) rivalShip.upgradeMaterials(renderer.capabilities.getMaxAnisotropy(), renderer);
   scene.add(ship.root);
   console.info(`ship: ${Math.round(ship.tris)} tris, ${ship.rotors.length} rotors, canopy ${!!ship.canopy}, ` +
     `plumes ${ship.plumes.length}, tangents repaired ${ship.tangentsFixed}`);
@@ -130,10 +138,11 @@ async function boot() {
   if (MAP !== 'meadow') flight.gravity = 0;
   const track = world.track || null;
   const racer = track ? new TrackRacer(ship, track) : null;
+  if (racer) racer.handling = HANDLING[SHIP] || HANDLING.feather;      // how the chosen ship flies (ships.js)
   // eight rivals, cloned before the player's ship first animates (their canopies and rotors start at rest)
   status('Rolling out the rivals');
   progress('rivals');
-  const race = racer ? new Race(scene, track, ship, racer) : null;
+  const race = racer ? new Race(scene, track, ship, racer, { rivals: rivalShip, name: SHIP_NAME }) : null;
   world.race = race;                                       // (a world may read the ships: the ice planet's wakes)
   let mode = racer ? 'race' : 'free';
   let ctl = racer || flight;
@@ -301,9 +310,10 @@ async function boot() {
   let aoHalf = false;
   gtao.setSize = (w, h) => { gtao.fullSize = [w, h]; gtaoSetSize(aoHalf ? Math.max(1, w >> 1) : w, aoHalf ? Math.max(1, h >> 1) : h); };
   const tp = track ? track.parts : null;
+  let showroom = null;                                   // the Ship screen's studio (showroom.js; made below)
   const noAO = () => [...(world.noAO || []), ...ship.fxObjects(), ...fx.pools.map((p) => p.points), fx.streaks.lines, fx.ring, fx.marks.mesh, fx.trails.mesh,
     ...(tp ? [...tp.fields, ...tp.pads, ...tp.lanes, ...tp.gates.filter((m) => m.material.isShaderMaterial), ...(tp.flips || []).filter((m) => m.material.transparent), tp.tunnel[0]].filter(Boolean) : []), ...(race ? race.noAO() : []), ...fx.waves,
-    ...(world.dust ? [world.dust] : [])];
+    ...(world.dust ? [world.dust] : []), ...(showroom && showroom.active ? showroom.fxObjects() : [])];
   gtao.render = (renderer, writeBuffer, readBuffer, ...args) => { // glows, plumes, trails, particles, fields and decals must not occlude anything
     const hide = noAO().filter((o) => o.visible);
     hide.forEach((o) => (o.visible = false));
@@ -391,9 +401,49 @@ async function boot() {
   // the render scale: the frame drawn at a fraction (or a multiple) of the screen's pixels, resampled to it here
   const resample = new ResamplePass();
   composer.addPass(resample);
-  // before each frame's draw (the world's matrices up to date): the engines' heat sources, every ship's
   const fleet = () => (race ? race.entries.map((e) => e.ship) : [ship]);
-  const shipLook = () => { if (heat.enabled) { heat.amount = 8 * (1 + 2.4 * (world.underK || 0)); heat.gather(camera, fleet()); } };
+  // The deck's light on the ships (ship.js setDeckLight): the deck's mean colour, and per ship this frame the sun on the
+  // deck under it, the sky's share over it (none in a cave) and the engine lights, lamps and headlight round it.
+  const deckColour = track ? track.deckAlbedo(renderer) : new THREE.Color(0.25, 0.25, 0.25);
+  const deck = { k: 1, up: new THREE.Vector3(), sun: new THREE.Vector3(), E: new THREE.Color(), p: new THREE.Vector3() };
+  let deckLights = null;
+  // over a jump's gap the deck below is gone: 1 on the deck, down to a quarter 15 m into the gap
+  const deckGap = (s) => {
+    let k = 1;
+    for (const [s0, s1] of track.gaps) {
+      const d = track.wrap(s - s0), L = track.wrap(s1 - s0);
+      if (d <= L) k = Math.min(k, 1 - 0.75 * smoothstep(0, 15, Math.min(d, L - d)));
+    }
+    return k;
+  };
+  const deckLight = () => {
+    const sun = world.sun || world.sunL?.sun, D = deck;
+    if (sun) D.sun.copy(sun.position).sub(sun.target.position).normalize();
+    const lights = (deckLights ||= [...rivalLights, ...(world.lamps || []), ...fleet().flatMap((s) => s.exhaustLights)]);
+    for (const e of race ? race.entries : [{ ship, racer }]) {
+      const s = e.ship, p = s.root.position;
+      D.up.set(0, 1, 0).applyQuaternion(s.root.quaternion);
+      const cave = track ? track.caveLight(p) : 1;
+      D.E.setRGB(0, 0, 0);
+      if (sun) D.E.copy(sun.color).multiplyScalar(sun.intensity * Math.max(0, D.sun.dot(D.up)) * cave);
+      // a light's mean irradiance over the deck within 6 m of the ship, h over it, fading with its distance away
+      for (const l of lights) {
+        if (!l.visible || !(l.intensity > 0)) continue;
+        D.p.setFromMatrixPosition(l.matrixWorld).sub(p);                    // (the world's matrices are up to date)
+        const y = D.p.dot(D.up), h = Math.max(0.5, y + 1.2), r2 = D.p.lengthSq() - y * y;
+        const w = 2 * (1 - h / Math.sqrt(36 + h * h)) / 36 * Math.exp(-r2 / 64);
+        if (w > 1e-4) D.E.r += l.color.r * l.intensity * w, D.E.g += l.color.g * l.intensity * w, D.E.b += l.color.b * l.intensity * w;
+      }
+      // the player's headlight (the meteorite): its pool lies ahead, a little of it under the ship
+      if (s === ship && headlight.intensity > 0) D.E.r += headlight.color.r * headlight.intensity * 1e-4, D.E.g += headlight.color.g * headlight.intensity * 1e-4,
+        D.E.b += headlight.color.b * headlight.intensity * 1e-4;
+      const gap = track && e.racer ? deckGap(e.racer.s) : 1;
+      s.setDeckLight(D.up, deckColour, D.E, 0.012 + 0.988 * cave, deck.k * gap);
+    }
+  };
+  // before each frame's draw (the world's matrices up to date): every ship's deck light and the engines' heat sources
+  // (under water the shimmer is stronger: the sea bends the light more than the air)
+  const shipLook = () => { deckLight(); if (heat.enabled) { heat.amount = 8 * (1 + 2.4 * (world.underK || 0)); heat.gather(camera, fleet()); } };
   let pixelRatio = Math.min(devicePixelRatio, 2), renderScale = 1, blurOn = true, aoRes = 'auto';
   // half-size AO: asked for, or 'auto' with more than ~1440p of pixels to fill
   const applyAoRes = () => {
@@ -476,8 +526,15 @@ async function boot() {
     bloom.enabled = v.bloom;
     heat.enabled = v.engineHeat !== false;
     Ship.trailStyle = v.engineTrails || 'puffs';
+    Ship.nozzleMotion = v.nozzleMotion !== false;
     blurOn = v.blur;
     Ship.brakeLights = v.brakeLights;
+    deck.k = v.deckLight !== false ? 1 : 0;           // the deck's light on the ships
+    Ship.microShadow = v.hullShadows !== false ? 1 : 0;   // their seams and recesses shaded from the sun
+    Ship.engineFace = v.engineFaces === 'glow' ? 0 : 1;   // dark engine faces, the ring alone glowing
+    Ship.paintFinish = v.shipPaint === 'classic' ? 0 : 1;  // the deep gloss paint with its metal flake
+    Ship.trimFinish = v.shipTrim === 'classic' ? 0 : 1;    // the dark satin metal
+    Ship.accentLights = v.shipAccents !== false ? 1 : 0;   // the accent light strips
     const size = { high: 4096, medium: 2048 }[v.shadows];
     if (world.shadowMode) world.shadowMode(size, renderer, scene);
     else if (renderer.shadowMap.enabled !== !!size) {
@@ -600,7 +657,41 @@ async function boot() {
   const _sprayV = new THREE.Vector3();
   const _sunP = new THREE.Vector3(), _camF = new THREE.Vector3();
   let acc = 0, last = performance.now();
-  const render = () => { scene.updateMatrixWorld(); shipLook(); world.preRender?.(renderer); composer.render(); };
+  // the Ship screen's showroom (showroom.js): its studio through the same picture - the scene pass pointed at it, the
+  // passes that only belong on a circuit off - and everything put back after
+  const circuitOnly = () => [ssr, shafts, heat, streaks, blur, world.heat, grade, lens].filter(Boolean);
+  const drawShowroom = () => {
+    showroom.update();
+    const keepPass = { sky: scenePass.sky, skyCam: scenePass.skyCam, scene: scenePass.scene, camera: scenePass.camera };
+    const off = circuitOnly(), was = off.map((p) => p.enabled);
+    Object.assign(scenePass, { sky: null, skyCam: null, scene: showroom.scene, camera: showroom.camera });
+    gtao.scene = showroom.scene; gtao.camera = showroom.camera;
+    off.forEach((p) => (p.enabled = false));
+    renderer.shadowMap.needsUpdate = true;
+    try { composer.render(); } finally {
+      Object.assign(scenePass, keepPass);
+      gtao.scene = scene; gtao.camera = camera;
+      off.forEach((p, i) => (p.enabled = was[i]));
+      renderer.shadowMap.needsUpdate = true;
+    }
+  };
+  const makeShowroom = () => (showroom ||= new Showroom(renderer, { player: ship, playerId: SHIP,
+    others: rivalShip !== ship ? { feather: rivalShip } : {}, tier: RIVAL_TIER[Q.tier], layers: camera.layers.mask }));
+  const showcase = (on, id) => {
+    if (!on || settings.v.showroom === false) { if (showroom) showroom.active = false; return; }
+    makeShowroom().active = true;
+    if (id) showroom.show(id);
+  };
+  // made ready in the background a few seconds into the title: the first open no longer stalls on it all at once
+  setTimeout(() => {
+    if (settings.v.showroom === false || showroom) return;
+    const go = () => makeShowroom().prepare();
+    if (window.requestIdleCallback) requestIdleCallback(go, { timeout: 4000 }); else go();
+  }, 3500);
+  const render = () => {
+    if (showroom && showroom.active) { drawShowroom(); return; }
+    scene.updateMatrixWorld(); shipLook(); world.preRender?.(renderer); composer.render();
+  };
   // drawn between the last two physics steps: at 144 Hz a frame got 0, 1 or 2 steps of 8.3 ms, and everything that
   // moves juddered against the camera
   const keep = (m) => {
@@ -615,7 +706,7 @@ async function boot() {
     (m.rCamQ ||= new THREE.Quaternion()).slerpQuaternions(m.pCamQ, m.camQ || m.q, a);
   };
   // test hooks: __feather.state(), __feather.advance(seconds) (ticks without frames), __feather.shot(name)
-  window.__feather = { ship, flight, racer, race, rig, world, track, input, lap, THREE, scene, renderer, composer, bloom, gtao, ssr, streaks, heat, RIVAL_LIGHT,
+  window.__feather = { ship, flight, racer, race, rig, world, track, input, lap, THREE, scene, renderer, composer, bloom, gtao, ssr, streaks, heat, RIVAL_LIGHT, deck,
     agx, camera, fx, settings, render, audio,
     get ctl() { return ctl; }, get mode() { return mode; }, setMode, get rewarming() { return warming; },
     state: () => ({ mode, x: ctl.pos.x, y: ctl.pos.y, z: ctl.pos.z, s: racer ? racer.s : 0, lat: racer ? racer.x : 0,
@@ -671,7 +762,7 @@ async function boot() {
   };
   const heroOrbit = () => { rig.mode = 'orbit'; Object.assign(rig.orbit, { yaw: 2.35, pitch: 0.16, dist: 22 }); rig.anchor = null; rig.idle = 0; };
   let pilot = null;                                      // past the flag the rivals' AI flies the player's cool-down lap
-  const menu = new Menu({ settings, hud, input, rig, camera, race, track, ship, world, map: MAP,
+  const menu = new Menu({ settings, hud, input, rig, camera, race, track, ship, world, map: MAP, shipId: SHIP, showroom: showcase,
     mode: () => mode, engineOn: () => ship.engineOn, focus: () => ship.root.position,
     status: () => ({ race: race && mode === 'race' ? race.hud() : null }),
     startRace: () => { hud.hideResults(); setMode('race'); placeStart(false); resetLap(); heroOrbit(); engines(); },
@@ -692,6 +783,7 @@ async function boot() {
       rig.mode = 'orbit';
     } });
   window.__feather.menu = menu;
+  window.__feather.showroom = () => showroom;
   Object.defineProperty(window.__feather, 'paused', { get: () => menu.paused, enumerable: true });
   menu.showTitle();
 

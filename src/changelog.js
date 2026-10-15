@@ -2,6 +2,18 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.3.0', date: '16 Oct 2026', name: 'The Comet',
+    notes: [
+      'A second ship: the Comet R1, a titanium manta on two hover sponsons with its rocket in a long tail cone (title menu, Ship)',
+      'Its nozzle has 18 teeth: they fan out with the engine off and under the brake, close in on the throttle and spin faster with speed and boost',
+      'It flies differently: a higher top speed and sharper in the turns, less boost, and every knock costs it half as much again',
+      'The Ship screen is a showroom: each ship alone on a turning stand (drag to look round, scroll to zoom) with its stats',
+      'Both ships refinished: deep gloss paint, dark trim, dark engine faces with only the ring lit, accent strips in the engine colour, lit by the deck under them',
+      'Engine glow rings go dark with the engines off',
+      'The rivals still fly Feathers',
+    ],
+  },
+  {
     version: '1.2.5', date: '16 Oct 2026', name: 'The broken giant',
     notes: [
       'A colossal warship broken in two hangs over the ringed planet in space, wreckage drifting from the break',

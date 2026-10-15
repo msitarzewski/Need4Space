@@ -351,7 +351,9 @@ class Driver {
 export { Driver };
 
 export class Race {
-  constructor(scene, track, player, playerRacer) {
+  // opts.rivals: the ship the rivals are cloned from (the Feather when the player flies another ship); opts.name: the
+  // player's ship's name in the standings
+  constructor(scene, track, player, playerRacer, opts = {}) {
     this.scene = scene;
     this.track = track;
     this.lim = TRACK_W / 2 - player.halfSpan * 0.92;      // the furthest a hull's centre gets from the middle
@@ -363,10 +365,10 @@ export class Race {
     let team = 1;
     for (let slot = 0; slot < TEAMS.length; slot++) {
       let e;
-      if (slot === PLAYER_SLOT) e = { ship: player, racer: playerRacer, team: TEAMS[0], player: true };
+      if (slot === PLAYER_SLOT) e = { ship: player, racer: playerRacer, team: opts.name ? { ...TEAMS[0], name: opts.name } : TEAMS[0], player: true };
       else {
         const t = TEAMS[team++];
-        const ship = new Ship(null, { cloneOf: player, team: t, lights: false, engine: t.engine });
+        const ship = new Ship(null, { cloneOf: opts.rivals || player, team: t, lights: false, engine: t.engine });
         scene.add(ship.root);
         const racer = new TrackRacer(ship, track);
         e = { ship, racer, team: t, player: false };
@@ -518,7 +520,7 @@ export class Race {
             const j = rel * 0.6; A.vx += j; B.vx -= j; v = Math.abs(rel);
             if (first || this.knock[key] <= 0) {                // a side swipe costs both a little - once a blow
               const loss = 0.05 * Math.min(1, v / 15);
-              A.slow = (A.slow || 0) + A.vs * loss; B.slow = (B.slow || 0) + B.vs * loss;
+              A.slow = (A.slow || 0) + A.vs * loss * A.handling.impact; B.slow = (B.slow || 0) + B.vs * loss * B.handling.impact;
             }
           }
           side = sx;
@@ -533,8 +535,8 @@ export class Race {
             const dv = rear.vs - front.vs, k = Math.min(1, dv / 15);
             rear.vs -= dv * 0.5;
             if (first || this.knock[key] <= 0) {
-              rear.slow = (rear.slow || 0) + 0.04 * rear.vs * k;
-              front.slow = (front.slow || 0) + front.vs * 0.03 * k;
+              rear.slow = (rear.slow || 0) + 0.04 * rear.vs * k * rear.handling.impact;
+              front.slow = (front.slow || 0) + front.vs * 0.03 * k * front.handling.impact;
               const kick = (Math.random() - 0.5) * 0.16 * k;
               front.psi += kick; front.yawKick += kick;
               front.vx += (Math.random() - 0.5) * dv * 0.35;

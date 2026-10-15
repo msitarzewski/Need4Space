@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { mergeVertices, mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { clamp, damp, smoothstep, mulberry32, noise2, fbm } from './noise.js';
 import { bakeDeckMaps } from './deck.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { rockMaterial } from './rock.js';
 import { hullMaterial, hullBox, HULL_SIDE, HULL_UNDER, HULL_GIRDER } from './hull.js';
 import { wreckRoute, GRAVEYARD } from './wreckplan.js';
@@ -472,6 +473,34 @@ export class Track {
     this.deckDetail.map.value = m.detailAlbedo;
     this.deckDetail.normal.value = m.detailNormal;
     mat.needsUpdate = true;
+  }
+
+  // the deck's mean colour (linear), as its material makes it: the plates' map averaged over its whole tile, times the
+  // detail layer's mean gain and the circuit's own tint (the desert's sand-washed concrete) - for the light it throws
+  // up onto the ships (ship.js setDeckLight). Measured once on the GPU (64 x 64 samples at a coarse mip).
+  deckAlbedo(renderer) {
+    const map = this.deckMat.map, det = this.deckDetail.map.value, out = new THREE.Color(0.25, 0.25, 0.25);
+    if (!map) return out;
+    const rt = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false });
+    const q = new FullScreenQuad(new THREE.ShaderMaterial({ uniforms: { map: { value: map }, det: { value: det } },
+      vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
+      fragmentShader: /* glsl */`uniform sampler2D map, det;
+        void main() {
+          vec3 s = vec3(0.0); float d = 0.0;
+          for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+            vec2 uv = (vec2(x, y) + 0.5) / 64.0;
+            s += textureLod(map, uv, 4.0).rgb;
+            ${det ? 'd += textureLod(det, uv, 4.0).r;' : 'd += 0.5;'}
+          }
+          gl_FragColor = vec4(s / 4096.0, (0.72 + 0.56 * d / 4096.0) / 1.5);
+        }` }));
+    const px = new Uint8Array(4), prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(rt); q.render(renderer); renderer.readRenderTargetPixels(rt, 0, 0, 1, 1, px); renderer.setRenderTarget(prev);
+    q.material.dispose(); q.dispose(); rt.dispose();
+    const g = px[3] / 255 * 1.5;
+    out.setRGB(px[0] / 255 * g, px[1] / 255 * g, px[2] / 255 * g);
+    if (TH.sand) out.multiply(new THREE.Color(2.3, 1.9, 1.4));         // (as the deck's shader tints it)
+    return out;
   }
 
   // the fastest a ship can take each metre: the yaw rate it can turn at over the curvature there, then a braking
@@ -1774,6 +1803,7 @@ export class TrackRacer {
     this.airT = 0;                      // 0 on the deck .. 1 well clear of it
     this.yawKick = 0;                   // heading turned in one step (a wall glance): the animation eases it in
     this.perks = PERKS.brutal;          // the player's help by the difficulty (main.js); none for the rivals
+    this.handling = { thrust: 1, boost: 1, drag: 1, turn: 1, impact: 1 };   // how this ship flies (ships.js HANDLING; the rivals: the Feather's)
     this.drift = 0;                     // drifting: the side (+1 right), 0 not
     this.driftCharge = 0; this.driftKick = 0; this.driftS = 0; this.slip = 0;
     this.pitchIn = 0;
@@ -1885,9 +1915,11 @@ export class TrackRacer {
     // steering (A/D, arrows, mouse, stick), airbrakes (Z / X, bumpers): a sharper turn, more drag; drifting, a
     // livelier nose
     this.steerS += (steer + (brakeR - brakeL) * 0.8 - this.steerS) * damp(8, dt);
-    const grip = air ? 0.25 : 1, dk = this.driftK;
+    const grip = air ? 0.25 : 1, dk = this.driftK, H = this.handling, vR = Math.sqrt(H.thrust / H.drag);
     const ch = this.chain || 0, rateK = (brakeL || brakeR ? 1 + AIRBRAKE : 1) * (1 + (DRIFT.rate + 0.1 * ch - 1) * dk);
-    this.yawRate = this.steerS * turnRate(Math.abs(this.vs)) * rateK * grip * power;
+    // (a faster ship turns as the other does at the same share of its top speed - its yaw rate scaled with its speed,
+    // so it holds the same lines - and then by its own turn)
+    this.yawRate = this.steerS * turnRate(Math.abs(this.vs) / vR) * vR * H.turn * rateK * grip * power;
     this.psi += this.yawRate * dt;
     if (this.assist && Math.abs(steer) < 0.1 && !air && !this.drift) this.psi -= this.psi * 1.1 * dt;   // eases back along the track
     this.airIn = brakeR - brakeL;
@@ -1908,9 +1940,9 @@ export class TrackRacer {
     // thrust along the heading, drag, brake, airbrakes
     const hs = Math.cos(this.psi), hx = Math.sin(this.psi);
     // slipstream: tucked in behind another ship (Race sets draft 0..1) the air is easier: up to 7 % more thrust
-    const thrust = (this.throttle * THRUST + this.boosting * BOOST) * power * this.thrustScale * (1 + 0.07 * (this.draft || 0));
+    const thrust = (this.throttle * THRUST * H.thrust + this.boosting * BOOST * H.boost) * power * this.thrustScale * (1 + 0.07 * (this.draft || 0));
     const sp = Math.hypot(this.vs, this.vx);
-    const drag = DRAG_L + DRAG_Q * sp + (brakeL + brakeR) * 0.25;
+    const drag = DRAG_L + DRAG_Q * H.drag * sp + (brakeL + brakeR) * 0.25;
     this.vs += (hs * thrust - this.vs * drag) * dt;
     this.vx += (hx * thrust - this.vx * drag) * dt;
     // the brake: ~6 g plus a share of the speed (15 g at top speed), never into reverse (drifting: a feather of it)
@@ -1920,7 +1952,7 @@ export class TrackRacer {
     // the slide's speed turned forward - a slide never gains speed, it drags with its angle
     const along = this.vs * hs + this.vx * hx, across = -this.vs * hx + this.vx * hs;
     const push = this.drift ? clamp(steer * this.drift, 0, 1) : 0;    // steered into the slide (else it grips again)
-    let kept = across * Math.exp(-(air ? 0.4 : gripAt(sp) * (1 - (1 - DRIFT.grip + 0.07 * ch) * dk * (0.35 + 0.65 * push))) * dt);
+    let kept = across * Math.exp(-(air ? 0.4 : gripAt(sp / vR) * vR * H.turn * (1 - (1 - DRIFT.grip + 0.07 * ch) * dk * (0.35 + 0.65 * push))) * dt);
     let al2 = along + (air ? 0 : Math.abs(across - kept) * (0.5 + (DRIFT.keep - 0.5) * dk) * Math.sign(along || 1));
     if (dk > 0) {
       const was = Math.hypot(along, across), now = Math.hypot(al2, kept);
@@ -1937,7 +1969,7 @@ export class TrackRacer {
     // a drift's kick, paid over ~0.2 s along the way it goes
     if (this.driftKick > 0) {
       const d = Math.min(this.driftKick, 180 * dt), v = Math.max(1, Math.hypot(this.vs, this.vx));
-      this.vs = Math.min(PAD_MAX, this.vs + this.vs / v * d); this.vx += this.vx / v * d;
+      this.vs = Math.min(PAD_MAX * vR, this.vs + this.vs / v * d); this.vx += this.vx / v * d;
       this.driftKick -= d;
     }
     // boost pads
@@ -1945,7 +1977,7 @@ export class TrackRacer {
     for (const p of tr.pads) {
       const ds = ((this.s - p.s) % tr.length + tr.length * 1.5) % tr.length - tr.length / 2;
       if (Math.abs(ds) < 8 && Math.abs(this.x - p.x) < 6 && this.padT <= 0 && !air) {
-        this.vs = Math.min(PAD_MAX, this.vs + PAD_KICK);
+        this.vs = Math.min(PAD_MAX * vR, this.vs + PAD_KICK);
         this.padT = 0.6;
         this.emit({ type: 'pad', i: tr.pads.indexOf(p), at: p.at });
       }
@@ -1965,7 +1997,7 @@ export class TrackRacer {
       this.grindSide = side;
       this.x = side * lim;
       // grinding along it drags: ~20 % of the speed for each second of contact (proportional - it never stops a ship)
-      this.vs *= Math.exp(-0.22 * this.perks.wall * dt);
+      this.vs *= Math.exp(-0.22 * this.perks.wall * H.impact * dt);
       // the nose glances off: a heading into the wall is turned back along it
       if (this.psi * side > 0) {
         const p0 = this.psi;
@@ -1981,7 +2013,7 @@ export class TrackRacer {
         // me stuck sometimes"
         // "make the wall hits more punishing": a knock costs a share of the blow and, for a real blow, a share of
         // the speed too (a 20 m/s knock at 900 km/h: ~13 %); a graze costs little
-        this.slow = (this.slow || 0) + (0.45 * hit + 0.13 * Math.abs(this.vs) * smoothstep(3, 24, hit)) * this.perks.wall;
+        this.slow = (this.slow || 0) + (0.45 * hit + 0.13 * Math.abs(this.vs) * smoothstep(3, 24, hit)) * this.perks.wall * H.impact;
         if (hit > 4) this.driftCharge = 0;
         // one event per knock, not one per step of grinding (each fired the jolt, shield, shake and thud again)
         if (hit > 1.5 && this.wallCool <= 0) {
