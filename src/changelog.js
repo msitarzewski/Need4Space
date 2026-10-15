@@ -2,6 +2,13 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.4.6', date: '16 Oct 2026', name: 'Clear of the swell',
+    notes: [
+      'The low causeway between the sea stacks is raised clear of the waves: no more dark slabs washing in and out under it',
+      'Lights reflected in the sea no longer flicker: the track’s own lamps show in the reflection itself, the big lights out at sea as steady streaks',
+    ],
+  },
+  {
     version: '1.4.5', date: '16 Oct 2026', name: 'Steady horizon',
     notes: [
       'Far off the sea mirrors the sky and the lights’ streaks only: distant reflections no longer flicker as you move',

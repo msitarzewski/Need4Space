@@ -36,10 +36,11 @@ export const KEEPER = { x: 900, z: 250, foot: SEA_Y - 520, floor: SEA_Y - 900, s
 const P = [];
 const pt = (x, y, z, bank = 0, name = null) => P.push([x, y, z, bank, name]);
 pt(0, 9, 650); pt(0, 9, 330, 0, 'start'); pt(0, 9, 20);
-// east between the sea stacks, low over the swell
-pt(40, 8, -260, 6); pt(200, 6, -480, 14); pt(460, 5, -600, 8, 'spray'); pt(760, 5, -640, 0);
+// east between the sea stacks, low over the swell (9.5 m: at 5 m the deck's girders and the pylons' heads lay in the
+// waves, black slabs the swell washed over)
+pt(40, 9.5, -260, 6); pt(200, 9.5, -480, 14); pt(460, 9.5, -600, 8, 'spray'); pt(760, 9.5, -640, 0);
 // through the sea arch, then up onto the viaduct and the jump
-pt(1020, 6, -630, -4, 'arch'); pt(1260, 10, -580, -10);
+pt(1020, 9.5, -630, -4, 'arch'); pt(1260, 11, -580, -10);
 pt(1480, 26, -470, -16); pt(1680, 46, -300, -14); pt(1800, 62, -80, -4); pt(1830, 66, 80, 0, 'crest1');
 pt(1840, 58, 300); pt(1830, 60, 520, 0, 'breach');
 // a long descending left-hander, banked, and south of the Keeper the dive
@@ -552,7 +553,8 @@ export class OceanWorld {
     for (let s = 60; s < tr.length; s += 120) {
       if (tr.inGap(s, 50) || tr.inLoop(s, 80) || tr.inCave(s, 60)) continue;
       const f = tr.frame(s), deep = this.city ? this.city.basin.natural(f.P.x, f.P.z) - 6 : SEA_Y - 140;
-      if (f.U.y < 0.93 || f.P.y < SEA_Y + 3) continue;
+      // (only where the deck stands high enough for the pylon's head to clear the swell's crests)
+      if (f.U.y < 0.93 || f.P.y < SEA_Y + 9) continue;
       const top = f.P.y - 1.8 - 2.4 - 1.6 - deep;
       let clear = true;
       for (let y = 4; y < top - 8 && clear; y += 6) {
@@ -659,30 +661,20 @@ export class OceanWorld {
     if (Math.abs(x) < TRACK_W_HALF + 4 && y > -6 && y < 6.5) p.addScaledVector(tr.U[i], 6.5 - y);
   }
 
-  // The lights that show in the sea: of every light near enough to the water, the twelve that shine brightest at the
-  // camera - the gantries' lamps, the lamp posts and the barriers' glow down the track near it, the lighthouse, the
-  // braziers and the dome's lantern out of the sea, the ships' engines. Each keeps its slot while it stays among the
-  // brightest and fades in and out of it (a light dropping out of the twelve vanished from the sea at once: flicker)
+  // The lights that show in the sea as streaks of their own: of the big fixed lights near enough to the water - the
+  // lighthouse, the Keeper's lantern, the castles' braziers, the city's lamps out of the sea - the twelve that shine
+  // brightest at the camera. Each keeps its slot while it stays among the brightest and fades in and out of it. (The
+  // track's own lamps, barriers, gantries and the ships are in the sea's mirror: as streaks here too they were swapped
+  // in and out of the twelve every moment as the posts went by - the lights in the water flickered)
   reflectLights(cp, dt = 1 / 60) {
     const tr = this.track, cand = (this._cand ||= []), U = this.ocean.U;
     cand.length = 0;
     const key = (p) => `${Math.round(p.x)},${Math.round(p.y)},${Math.round(p.z)}`;
     const add = (p, col, I, id = null) => { if (p.y > SEA_Y - 1 && p.y < SEA_Y + 120) cand.push({ p, col, I, k: I / Math.max(100, p.distanceToSquared(cp)), id: id ?? key(p) }); };
-    for (const l of this.lamps) if (l.intensity > 0) add(l.position, [l.color.r, l.color.g, l.color.b], l.intensity * 4);
     if (this.lightLamp) add(this.lightLamp.p, [1.0, 0.86, 0.62], 30000);
     if (this.keeper) add(this.keeper.top, [1.0, 0.8, 0.55], 120000, 'keeper');
     for (const L of this.castleLamps || []) add(L.p, L.col, L.I * 0.8);
     for (const L of this.city.lamps) if (L.p.y > SEA_Y) add(L.p, L.col, Math.min(L.I, 20000));
-    // down the track near the camera: the lamp posts' lenses (every 60 m, sides alternating) and the barriers' glow
-    const i0 = tr.nearestIndex(cp), every = Math.round(60 / tr.step), th = OCEAN_LAYOUT.theme;
-    const X = TRACK_W / 2 + 0.35;
-    for (let d = -3; d <= 8; d++) {
-      const k = Math.floor(i0 / every) + d, i = ((k * every) % tr.n + tr.n) % tr.n, side = ((k % 2) + 2) % 2 ? 1 : -1;
-      if (tr.P[i].y > SEA_Y + 40) continue;
-      add(tr.P[i].clone().addScaledVector(tr.R[i], side * (X - 1.15)).addScaledVector(tr.U[i], 1.2 + 4.04), th.lamp, 900);
-      for (const sd of [-1, 1]) add(tr.P[i].clone().addScaledVector(tr.R[i], sd * (TRACK_W / 2 + 0.7)).addScaledVector(tr.U[i], 3), th.field, 260);
-    }
-    if (this.race) this.race.entries.forEach((e, n) => add(e.ship.root.position, [e.ship.engineColor?.r ?? 0.3, e.ship.engineColor?.g ?? 0.6, e.ship.engineColor?.b ?? 1], 700, `ship${n}`));
     cand.sort((a, b) => b.k - a.k);
     const top = new Map(), keep = new Map();
     cand.forEach((c, j) => { if (j < 12) top.set(c.id, c); if (j < 18) keep.set(c.id, c); });
