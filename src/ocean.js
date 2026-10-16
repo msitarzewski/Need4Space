@@ -18,6 +18,7 @@ import { City, lighthouseGeometry, stoneMaterial, castleGeometry, bakedGeometry 
 import { SeaLife } from './sealife.js';
 import { GiantSquid } from './squid.js';
 import { Rain } from './rain.js';
+import { PowerLine } from './pylons.js';
 import { Seabed } from './seabed.js';
 import { TrackGrid } from './spires.js';
 import { moonMesh } from './celestial.js';
@@ -304,6 +305,13 @@ export class OceanWorld {
     this.buildPylons(scene);
     lap('pylons');
     this.buildLighthouse(scene);
+    // the old power line: a ring of colossal towers round the whole circuit, cables sagging between them (pylons.js)
+    {
+      const lh = this.lighthouseRock.geometry.boundingSphere || (this.lighthouseRock.geometry.computeBoundingSphere(), this.lighthouseRock.geometry.boundingSphere);
+      this.powerLine = new PowerLine(scene, this.track, { avoid: [{ x: lh.center.x, z: lh.center.z, r: 140 }, { x: -130, z: -200, r: 120 }] });
+      this.noAO.push(this.powerLine.cables, this.powerLine.lamps);
+    }
+    lap('power line');
     // its life: leapers, leviathans, birds, the deep's shoals and jellyfish, spray
     this.life = new SeaLife(scene, this.track, { city: this.city, dens: this.dens });
     this.ocean.U.seRings.value = this.life.rings;
@@ -783,6 +791,7 @@ export class OceanWorld {
     this.wetOn = v.shipWet !== false;
     this.squid?.setOn(v.kraken !== false);
     this.rainOn = v.oceanRain !== false;
+    this.powerLine.setOn(v.oceanPylons !== false);
     this.rain.setOn(this.rainOn);
     if (!this.mirrorOn) this.ocean.U.seReflOn.value = 0;
   }
@@ -1009,6 +1018,7 @@ export class OceanWorld {
       for (const o of this.highOnly) o.visible = !deep;
       for (const o of this.deepOnly) o.visible = under;
       this.squid?.update(dt, camera.position, deep);
+      this.powerLine.update(t, camera, pr, deep);
     }
     // the rain: falling round the camera, splashing on the deck ahead of it, lit by the nearest ships' headlights; the
     // sea's rings where it falls (none of it under the sea)

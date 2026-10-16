@@ -2,6 +2,15 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.6.1', date: '16 Oct 2026', name: 'The old power line',
+    notes: [
+      'A ring of colossal old transmission towers round the ocean circuit - a kilometre tall, rusted lattice steel on concrete caissons in the sea, cables sagging from one to the next high over the track',
+      'Insulator strings, relay dishes, a maintenance deck at each waist; red warning lamps pulsing out of time with each other, sodium floodlights at their feet',
+      'One cable has snapped: its ends hang down into the sea',
+      'A switch for them in Settings',
+    ],
+  },
+  {
     version: '1.6.0', date: '16 Oct 2026', name: 'Airbrake charge',
     notes: [
       'An airbrake is now one shot: press and it fires (held, up to a second), then it takes 3 seconds to charge again - a new Airbrake meter shows it',

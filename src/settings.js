@@ -8,7 +8,7 @@ export const DEFAULTS = { ship: 'feather', tonemap: 'aces', ao: true, bloom: tru
   iceStorm: true, iceGeysers: true, wreckFx: true, wreckMist: true, airPitch: true, sandFx: true, dustDevils: true, heatHaze: true,
   sandstorm: true, caveFx: true, canyonAO: true, engineHeat: true, engineTrails: 'puffs', colossus: true, nozzleMotion: true, showroom: true,
   deckLight: true, hullShadows: true, engineFaces: 'dark', shipPaint: 'gloss', shipTrim: 'dark', shipAccents: true,
-  seaLife: true, seaReflect: true, oceanStorm: true, shipWet: true, kraken: true, oceanRain: true };
+  seaLife: true, seaReflect: true, oceanStorm: true, shipWet: true, kraken: true, oceanRain: true, oceanPylons: true };
 // Graphics quality presets ("low, which would be laptop, balanced in between, and high the actual default"): each sets
 // the rows below at once; a row changed by hand afterwards shows the preset as Custom. Low is Laptop mode (quality.js:
 // the lite shaders and fewer lights as well - tested on a Core Ultra 5 235U; the render scale stays at 100 %), High
@@ -76,6 +76,7 @@ const ROWS = [
   ['shipWet', 'Water running off the ships out of the sea (ocean)', [[true, 'On'], [false, 'Off']]],
   ['kraken', 'The giant squid on its rock off the start (ocean)', [[true, 'On'], [false, 'Off']]],
   ['oceanRain', 'Rain: streaks, splashes on the deck, rings on the sea (ocean)', [[true, 'On'], [false, 'Off']]],
+  ['oceanPylons', 'The old power line: giant towers round the circuit (ocean)', [[true, 'On'], [false, 'Off']]],
   ['brakeLights', 'Brake lights', [[true, 'On'], [false, 'Off']]],
   ['shadows', 'Shadows', [['high', 'High'], ['medium', 'Medium'], ['off', 'Off']]],
   ['scale', 'Render scale', [[0.5, '50%'], [0.75, '75%'], [1, '100%'], [1.25, '125%'], [1.5, '150%']]],
