@@ -934,7 +934,26 @@ async function boot() {
           // (the player's own airbrake attack: the hull held steady - a little shake)
           fx.scrape(e.at, ctl.vel, e.v / 15); rig.shake = Math.max(rig.shake, Math.min(0.7, e.v / 15) * (e.attack ? 0.35 : 1)); audio.bump(e.at, e.v);
         }
-        else if (e.type === 'wreck') {
+        else if (e.type === 'damage') {
+          // a hull hit: sparks off it, sized by the damage; the player's own - a red flash at the screen's edges and a
+          // jolt, the bigger the harder (the Hull bar flares - hud.js)
+          const near = camera.position.distanceTo(e.entry.racer.pos) < 260;
+          if (near && e.amount > 1.5) fx.scrape(e.at || e.entry.racer.pos, e.entry.racer.vel, Math.min(1.6, e.amount / 12));
+          if (e.player && mode === 'race') {
+            hud.flash(`rgba(255, 40, 25, ${Math.min(0.8, 0.22 + e.amount / 30).toFixed(2)})`, 0.55);
+            rig.shake = Math.max(rig.shake, Math.min(0.9, 0.15 + e.amount / 28));
+          }
+        } else if (e.type === 'lunge') {
+          if (e.player && mode === 'race') { rig.shake = Math.max(rig.shake, 0.18); audio.driftKick(2); }
+        } else if (e.type === 'attack') {
+          // an airbrake attack landing: the burst (fx.attack) in the attacker's engine colour, travelling with the two;
+          // the one hit is shaken hard, the attacker barely
+          const A = e.attacker, B = e.victim, vel = A.racer.vel.clone().add(B.racer.vel).multiplyScalar(0.5);
+          if (camera.position.distanceTo(e.at) < 320) fx.attack(e.at, vel, e.dir, new THREE.Color(...(A.team.engine || [0.1, 0.42, 1.0])), e.slam);
+          audio.bump(e.at, e.slam ? 40 : 20);
+          if (B.player && mode === 'race') { rig.shake = Math.max(rig.shake, e.slam ? 1.1 : 0.6); hud.flash('rgba(255, 60, 30, 0.6)', 0.6); }
+          if (A.player && mode === 'race') { rig.shake = Math.max(rig.shake, 0.25); hud.flash('rgba(140, 200, 255, 0.35)', 0.35); }
+        } else if (e.type === 'wreck') {
           // a hull gone: sparks off it (a fireball left behind at these speeds streaked the whole screen) and its shield
           // lit; it races on from there, flown through for 3 s
           if (camera.position.distanceTo(e.at) < 300) fx.scrape(e.at, e.entry.racer.vel, 1);

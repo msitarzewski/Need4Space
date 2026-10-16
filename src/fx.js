@@ -365,6 +365,9 @@ class DeckTrails {
   }
 }
 
+const ZERO = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0), WHITE = new THREE.Color(1, 1, 1);
+const SMOKE = new THREE.Color(0.42, 0.41, 0.4), FLAME_A = new THREE.Color(1.0, 0.45, 0.1), FLAME_B = new THREE.Color(1.0, 0.75, 0.35);
+
 export class FX {
   constructor(scene, camera) {
     const glow = glowTex(), puff = puffTex();
@@ -404,14 +407,64 @@ export class FX {
     this.kick = 0;
   }
 
-  // a ring racing out over the deck at `at`, lying in the plane of `basis` (a matrix with the deck's axes)
-  wave(at, basis, colour, size = 12, life = 0.5) {
+  // a ring racing out over the deck at `at`, lying in the plane of `basis` (a matrix with the deck's axes); vel: it
+  // travels with something moving (an attack between two ships at 900 km/h)
+  wave(at, basis, colour, size = 12, life = 0.5, vel = null) {
     const m = this.waves[this.waveN++ % this.waves.length];
     m.position.copy(at);
     m.quaternion.setFromRotationMatrix(basis);
     Object.assign(m.userData, { t: 0, size, life });
     m.userData.col.copy(colour);
+    (m.userData.vel ||= new THREE.Vector3()).copy(vel || ZERO);
     m.visible = true;
+  }
+
+  // An airbrake attack landing (race.js 'attack'): the blow lights white, two shockwave rings are thrown out from it
+  // in the plane across the shove - the attacker's engine colour, then white - a ring of sparks blasts out in that
+  // plane, and an energy jet drives across into the one hit. All of it travels with the ships (vel). A slam (the
+  // lunge's blow) is the full size, a shove of an airbrake already touching smaller.
+  attack(at, vel, dir, colour, slam) {
+    const K = slam ? 1 : 0.55, Y = dir.clone().normalize();
+    const X = new THREE.Vector3().crossVectors(Y, Math.abs(Y.y) < 0.9 ? UP : new THREE.Vector3(1, 0, 0)).normalize();
+    const Z = new THREE.Vector3().crossVectors(X, Y), basis = new THREE.Matrix4().makeBasis(X, Y, Z);
+    const hot = colour.clone().multiplyScalar(2.6), white = new THREE.Color(0.9, 0.95, 1.0), V = new THREE.Vector3();
+    this.wave(at, basis, hot, 5 + 7 * K, 0.3, vel);
+    this.wave(at.clone().addScaledVector(Y, 1.5), basis, white, 6 + 8 * K, 0.4, vel);
+    const tint = colour.clone().lerp(new THREE.Color(1, 1, 1), 0.45);
+    for (let i = 0, n = Math.round(130 * K); i < n; i++) {
+      const a = Math.random() * Math.PI * 2, sp = 20 + Math.random() * 34;
+      V.copy(X).multiplyScalar(Math.cos(a) * sp).addScaledVector(Z, Math.sin(a) * sp).addScaledVector(Y, Math.random() * 12).add(vel);
+      this.sparks.emit(at, V, Math.random() < 0.5 ? tint : WHITE, { size: 0.06 + Math.random() * 0.07, life: 0.3 + Math.random() * 0.4,
+        alpha: 2.2, drag: 0.4, grav: 4, fadeIn: 0.01, stretch: 0.025 });
+    }
+    const from = at.clone().addScaledVector(Y, -3);
+    for (let i = 0, n = Math.round(60 * K); i < n; i++) {
+      V.copy(Y).multiplyScalar(30 + Math.random() * 45).addScaledVector(X, (Math.random() - 0.5) * 10).addScaledVector(Z, (Math.random() - 0.5) * 10).add(vel);
+      this.ions.emit(from, V, hot, { size: 0.12 + Math.random() * 0.1, life: 0.18 + Math.random() * 0.15, alpha: 2.6, drag: 0.4, fadeIn: 0.01, stretch: 0.04 });
+    }
+    this.glints.emit(at, vel.clone(), new THREE.Color(1, 0.95, 0.9), { size: 5 + 6 * K, grow: 26, life: 0.2, alpha: 3.5, drag: 0, fadeIn: 0.01 });
+  }
+
+  // A damaged hull (race.js visuals: under half its hull): smoke torn off it, thicker the worse it is; under a quarter
+  // flames lick out of it and sparks crackle off - the others can see who is hurt. Rate per second, kept per ship.
+  damaged(ship, r, hp, dt) {
+    const k = Math.min(1, (0.5 - hp) / 0.5), R = ship.root, hs = (ship.halfSpan || 5) * 0.55, L = (ship.length || 13) * 0.35;
+    const P = (this._dp ||= new THREE.Vector3()), V = (this._dv ||= new THREE.Vector3());
+    ship.dmgAcc = (ship.dmgAcc || 0) + dt * (10 + 34 * k);
+    for (; ship.dmgAcc >= 1; ship.dmgAcc -= 1) {
+      P.set((Math.random() - 0.5) * 2 * hs, 0.3 + Math.random() * 0.9, (Math.random() - 0.2) * L).applyQuaternion(R.quaternion).add(R.position);
+      V.set(Math.random() - 0.5, Math.random() * 0.6, Math.random() - 0.5).multiplyScalar(4).addScaledVector(r.vel, 0.94);
+      this.smoke.emit(P, V, SMOKE, { size: 1.6 + 1.4 * k, grow: 4.5 + 5 * k, life: 0.9 + Math.random() * 0.7, alpha: 0.35 + 0.3 * k,
+        drag: 0.5, grav: -1.2, spin: (Math.random() - 0.5) * 1.5, fadeIn: 0.06 });
+      if (hp < 0.25 && Math.random() < 0.8) {
+        this.fire.emit(P, V, Math.random() < 0.5 ? FLAME_A : FLAME_B, { size: 1.5 + Math.random() * 1.2, grow: 3, life: 0.28 + Math.random() * 0.2,
+          alpha: 1.8, drag: 0.4, fadeIn: 0.02 });
+        if (Math.random() < 0.5) {
+          V.addScaledVector(UP, 4 + Math.random() * 8).add(new THREE.Vector3((Math.random() - 0.5) * 10, 0, (Math.random() - 0.5) * 10));
+          this.sparks.emit(P, V, FLAME_B, { size: 0.05, life: 0.3 + Math.random() * 0.3, alpha: 2, drag: 0.4, grav: 12, fadeIn: 0.01, stretch: 0.02 });
+        }
+      }
+    }
   }
 
   // a boost pad fires: a deck shockwave, a fountain of hot motes, and (for the player) a kick for the camera / streaks
@@ -665,6 +718,7 @@ export class FX {
       const u = m.userData;
       if (!m.visible) continue;
       u.t += dt / u.life;
+      if (u.vel) m.position.addScaledVector(u.vel, dt);
       const r = 1 + u.size * Math.sqrt(u.t);
       m.scale.set(r, 1, r);
       m.material.color.copy(u.col).multiplyScalar(Math.max(0, 1 - u.t));

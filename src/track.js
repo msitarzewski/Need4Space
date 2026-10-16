@@ -1830,15 +1830,19 @@ export const PERKS = { easy: { wall: 0.2, drift: 1.2, recharge: 1.1 }, normal: {
 // more than a third of a Feather's hull), times the speed share - none under v0 m/s (~290 km/h), 1 at v1 (900 km/h),
 // up to 1.4. Another ship's knock (race.js collide): ship per m/s of the closing
 // speed past shipGraze, times the same speed share and the hitter's ram (ships.js). At 0 the hull is reset where it
-// is, at wreckSpeed of its speed, and for ghost seconds it can be flown through: no contact with the other ships, no
-// damage - the pack goes by it.
-export const DAMAGE = { wall: 1.0, graze: 6, cap: 24, ship: 0.15, shipGraze: 5, v0: 80, v1: 250, wreckSpeed: 0.5, ghost: 3 };
+// is, stopped dead ("completely stopping its acceleration and speed and going from 0"), and for ghost seconds it can
+// be flown through - no contact with the other ships, no damage, no boost - the pack goes by it.
+export const DAMAGE = { wall: 1.0, graze: 6, cap: 24, ship: 0.15, shipGraze: 5, v0: 80, v1: 250, ghost: 3 };
 export const damageSpeed = (v) => clamp((Math.abs(v) - DAMAGE.v0) / (DAMAGE.v1 - DAMAGE.v0), 0, 1.4);
 // The airbrake as a weapon ("air brake on the side when next to an enemy should go harder on them and keep the ship
-// more stable, so its like an attack"): side by side with its airbrake out on the other's side, a hull holds its
-// line - none of the push, none of the speed lost - while the other is shoved away (shove m/s across), slowed (loss of
-// its speed) and takes dmg times a knock's damage (a knock of at least min m/s); the attacker keep of its share
-export const ATTACK = { shove: 7, loss: 0.06, dmg: 4, keep: 0.3, min: 16 };
+// more stable, so its like an attack"; "actually shoves in them when in range"). Fired toward a hull alongside -
+// overlapping along, at most range m of air between them across - the ship throws itself at it: a lunge across at
+// lunge m/s (held for lungeT s or until they meet). The blow: the other shoved slamShove m/s away and turned off its
+// heading (slamYaw rad), slowed (slamLoss of its speed), dmg times a knock's damage (a knock of at least slamMin
+// m/s); the attacker stops its lunge and holds its line, keep of its share of the damage. An airbrake out toward a
+// hull already touching (no lunge): the lighter shove / loss / min.
+export const ATTACK = { range: 7, lunge: 24, lungeT: 0.45, slamShove: 18, slamYaw: 0.16, slamLoss: 0.09, slamMin: 22,
+  shove: 7, loss: 0.06, min: 16, dmg: 4, keep: 0.3 };
 const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck
 
@@ -1931,13 +1935,13 @@ export class TrackRacer {
     return amount;
   }
 
-  // the hull gone: reset where it is - square to the track, at a share of its speed, the hull full again - and flown
-  // through by the other ships for DAMAGE.ghost seconds
+  // the hull gone: reset where it is - square to the track, stopped dead, the throttle closed and the boost cut, the
+  // hull full again - and flown through by the other ships for DAMAGE.ghost seconds
   wreck() {
     const at = this.pos.clone();
     if (this.drift) this.endDrift(false);
-    this.vs = Math.max(0, this.vs) * DAMAGE.wreckSpeed;
-    this.vx = 0; this.psi = 0; this.yawRate = 0; this.slow = 0; this.driftKick = 0;
+    this.vs = 0; this.vx = 0; this.psi = 0; this.yawRate = 0; this.slow = 0; this.driftKick = 0;
+    this.throttle = 0; this.boosting = 0; this.lunge = null;
     this.health = this.maxHealth;
     this.ghost = DAMAGE.ghost;
     this.emit({ type: 'wreck', at });
@@ -2013,7 +2017,7 @@ export class TrackRacer {
     else if (!ship.engineOn) this.throttle = Math.max(0, this.throttle - dt);
     this.brakeS = (this.brakeS || 0) + ((braking ? 1 : 0) - (this.brakeS || 0)) * damp(9, dt);
     this.driftS += ((this.drift ? 1 : 0) - this.driftS) * damp(5, dt);
-    const wantBoost = inp.boost && this.boostEnergy > 0.02 && ship.ready;
+    const wantBoost = inp.boost && this.boostEnergy > 0.02 && ship.ready && !(this.ghost > 0);   // (no boost while a wreck)
     this.boosting += ((wantBoost ? 1 : 0) - this.boosting) * damp(6, dt);
     // the boost spends the energy; under full it recharges, over full (a drift's top-up) it bleeds back once the
     // drifting is over

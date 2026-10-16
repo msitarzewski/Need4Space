@@ -2,6 +2,15 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.9.0', date: '17 Oct 2026', name: 'Fight for it',
+    notes: [
+      'The airbrake attack: fire the airbrake toward a ship alongside - up to 7 m away - and yours throws itself at it. The slam shoves it across the track and off its line and tears its hull, in a burst of light, shockwaves and sparks; you hold your line',
+      'The rivals attack too, and the first three fight each other for the lead and slow themselves down - the ones behind can catch them',
+      'Damage you can see: hits throw sparks and your screen flashes red; hurt ships smoke and, near the end, burn. The Hull bar is big along the bottom of the screen and shows the chunk each hit takes',
+      'A wrecked hull stops dead and starts again from nothing; for its 3 seconds it blinks in and out and cannot boost',
+    ],
+  },
+  {
     version: '1.8.0', date: '17 Oct 2026', name: 'Hulls and rivals',
     notes: [
       'The rivals fly all three ships: four Feathers, two Comets and two Anvils (Settings: Feathers only)',

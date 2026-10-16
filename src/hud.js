@@ -232,13 +232,22 @@ export class HUD {
       if (ready !== this.abReady) { $('abr').parentElement.classList.toggle('ready', ready); this.abReady = ready; }
       this.ab = ab;
     }
-    // the hull: full .. empty, amber under half, red under a quarter; while a wreck is being flown through, the ghost
-    // colour
+    // the hull (the bar along the bottom): full .. empty, amber under half, red under a quarter, the ghost colour while
+    // a wreck is flown through. A hit flares it and the chunk it took lingers before draining (the trail); filled again
+    // (a wreck's new hull, a new race) the trail jumps with it
     if (s.health != null) {
-      const hp = Math.round(Math.max(0, Math.min(1, s.health)) * 100) / 100, gh = s.ghost > 0;
-      if (hp !== this.hp) { $('hul').style.transform = `scaleX(${hp})`; this.hp = hp; }
+      const hp = Math.round(Math.max(0, Math.min(1, s.health)) * 1000) / 1000, gh = s.ghost > 0;
+      if (hp !== this.hp) {
+        const trail = $('hult');
+        if (this.hp != null && hp < this.hp - 0.003) retrigger($('hullbar'), 'hit');
+        if (this.hp == null || hp > this.hp) { trail.style.transition = 'none'; trail.style.transform = `scaleX(${hp})`; void trail.offsetWidth; trail.style.transition = ''; }
+        else trail.style.transform = `scaleX(${hp})`;
+        $('hulf').style.transform = `scaleX(${hp})`;
+        this.set('hulv', Math.ceil(hp * 100));
+        this.hp = hp;
+      }
       const band = gh ? 'ghost' : hp < 0.25 ? 'red' : hp < 0.5 ? 'amber' : '';
-      if (band !== this.hpBand) { $('hul').parentElement.dataset.band = band; this.hpBand = band; }
+      if (band !== this.hpBand) { $('hullbar').dataset.band = band; this.hpBand = band; }
     }
     // the drift's charge: shown while drifting, coloured by the step it has reached
     const dr = !!s.drifting;

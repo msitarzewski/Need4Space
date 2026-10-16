@@ -27,7 +27,8 @@ const HOLD = { throttleUp: 0, throttleDown: 0, throttleAxis: 0, boost: 0, yaw: 0
 // AI difficulty (settings: "AI difficulty"). pace: engine thrust = p0 - slot * step + rnd * spread (the front of the
 // grid a touch quicker); corner: the share of the line's speed limit it dares; pads: the chance it takes each pad;
 // boost: 'plan' (spent where the lap has room to use it) or 'random'; lane: how far it strays off the line where that
-// costs nothing; band: more / less thrust when far behind / far ahead of the player - never within sight of it;
+// costs nothing; band: more / less thrust when far behind / far ahead of the player - never within sight of it; hold:
+// how much one of the first three eases off with open road behind it (the front stays a fighting bunch);
 // wander: a slow drift off the line, everywhere (m: a human's line); defend: how firmly it covers the player's way
 // past; aggression: how close it passes, how late it gives way.
 // ace: the one rival a bit smarter and faster than the rest ("anvil the smartest and mostly a winner at lower
@@ -40,16 +41,16 @@ const HOLD = { throttleUp: 0, throttleDown: 0, throttleAxis: 0, boost: 0, yaw: 0
 export const AI_LEVELS = {
   // "add an easy setting ... and the enemies are also slower": a tenth less engine than Normal, careful in the bends,
   // pads and boost left to chance, wide of the line, never blocking, easing off more when well ahead of the player
-  easy: { pace: [0.84, 0.004, 0.02], corner: 0.9, pads: 0.3, boost: 'random', lane: 10, wander: 7, band: [0.03, 0.08], defend: 0, aggression: 0.35, speed: 0.25,
+  easy: { pace: [0.84, 0.004, 0.02], corner: 0.9, pads: 0.3, boost: 'random', lane: 10, wander: 7, band: [0.03, 0.08], defend: 0, aggression: 0.35, speed: 0.25, hold: 0.08,
     kinds: { rocket: { pace: 0.92 }, heavy: { pace: 1.035 } }, ace: { kind: 'heavy', pace: 0, drive: { pads: 0.55, boost: 'plan', lane: 6, wander: 4, corner: 0.92 } } },
   // "make normal, hard and brutal a bit easier, like 30 % easier overall": each one's lap a third of the way back
   // toward Easy's (median laps on the ice: Normal 47.0 -> 48.2 s, Hard 44.9 -> 46.4, Brutal 44.6 -> 46.2, Easy 50.2),
   // its aggression and defence 30 % of the way too. speed: the menu's bar for their pace (the laps, not the engine)
-  normal: { pace: [0.9235, 0.004, 0.02], corner: 0.95, pads: 0.45, boost: 'random', lane: 8, wander: 5, band: [0.04, 0.04], defend: 0, aggression: 0.45, speed: 0.5,
+  normal: { pace: [0.9235, 0.004, 0.02], corner: 0.95, pads: 0.45, boost: 'random', lane: 8, wander: 5, band: [0.04, 0.04], defend: 0, aggression: 0.45, speed: 0.5, hold: 0.07,
     kinds: { rocket: { pace: 0.92 }, heavy: { pace: 1.035 } }, ace: { kind: 'heavy', pace: -0.005, drive: { pads: 0.7, boost: 'plan', lane: 5, wander: 3, corner: 0.96 } } },
-  hard: { pace: [0.895, 0.0025, 0.008], corner: 1, pads: 1, boost: 'plan', lane: 3, wander: 0, band: [0.05, 0.015], defend: 0.42, aggression: 0.67, speed: 0.78,
+  hard: { pace: [0.895, 0.0025, 0.008], corner: 1, pads: 1, boost: 'plan', lane: 3, wander: 0, band: [0.05, 0.015], defend: 0.42, aggression: 0.67, speed: 0.78, hold: 0.06,
     kinds: { rocket: { pace: 0.965 }, heavy: { pace: 0.995 } }, ace: { kind: 'rocket', pace: 0.02, drive: { lane: 2 } } },
-  brutal: { pace: [0.905, 0.0015, 0.004], corner: 1, pads: 1, boost: 'plan', lane: 2, wander: 0, band: [0.08, 0], defend: 0.7, aggression: 0.8, speed: 0.88,
+  brutal: { pace: [0.905, 0.0015, 0.004], corner: 1, pads: 1, boost: 'plan', lane: 2, wander: 0, band: [0.08, 0], defend: 0.7, aggression: 0.8, speed: 0.88, hold: 0.05,
     kinds: { rocket: { pace: 0.965 }, heavy: { pace: 0.995 } }, ace: { kind: 'feather', pace: 0.025, drive: {} } },
 };
 
@@ -173,6 +174,7 @@ class Driver {
   // a new race: no pass, defence, burst or pad choice carried over
   reset() {
     Object.assign(this, { passSide: 0, passT: 0, passWho: null, defT: 0, defCool: 0, defX: null, airOn: 0, airHold: 0, boostOn: false,
+      atkT: 0, atkCool: 4, attacking: false,
       boostT: 0, burstT: 0, knockT: 0, offS: 0, odo: 0, gridX: this.e.racer.x });
     this.padPick.clear();
   }
@@ -205,6 +207,8 @@ class Driver {
   think(dt) {
     const r = this.e.racer, race = this.race, tr = race.track, plan = race.plan, n = tr.n, T = Driver.tune;
     const L = this.level, lim = race.lim, v = Math.max(20, r.vs), VL = race.vlims?.[this.e.kind] || plan.vlim;
+    // one of the first three: it fights the others there - defends against them, attacks them far more readily
+    const top = race.racing && this.e.rank <= 3;
     const i = ((Math.floor(r.s / tr.step) % n) + n) % n;
     const at = (m) => (i + Math.round(m / tr.step) + n) % n;
     const air = r.y > 2.6;
@@ -289,7 +293,7 @@ class Driver {
           if (dx > 0) xT = Math.min(xT, or.x - W - 2); else xT = Math.max(xT, or.x + W + 2);
           if (Math.abs(xT) > lim - 0.5 && Math.abs(dx) < W + 0.7) follow = Math.min(follow, ds > 0 ? or.vs - 6 : Infinity);
         }
-      } else if (o.player && L.defend > 0 && ds > -45 && (or.vs > r.vs + 1 || ds > -30)) guard = o;
+      } else if ((o.player ? L.defend > 0 : top && o.rank <= 3) && ds > -45 && (or.vs > r.vs + 1 || ds > -30)) guard = o;
     }
     // the slipstream: tuck in behind (8 - 45 m, within 4.5 m across: +7 % thrust) where the line costs nothing
     if (draftX != null && this.passT <= 0) xT += (draftX - xT) * clamp(plan.slack[i] + 0.4, 0, 1);
@@ -300,7 +304,7 @@ class Driver {
     if (guard && !jump && !loop && straight && this.passT <= 0) {
       const LN = race.len(this.e, guard), g = guard.racer, back = -race.gap(g.s, r.s), ttc = (back - LN) / Math.max(0.1, g.vs - r.vs);
       if (this.defT <= 0 && this.defCool <= 0 && back > LN + 3.2 && ttc > 0.8 && Math.abs(g.x - r.x) > 2) {
-        this.defX = r.x + (g.x - r.x) * L.defend; this.defT = 2.0; this.defCool = 3.5;
+        this.defX = r.x + (g.x - r.x) * (top ? Math.max(L.defend, 0.6) : L.defend); this.defT = 2.0; this.defCool = 3.5;
       }
       if (this.defT > 0 && this.defX != null) xT = this.defX;
     } else if (this.defT <= 0) this.defX = null;
@@ -342,6 +346,24 @@ class Driver {
     this.inp.yaw = clamp(steer, -1, 1);
     this.inp.airL = this.airOn < 0 ? 1 : 0;
     this.inp.airR = this.airOn > 0 ? 1 : 0;
+    // an attack (Race attacks): alongside a hull in range on a straight, now and then - the airbrake out toward it for
+    // a moment (it lunges); then a while before the next
+    this.atkCool = Math.max(0, (this.atkCool ?? 4) - dt);
+    this.attacking = this.atkT > 0;
+    if (this.atkT > 0) {
+      this.atkT -= dt;
+      this.inp.airL = this.atkDir < 0 ? 1 : 0; this.inp.airR = this.atkDir > 0 ? 1 : 0;
+    } else if (this.atkCool <= 0 && straight && !jump && !loop && race.racing && r.ghost <= 0 && this.rnd() < (top ? 5 : 1.2) * this.aggression * dt) {
+      for (const o of race.entries) {
+        if (o === this.e || o.racer.ghost > 0 || (top && o.rank > 3 && this.rnd() < 0.7)) continue;
+        const ds = race.gap(o.racer.s, r.s), dx = o.racer.x - r.x, air = Math.abs(dx) - race.wid(this.e, o);
+        if (Math.abs(ds) < race.len(this.e, o) * 0.6 && air > 0.5 && air < ATTACK.range - 1 + (top && o.rank <= 3 ? 2 : 0) && Math.abs(o.racer.y - r.y) < 3) {
+          this.atkT = 0.3; this.atkDir = Math.sign(dx); this.atkCool = (top && o.rank <= 3 ? 2.5 : 5) + this.rnd() * 5; this.attacking = true;
+          this.inp.airL = this.atkDir < 0 ? 1 : 0; this.inp.airR = this.atkDir > 0 ? 1 : 0;
+          break;
+        }
+      }
+    }
     // speed: the line's limit just ahead (braking already folded in), traffic; flat out over a cut
     let vT = Infinity;
     for (let d = 0; d <= v * 0.3; d += 8) vT = Math.min(vT, VL[at(d)]);
@@ -520,7 +542,7 @@ export class Race {
     }
     if (ev.type === 'damage') {
       if (ev.why === 'wall') e.dmgWall += ev.amount; else e.dmgShip += ev.amount;
-      if (e.player) this.events.push({ type: 'damage', amount: ev.amount, why: ev.why, player: true });
+      this.events.push({ type: 'damage', amount: ev.amount, why: ev.why, at: ev.at, player: e.player, entry: e });
     }
     if (ev.type === 'wreck') {
       e.wrecks++;
@@ -562,17 +584,56 @@ export class Race {
       }
       e.racer.draft = (e.racer.draft || 0) + (d - (e.racer.draft || 0)) * Math.min(1, dt * 3);
     }
+    // the order (the first three fight among themselves - Driver - so the ones behind can catch them)
+    const order = racing ? this.standings() : null;
+    order?.forEach((e, k) => (e.rank = k + 1));
     for (const e of this.entries) {
       if (e.player) { if (playerActive) e.racer.step(dt, inp); continue; }
       // a rubber band toward the player, only out of its sight (150 m+ away, full from 700 m): a rival far behind gets
       // a little more thrust, one far ahead (on the easier levels) a little less - never a visible surge near it
       const lead = this.player.progress - e.progress, far = smoothstep(150, 700, Math.abs(lead)), band = AI_LEVELS[this.level].band;
       e.racer.thrustScale = e.driver.pace * (1 + far * (lead > 0 ? band[0] : -band[1]));
+      // one of the first three with open road behind it eases off (AI_LEVELS hold: up to that share of its engine, 60 -
+      // 300 m clear) - the front stays a bunch that fights and slows itself down ("so those from behind can have a
+      // chance of taking them")
+      if (order && e.rank <= 3 && !e.finished) {
+        const behind = order[e.rank], clear = behind ? e.progress - behind.progress : 0;
+        e.racer.thrustScale *= 1 - (AI_LEVELS[this.level].hold || 0) * smoothstep(60, 300, clear);
+      }
       e.racer.step(dt, !racing ? HOLD : e.finished ? e.driver.coast(dt) : e.driver.think(dt));
       e.racer.events.length = 0;
     }
-    if (racing) { this.unghost(); this.collide(dt, playerActive); }
+    if (racing) { this.attacks(dt, playerActive); this.unghost(); this.collide(dt, playerActive); }
     this.count_laps();
+  }
+
+  // The airbrake as a weapon (track.js ATTACK): fired - the moment it comes out - toward a hull alongside in range,
+  // the ship throws itself at it, a lunge across held until they meet (collide lands the blow) or lungeT runs out.
+  // The player's every airbrake can; a rival's only when its driver means it (Driver attack), not its bends'.
+  attacks(dt, playerActive) {
+    for (const e of this.entries) {
+      const r = e.racer, a = Math.sign(r.airIn || 0), was = e.airWas || 0;
+      e.airWas = a;
+      if (r.lunge) {
+        r.lunge.t -= dt;
+        if (r.lunge.t <= 0 || r.ghost > 0) r.lunge = null;
+        else r.vx = r.lunge.dir * Math.max(r.lunge.dir * r.vx, ATTACK.lunge);
+      }
+      if (!a || a === was || r.ghost > 0 || r.y > 4 || e.finished || (e.player ? !playerActive : !e.driver?.attacking)) continue;
+      let best = null, bx = Infinity;
+      for (const o of this.entries) {
+        if (o === e || o.racer.ghost > 0 || (o.player && !playerActive) || Math.abs(o.racer.y - r.y) > 4) continue;
+        const ds = this.gap(o.racer.s, r.s), dx = (o.racer.x - r.x) * a;
+        if (Math.abs(ds) > this.len(e, o) * 0.9 || dx <= 0) continue;
+        const air = dx - this.wid(e, o), range = e.rank <= 3 && o.rank <= 3 ? ATTACK.range + 2 : ATTACK.range;
+        if (air <= range && air < bx) { bx = air; best = o; }
+      }
+      if (!best) continue;
+      r.lunge = { dir: a, t: ATTACK.lungeT };
+      r.vx = a * Math.max(a * r.vx, ATTACK.lunge);
+      e.ship.lunge?.(a);
+      this.events.push({ type: 'lunge', entry: e, dir: a, player: e.player });
+    }
   }
 
   // a ghost's time runs out only clear of every other hull (it would come back solid inside one)
@@ -619,7 +680,7 @@ export class Race {
         this.touch[key] += dt;
         if (first) this.stats.contacts++;
         const ox = WID - Math.abs(dx), os = LEN - Math.abs(ds);
-        let v = 0, side = 0, atk = 0, struck = false;
+        let v = 0, side = 0, atk = 0, struck = false, slam = false;
         if (ox < os * 0.75) {                                // side by side: pushed apart sideways
           // at most 25 cm a step: two hulls landing on each other after a jump overlapped by metres and were shoved
           // apart in two or three lurches; the traded speed does the rest
@@ -634,10 +695,11 @@ export class Race {
           // never through a wall: the one pinned there stays, the other takes the whole separation
           if (Math.abs(A.x) > limA) { B.x += sx * (Math.abs(A.x) - limA); A.x = Math.sign(A.x) * limA; }
           if (Math.abs(B.x) > limB) { A.x -= sx * (Math.abs(B.x) - limB); B.x = Math.sign(B.x) * limB; }
-          const rel = B.vx - A.vx;
+          const rel = B.vx - A.vx, lunging = atk > 0 ? A.lunge : atk < 0 ? B.lunge : null;
           if (rel * sx < 0) {
+            // (a lunge landing: the slam below sets the shove - no bounce on top of it)
             const j = rel * 0.6;
-            if (atk > 0) B.vx -= 2 * j; else if (atk < 0) A.vx += 2 * j; else { A.vx += j; B.vx -= j; }
+            if (!lunging) { if (atk > 0) B.vx -= 2 * j; else if (atk < 0) A.vx += 2 * j; else { A.vx += j; B.vx -= j; } }
             v = Math.abs(rel);
             if (first || this.knock[key] <= 0) {                // a side swipe costs both a little - once a blow
               const loss = 0.05 * Math.min(1, v / 15);
@@ -648,10 +710,16 @@ export class Race {
           if (this.hurtT[key] <= 0 && (v > DAMAGE.shipGraze || atk)) {
             this.hurtT[key] = 0.35;
             if (atk) {                                         // the attack's blow: the other shoved off and slowed
-              const vic = atk > 0 ? B : A;
-              vic.vx += (atk > 0 ? sx : -sx) * ATTACK.shove;
-              vic.slow = (vic.slow || 0) + vic.vs * ATTACK.loss * vic.handling.impact;
-              v = Math.max(v, ATTACK.min);
+              const att = atk > 0 ? A : B, vic = atk > 0 ? B : A, out = atk > 0 ? sx : -sx;
+              slam = !!att.lunge;
+              if (slam) {                                      // thrown across and off its heading; the attacker stops dead
+                vic.vx = out * Math.min(Math.max(out * vic.vx, 0) + ATTACK.slamShove, 30);
+                const kick = out * ATTACK.slamYaw;
+                vic.psi += kick; vic.yawKick += kick;
+                att.vx *= 0.15; att.lunge = null;
+              } else vic.vx = out * Math.min(out * vic.vx + ATTACK.shove, 30);     // (never thrown across faster than 30 m/s)
+              vic.slow = (vic.slow || 0) + vic.vs * (slam ? ATTACK.slamLoss : ATTACK.loss) * vic.handling.impact;
+              v = slam ? ATTACK.slamMin : ATTACK.min;          // (the blow is the attack's own size, not the closing speed)
               struck = true;
             }
             this.ram(E[a], E[b], v, atk);
@@ -687,11 +755,17 @@ export class Race {
         this.knock[key] = 0.35;
         this.stats.jolts++;
         if (struck) this.stats.attacks = (this.stats.attacks || 0) + 1;
-        // the hulls jolt apart, the shields light where they met (an attacker barely moved, the one attacked hard)
-        const at = A.pos.clone().add(B.pos).multiplyScalar(0.5), k = v / 12;
+        // the hulls jolt apart, the shields light where they met (an attacker barely moved, the one attacked hard - a
+        // slam throws it over)
+        const at = A.pos.clone().add(B.pos).multiplyScalar(0.5), k = v / 12, kv = slam ? 2.6 : 1.5;
         if (side) {
-          E[a].ship.hit(new THREE.Vector3(-side, 0, 0), k * (atk > 0 ? 0.3 : atk < 0 ? 1.5 : 1), E[a].ship.root.worldToLocal(at.clone()));
-          E[b].ship.hit(new THREE.Vector3(side, 0, 0), k * (atk < 0 ? 0.3 : atk > 0 ? 1.5 : 1), E[b].ship.root.worldToLocal(at.clone()));
+          E[a].ship.hit(new THREE.Vector3(-side, 0, 0), k * (atk > 0 ? 0.3 : atk < 0 ? kv : 1), E[a].ship.root.worldToLocal(at.clone()));
+          E[b].ship.hit(new THREE.Vector3(side, 0, 0), k * (atk < 0 ? 0.3 : atk > 0 ? kv : 1), E[b].ship.root.worldToLocal(at.clone()));
+          if (struck) {
+            const att = atk > 0 ? E[a] : E[b], vic = atk > 0 ? E[b] : E[a];
+            this.events.push({ type: 'attack', at, attacker: att, victim: vic, slam, v,
+              dir: vic.racer.pos.clone().sub(att.racer.pos).projectOnPlane(this.track.frame(att.racer.s).T).normalize() });
+          }
         } else {
           const aRear = ds > 0;
           E[a].ship.hit(new THREE.Vector3(0, 0, aRear ? 1 : -1), k, E[a].ship.root.worldToLocal(at.clone()));
@@ -804,6 +878,9 @@ export class Race {
         ship.update(dt, { throttle: r.throttle, boost: r.boosting, speed: r.speed, turn: r.turn, ...r.animState() }, scene, camera);
         if (camera.position.distanceToSquared(r.pos) < 160 * 160) fx.exhaust(ship, r, dt);
       }
+      // a hull under half smokes, under a quarter burns (fx.damaged): who is hurt shows
+      const hp = r.health / r.maxHealth;
+      if (this.racing && hp < 0.5 && !(r.ghost > 0) && camera.position.distanceToSquared(r.pos) < 300 * 300) fx.damaged(ship, r, hp, dt);
     }
   }
 
