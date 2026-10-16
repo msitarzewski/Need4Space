@@ -402,6 +402,11 @@ body.lite .m-news { backdrop-filter: none; background: linear-gradient(115deg, r
 .s-stats { width: min(24rem, 100%); margin-top: 1.6rem; padding-left: 1.3rem; }
 .s-stats.swap { animation: fade-in 0.3s ease both; }
 .s-stats .d-bar i.on { background: var(--accent); box-shadow: 0 0 0.45rem color-mix(in srgb, var(--accent) 70%, transparent); }
+.s-paint { display: grid; grid-template-columns: 6.8rem 1fr; align-items: center; gap: 0.6rem; width: min(30rem, 100%); margin-top: 1.1rem;
+  padding-left: 1.3rem; font: 700 0.7rem var(--ui); letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); }
+.s-paint:empty { display: none; }
+.s-paint.swap { animation: fade-in 0.3s ease both; }
+.s-paint .seg { justify-content: flex-start; pointer-events: auto; }
 .d-slot.sel .d-bar i.on { background: var(--c); box-shadow: 0 0 0.45rem color-mix(in srgb, var(--c) 70%, transparent);
   transition-delay: calc(var(--k) * 35ms + 120ms); }
 .d-sweep { position: absolute; inset: 0; pointer-events: none; transform: translateX(-130%);

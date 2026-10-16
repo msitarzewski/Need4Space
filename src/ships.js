@@ -1,10 +1,12 @@
-// The ships the player can fly: the Feather S1 (twin turbofan pods on swept wings) and the Comet R1 (one big rocket in
-// the back of a titanium manta riding two hover sponsons). main.js loads the one chosen - the page reloads into it -
-// and the rivals stay Feathers whichever it is. Both have the same span and the same lowest point, so the walls, the
-// hover and the chase camera treat them alike; HANDLING (below) is how each flies.
+// The ships the player can fly: the Feather S1 (twin turbofan pods on swept wings), the Comet R1 (one big rocket in
+// the back of a titanium manta riding two hover sponsons) and the Anvil H1 (a heavy armoured lifting body, two pulse
+// engines in its housings, magnet balls orbiting them). main.js loads the one chosen - the page reloads into it - and
+// the rivals stay Feathers whichever it is. All share the same lowest point, so the hover and the chase camera treat
+// them alike; the Anvil is wider (its half span is its wall limit); HANDLING (below) is how each flies.
 export const SHIPS = [
   ['feather', 'Feather S1', 'Twin turbofan pods on swept wings: the original'],
   ['rocket', 'Comet R1', 'Faster and sharper, but every knock costs it more'],
+  ['heavy', 'Anvil H1', 'Heavy armour and two pulse engines: shrugs off knocks, hits hardest on the boost'],
 ];
 
 // How each ship flies (track.js TrackRacer): thrust and boost - its engine's pull, cruising and boosting; drag - the
@@ -15,12 +17,31 @@ export const SHIPS = [
 export const HANDLING = {
   feather: { thrust: 1, boost: 1, drag: 1, turn: 1, impact: 1 },
   rocket: { thrust: 1, boost: 0.9, drag: 0.92, turn: 1.05, impact: 1.5 },   // (clean flying laps 2-4 % under the Feather's)
+  // the Anvil: a little slower off the line and in the turns, more on the boost, and knocks cost it a third less
+  heavy: { thrust: 0.97, boost: 1.12, drag: 1, turn: 0.94, impact: 0.65 },
 };
 
-// each ship's model by memory tier (quality.js memoryTier): 8K, 4K and 2K maps
+// which bake of the ships' maps the files are: a livery's maps (and its edge map) fit only the hull atlas they were
+// baked on, and Pages lets a browser keep a file ten minutes - a new bake changes the tag, so the ship and its liveries
+// are fetched together, never last bake's ship under this bake's paint
+export const BAKE = '?b=2';
+
+// each ship's model by memory tier (quality.js memoryTier): the 2K maps on every tier - supersampled, lossless and the
+// atlas packed to ~60 %, they hold up in the showroom's closest view
+const all = (url) => ({ high: url + BAKE, mid: url + BAKE, low: url + BAKE });
 export const SHIP_URLS = {
-  feather: { high: 'assets/racer_web.glb', mid: 'assets/racer_web_4k.glb', low: 'assets/racer_web_2k.glb' },
-  rocket: { high: 'assets/rocket_web.glb', mid: 'assets/rocket_web_4k.glb', low: 'assets/rocket_web_2k.glb' },
+  feather: all('assets/racer_web_2k.glb'),
+  rocket: all('assets/rocket_web_2k.glb'),
+  heavy: all('assets/heavy_web_2k.glb'),
+};
+
+// each ship's liveries (Settings, the Ship screen): the first is the GLB's own paint, the others' hull maps (colour,
+// roughness / metal) load from assets/liveries/<ship>/<livery>_albedo_<n>k.webp and _orm_ - in the sizes listed (the
+// largest not over the ship's own atlas is used); key - the setting that holds the choice
+export const LIVERIES = {
+  feather: { names: ['classic', 'airracer', 'green'], labels: ['Classic', 'Air Racer', 'Racing Green'], key: 'featherLivery', res: [2048] },
+  rocket: { names: ['titanium', 'orbiter', 'testflight'], labels: ['Titanium', 'Orbiter', 'Test Flight'], key: 'cometLivery', res: [2048] },
+  heavy: { names: ['hazard', 'military', 'navy'], labels: ['Hazard', 'Military', 'Navy'], key: 'heavyLivery', res: [2048] },
 };
 
 // the rivals' Feathers when the player flies another ship: a tier lighter - they are never as close to the camera as

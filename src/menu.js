@@ -8,7 +8,7 @@ import { AI_LEVELS, LAPS, TEAMS } from './race.js';
 import { controlsHTML, GAMEPAD, fmt } from './hud.js';
 import { UPDATES, VERSION } from './changelog.js';
 import { Scoreboard } from './scoreboard.js';
-import { SHIPS, HANDLING, shipName } from './ships.js';
+import { SHIPS, HANDLING, LIVERIES, shipName } from './ships.js';
 
 const ui = (name) => window.__feather?.audio?.ui?.(name);
 const wake = () => window.__feather?.audio?.start?.();          // audio needs a user gesture: any menu key or click
@@ -79,7 +79,7 @@ const HINTS = {
   controls: K(['Esc'], 'Back', 'back'),
   support: K(['Enter'], 'Donate on Revolut', 'ok') + K(['Esc'], 'Back', 'back'),
   circuit: K(['↑', '↓'], 'Select', UD) + K(['Enter'], 'Fly it', 'ok') + K(['Esc'], 'Back', 'back'),
-  ship: K(['↑', '↓'], 'Select', UD) + K(['Enter'], 'Fly it', 'ok') + K(['Esc'], 'Back', 'back'),
+  ship: K(['↑', '↓'], 'Select', UD) + K(['←', '→'], 'Paint', LR) + K(['Enter'], 'Fly it', 'ok') + K(['Esc'], 'Back', 'back'),
   scoreboard: K(['↑', '↓'], 'Circuit', UD) + K(['←', '→'], 'Difficulty', LR) + K(['R'], 'Refresh', 'refresh') + K(['Esc'], 'Back', 'back'),
   results: K(['←', '→'], 'Select', LR) + K(['Enter'], 'Confirm', 'ok') + K(['R'], 'Race again', 'again') + K(['Esc'], 'Main menu', 'back'),
 };
@@ -175,6 +175,7 @@ export class Menu {
         <nav class="m-list">${SHIPS.map(([id, name]) => ['ship:' + id, name]).map(item).join('')}</nav>
         <div class="m-desc"></div>
         <div class="d-stats s-stats"></div>
+        <div class="s-paint"></div>
       </section>
       <section class="m-screen" data-s="settings">
         <header><div class="m-kicker">Options</div><h2 class="m-h2">Settings</h2></header>
@@ -377,6 +378,17 @@ export class Menu {
       this.h.showroom?.(true, id);
       const st = this.el.querySelector('.s-stats');
       if (st && st.dataset.id !== id) { st.dataset.id = id; st.innerHTML = statRows(shipStats(HANDLING[id] || HANDLING.feather)); retrigger(st, 'swap'); }
+      // its paint: the liveries side by side, the one it wears lit (left / right or a click changes it; the stand's ship
+      // takes it at once - main.js Ship.liveries)
+      const pv = this.el.querySelector('.s-paint'), L = LIVERIES[id];
+      const cur = L && (L.names.includes(this.h.settings.v[L.key]) ? this.h.settings.v[L.key] : L.names[0]);
+      if (pv && pv.dataset.at !== `${id}:${cur}`) {
+        const fresh = pv.dataset.at?.split(':')[0] !== id;
+        pv.dataset.at = `${id}:${cur}`;
+        pv.innerHTML = L ? `<span>Paint</span><div class="seg">${L.names.map((n, k) =>
+          `<button tabindex="-1" data-act="paint:${n}" class="${n === cur ? 'on' : ''}">${L.labels[k]}</button>`).join('')}</div>` : '';
+        if (fresh) retrigger(pv, 'swap');
+      }
     }
     const d = this.el.querySelector(`.m-screen[data-s="${s}"] .m-desc`);
     if (d) {
@@ -393,7 +405,7 @@ export class Menu {
       controls: 'Keyboard, mouse and gamepad',
       support: 'Donate to keep Need4Space flying',
       circuit: 'Space, the forest moon, the ice planet or the desert planet',
-      ship: 'The Feather S1 or the Comet R1 - look them over in the showroom',
+      ship: 'The Feather S1, the Comet R1 or the Anvil H1 - look them over in the showroom',
       scoreboard: 'The global top 10 for each circuit and difficulty',
       ...Object.fromEntries(CIRCUITS.map(([id, , d]) => ['map:' + id, d])),
       ...Object.fromEntries(SHIPS.map(([id, , d]) => ['ship:' + id, d])),
@@ -510,10 +522,23 @@ export class Menu {
       if (vert) { this.h.settings.move(d); ui('move'); } else if (this.h.settings.cycle(d) && this.h.settings.focusKey !== 'ai') ui('move');
       return;
     }
+    if (s === 'ship' && !vert) { this.paint(d); return; }
     if (s === 'controls' || (!vert && s !== 'results')) return;
     const n = this.items().length;
     if (!n) return;
     this.sel[s] = ((this.sel[s] || 0) + d + n) % n;
+    this.refresh();
+    ui('move');
+  }
+
+  // the Ship screen's paint: the selected ship's next livery (d), or the one named
+  paint(d, name) {
+    const id = this.items()[this.sel.ship || 0]?.dataset.act.slice(5), L = LIVERIES[id];
+    if (!L) return;
+    const n = L.names.length, i = Math.max(0, L.names.indexOf(this.h.settings.v[L.key]));
+    const next = name || L.names[(i + d + n) % n];
+    if (!L.names.includes(next) || next === L.names[i]) return;
+    this.h.settings.set(L.key, next);
     this.refresh();
     ui('move');
   }
@@ -578,6 +603,8 @@ export class Menu {
           const u = new URL(location.href);
           u.searchParams.delete('map');
           setTimeout(() => location.replace(u.href), 300);
+        } else if (a.startsWith('paint:')) {
+          this.paint(0, a.slice(6));
         } else if (a.startsWith('ship:')) {         // another ship: saved, and the page reloads into it
           const id = a.slice(5);
           ui('select');

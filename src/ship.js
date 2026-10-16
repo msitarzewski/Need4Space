@@ -36,6 +36,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshoptSimplifier } from 'meshoptimizer/meshopt_simplifier.module.js';
 import { clamp, damp, smoothstep, noise2 } from './noise.js';
 import { Q } from './quality.js';
+import { LIVERIES, BAKE } from './ships.js';
 
 // Blender (Z up) -> glTF / three (Y up): (x, y, z) -> (x, z, -y). The nose is at -Z, starboard at +X.
 const toThree = ([x, y, z]) => new THREE.Vector3(x, z, -y).normalize();
@@ -170,6 +171,88 @@ class Plume {
     this.haloA = Math.min(0.7, power * (0.2 + 0.35 * thrust + 0.3 * boost));
     this.halo.visible = power > 0.01 && DARK_FACE.value < 1;
   }
+}
+
+// The Anvil's pulse exhaust, on each muzzle: every pulse of its engines fires a ring of plasma out of the muzzle - a
+// shock ring shooting back and opening out, gone in under half a second (on the boost they come one on another) - and
+// the jet's shock diamonds and the muzzle's glow flare with it. In the ship's own frame: the rings leave with the
+// ship's speed plus the exhaust's, so they always shoot back out of the engine. Always drawn (an empty ring costs a
+// quad; hidden, its program would compile on the first pulse mid-race).
+const PULSE_LIFE = 0.42;
+function pulseRingMaterial(eng) {
+  const m = new THREE.ShaderMaterial({
+    uniforms: { col: { value: eng.clone() }, hot: { value: eng.clone().lerp(new THREE.Color(1, 1, 1), 0.5) }, a: { value: 0 }, u: { value: 0 } },
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    vertexShader: /* glsl */`varying vec2 vP; void main() { vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: /* glsl */`
+      uniform vec3 col, hot; uniform float a, u; varying vec2 vP;
+      void main() {
+        if (a < 0.002) discard;
+        // a hot thin rim (the shock front) over a softer band, the band thinning as it opens; a faint fill inside
+        float r = length(vP), w = mix(0.07, 0.03, u);
+        float rim = exp(-pow((r - 0.86) / w, 2.0)), band = exp(-pow((r - 0.8) / (w * 3.0), 2.0)), fill = 0.08 * smoothstep(0.86, 0.3, r);
+        // (in the engine's colour, white only along its hottest line: near-white rings washed the colour out)
+        vec3 c = mix(col, hot, rim * (1.0 - u)) * (1.9 * rim + 0.8 * band + fill);
+        gl_FragColor = vec4(c * a, 1.0);
+      }`,
+  });
+  m.customProgramCacheKey = () => 'pulse-ring';
+  return m;
+}
+
+class PulseExhaust {
+  constructor(parent, plume, eng, n = 8) {
+    this.plume = plume;
+    this.z0 = plume.outer.position.z + 0.28;        // just behind the muzzle's teeth
+    const geo = new THREE.RingGeometry(0.3, 1.0, 72, 1);
+    this.rings = [];
+    for (let i = 0; i < n; i++) {
+      const m = new THREE.Mesh(geo, pulseRingMaterial(eng));
+      m.position.set(plume.outer.position.x, plume.outer.position.y, this.z0);
+      m.renderOrder = 3;
+      m.frustumCulled = false;
+      parent.add(m);
+      this.rings.push({ mesh: m, age: 9 });
+    }
+    // shock diamonds down the jet
+    this.diamonds = [0.55, 1.35, 2.3, 3.4].map((d, i) => {
+      const sp = new THREE.Sprite(glowSprite());
+      sp.material.color.copy(eng).lerp(new THREE.Color(1, 1, 1), 0.55 - 0.1 * i);
+      sp.position.set(plume.outer.position.x, plume.outer.position.y, this.z0 + d);
+      sp.renderOrder = 3;
+      parent.add(sp);
+      return { sp, d, k: 1 - 0.18 * i };
+    });
+  }
+
+  fire() {
+    const r = this.rings.reduce((a, b) => (b.age > a.age ? b : a));
+    r.age = 0;
+  }
+
+  update(dt, power, thrust, boost, kick) {
+    const R = this.plume.r;
+    for (const q of this.rings) {
+      q.age += dt;
+      const u = Math.min(1, q.age / PULSE_LIFE), U = q.mesh.material.uniforms;
+      const vel = 18 + 30 * boost;                   // m/s back out of the muzzle
+      q.mesh.position.z = this.z0 + vel * q.age * (1 - 0.35 * u);
+      const s = R * (1.55 + 2.2 * Math.sqrt(u)) * (1 + 0.25 * boost);
+      q.mesh.scale.set(s, s, 1);
+      U.u.value = u;
+      U.a.value = q.age < PULSE_LIFE ? power * (1 - u) * (1 - u) * (0.55 + 0.45 * thrust + 0.6 * boost) : 0;
+    }
+    const stretch = 1 + 0.6 * boost + 0.3 * thrust;
+    for (const d of this.diamonds) {
+      d.sp.position.z = this.z0 + d.d * stretch;
+      const sc = R * d.k * (0.9 + 0.5 * thrust + 0.5 * boost) * (1 + 0.35 * kick);
+      d.sp.scale.set(sc, sc, 1);
+      d.sp.material.opacity = power * d.k * (0.18 + 0.3 * thrust + 0.45 * boost + 0.7 * kick);
+      d.sp.visible = power > 0.01;
+    }
+  }
+
+  objects() { return [...this.rings.map((q) => q.mesh), ...this.diamonds.map((d) => d.sp)]; }
 }
 
 // A world-space ribbon's bounds, from the vertices it was just given: so it is frustum-culled like anything else (a
@@ -634,6 +717,69 @@ function deckPatch(sh, U) {
     .replace('#include <fog_vertex>', '#include <fog_vertex>\n\tvWetP = transformed;');
 }
 
+// Sharp paint edges up close. A 2K hull atlas puts 4-5 screen pixels on a texel in the Ship screen's closest zoom: every
+// livery edge (chevrons, stripes, the paint against the dark trim) was a soft, stepped blur there. Each livery has an
+// edge map (blender/edge_maps.py): two signed distance fields, in texels, to the hard colour edges at two luminance
+// levels. Where a texel covers more than ~1.2 screen pixels, every colour / roughness / metal lookup moves up to 1.6
+// texels away from the nearest edge, into its own side: the bilinear blend across the edge is never sampled, so the
+// edge falls on the field's zero line, sub-texel exact, and stays sharp at any zoom. Where the field is no distance
+// field (a soft edge's +-range jump, an island's border: its gradient far from 1 texel per texel) nothing moves.
+const SHARP_DECL = /* glsl */`
+uniform sampler2D edgeMap;
+uniform float edgeOn;
+uniform vec2 edgeTexel;
+const float EDGE_R = 4.0;
+float edgeD( vec2 uv, float useB ) {
+	vec2 e = texture2D( edgeMap, uv ).rg;
+	return ( mix( e.x, e.y, useB ) - 0.5 ) * 2.0 * EDGE_R;
+}
+vec2 edgeOffset( vec2 uv ) {
+	vec2 fw = fwidth( uv / edgeTexel );                         // texels per screen pixel
+	float px = 1.0 / max( max( fw.x, fw.y ), 1e-4 );
+	float k = edgeOn * clamp( ( px - 1.2 ) * 2.0, 0.0, 1.0 );
+	if ( k <= 0.0 ) return vec2( 0.0 );
+	vec2 e = ( texture2D( edgeMap, uv ).rg - 0.5 ) * 2.0 * EDGE_R;
+	// the first level's edge where it has one near, else the second's (one dark-to-bright edge crosses both levels a
+	// fraction of a texel apart: taking the nearer of the two each pixel made the edge wander between them)
+	float useB = abs( e.x ) < 1.6 ? 0.0 : 1.0;
+	float d = mix( e.x, e.y, useB );
+	if ( abs( d ) > 1.6 ) return vec2( 0.0 );
+	vec2 g = vec2( edgeD( uv + vec2( edgeTexel.x, 0.0 ), useB ) - edgeD( uv - vec2( edgeTexel.x, 0.0 ), useB ),
+		edgeD( uv + vec2( 0.0, edgeTexel.y ), useB ) - edgeD( uv - vec2( 0.0, edgeTexel.y ), useB ) ) * 0.5;
+	float gl = length( g );
+	if ( gl < 0.4 || gl > 1.8 ) return vec2( 0.0 );
+	// to 1.6 texels from the edge on this side - or, in a stripe thinner than that, to as deep as it goes: a push is
+	// taken only where the field there says it arrived (past a thin stripe's middle it says less: the far edge's
+	// blend would be sampled, a zig-zag)
+	vec2 n = g / gl;
+	for ( int i = 0; i < 4; i ++ ) {
+		float target = i == 0 ? 1.6 : ( i == 1 ? 1.25 : ( i == 2 ? 0.95 : 0.7 ) );
+		if ( target <= abs( d ) ) break;
+		vec2 off = n * ( sign( d ) * target - d ) * edgeTexel;
+		float d2 = edgeD( uv + off, useB );
+		if ( d2 * d > 0.0 && abs( d2 ) > target - 0.2 ) return off * k;
+	}
+	return vec2( 0.0 );
+}
+`;
+function sharpPatch(sh, U) {
+  const C = THREE.ShaderChunk, MAP = 'texture2D( map, vMapUv )', RGH = 'texture2D( roughnessMap, vRoughnessMapUv )',
+    MET = 'texture2D( metalnessMap, vMetalnessMapUv )';
+  if (!C.map_fragment.includes(MAP) || !C.roughnessmap_fragment.includes(RGH) || !C.metalnessmap_fragment.includes(MET)
+    || !sh.fragmentShader.includes('#include <clipping_planes_fragment>')) {
+    if (!sharpPatch.warned) console.warn('map chunks changed: the sharp paint edges not applied');
+    sharpPatch.warned = true;
+    return;
+  }
+  Object.assign(sh.uniforms, U);
+  sh.fragmentShader = sh.fragmentShader
+    .replace('void main() {', SHARP_DECL + 'void main() {')
+    .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n#ifdef USE_MAP\n\tvec2 edgeOff = edgeOffset( vMapUv );\n#else\n\tvec2 edgeOff = vec2( 0.0 );\n#endif')
+    .replace('#include <map_fragment>', C.map_fragment.replace(MAP, 'texture2D( map, vMapUv + edgeOff )'))
+    .replace('#include <roughnessmap_fragment>', C.roughnessmap_fragment.replace(RGH, 'texture2D( roughnessMap, vRoughnessMapUv + edgeOff )'))
+    .replace('#include <metalnessmap_fragment>', C.metalnessmap_fragment.replace(MET, 'texture2D( metalnessMap, vMetalnessMapUv + edgeOff )'));
+}
+
 // Water running off the hull out of the sea (the ocean: shipWet 1 coming out .. 0 dry over a few seconds): a film over
 // all of it, rivulets wandering back along it and down, beads left where it has run off - glossy, the paint a shade
 // darker under it. In the ship's own frame (the model's units, its nose toward -z). Off (0): untouched
@@ -733,10 +879,9 @@ function microPatch(sh) {
 const HULL_LOOK = { paint: { value: 1 }, trim: { value: 1 }, accent: { value: 1 } };
 const PARTS_A = { value: null }, TRIM_PARTS = [];      // (the atlas's colour rows and its aluminium parts: trimFinish)
 const L_NAC_X = 4.0, L_NAC_Z = -0.65;     // the pods' axis (racer_layout.py NAC_X, NAC_Z)
+// (the metal-flake glints are off: on a grid they read as "squares all over the ships" in the showroom, scattered they
+// read as white sparkles over the paint - twice not wanted. The clear coat stays. Define HULL_FLAKE to bring them back)
 const FLAKE_PARS = /* glsl */`
-#ifdef USE_CLEARCOAT
-	#define HULL_FLAKE
-#endif
 uniform float hullPaintK, hullTrimK, hullAccentK, accentOn;
 uniform vec3 accentCol;
 varying vec3 vShipP, vShipN;
@@ -754,9 +899,12 @@ float hullStrip( float x, float hw ) {
 // pixel it fills - none once a cell is under ~1.5 px
 vec3 hullFlakeLevel( vec2 fp, float cpp, float lv, vec3 n, out float w ) {
 	float k = exp2( lv );
-	vec2 q = fp / k, fc = floor( q ), fo = q - fc - 0.5 - ( hullH22( fc + lv * 31.7 ) - 0.5 ) * 0.6;
-	float c = max( cpp / k, 0.02 );
-	w = ( 1.0 - smoothstep( 0.2 - 0.5 * c, 0.2 + 0.5 * c, length( fo ) ) ) * ( 1.0 - smoothstep( 0.35, 0.7, c ) );
+	// (one flake in under half the cells, each its own size and anywhere in its cell: a flake in every cell, all one
+	// size, sat on a visible grid - "squares all over the ships" in the showroom's close view)
+	vec2 q = fp / k, fc = floor( q ), hp = hullH22( fc + lv * 31.7 ), fo = q - fc - 0.5 - ( hp - 0.5 ) * 0.8;
+	vec2 hs = hullH22( fc + lv * 7.13 + 91.7 );
+	float c = max( cpp / k, 0.02 ), rad = 0.08 + 0.14 * hs.y;
+	w = ( 1.0 - smoothstep( rad - 0.5 * c, rad + 0.5 * c, length( fo ) ) ) * ( 1.0 - smoothstep( 0.35, 0.7, c ) ) * step( 0.56, hs.x );
 	vec2 tilt = ( hullH22( fc + 17.31 + lv * 5.3 ) - 0.5 ) * 0.7;
 	vec3 ta = normalize( cross( n, abs( n.y ) < 0.9 ? vec3( 0.0, 1.0, 0.0 ) : vec3( 1.0, 0.0, 0.0 ) ) ), tb = cross( n, ta );
 	return normalize( n + tilt.x * ta + tilt.y * tb );
@@ -963,6 +1111,8 @@ export class Ship {
       shipWet: { value: 0 }, shipWetT: { value: 0 } };
     // the accent lights' colour (this ship's engines) and how lit they are (finishPatch)
     this.lookU = { accentCol: { value: new THREE.Color(0, 0, 0) }, accentOn: { value: 0 } };
+    // the livery's edge map (sharpPatch): on once it has loaded, if the setting has it
+    this.edgeU = { edgeMap: { value: null }, edgeOn: { value: 0 }, edgeTexel: { value: new THREE.Vector2(1 / 2048, 1 / 2048) } };
     const base = opts.cloneOf;
     this.model = base ? base.model.clone(true) : gltf.scene;
     if (base) {                        // each rival owns its materials: its glows follow its own engines
@@ -978,6 +1128,10 @@ export class Ship {
     this.rotors = [];
     this.folds = [];
     this.canopy = null;
+    this.orbits = [];
+    this.pulses = [];
+    this.lamps = [];
+    const balls = [];
     this.mats = {};
     this.tris = 0;
     this.model.traverse((o) => {
@@ -990,7 +1144,15 @@ export class Ship {
         this.folds.push({ node: o, axis: toThree(m.axis), deg: m.deg, base: o.quaternion.clone() });
       } else if (m && m.type === 'hinge') {
         this.canopy = { node: o, axis: toThree(m.axis), deg: m.deg, base: o.quaternion.clone() };
+      } else if (m && m.type === 'orbit') {     // the Anvil's magnet balls' anchor, on an engine's axis at its face
+        this.orbits.push({ node: o, m, balls: [] });
+      } else if (m && m.type === 'ball') {
+        balls.push({ node: o, phase: m.phase });
       }
+      let pu = o.userData && o.userData.pulse;  // a pulse engine's stage: its glow fires in turn (updatePulse)
+      if (typeof pu === 'string') pu = JSON.parse(pu);
+      if (pu && o.isMesh) this.pulses.push({ node: o, stage: pu.stage, stages: pu.stages });
+      if (o.isMesh && o.userData && o.userData.light) this.lamps.push({ node: o, kind: o.userData.light });
       if (o.isMesh) {
         o.castShadow = true;
         o.receiveShadow = true;
@@ -1016,24 +1178,48 @@ export class Ship {
       const m = this.mats[n];
       if (m) { m.emissive.copy(m.color).multiplyScalar(m.metalness > 0.5 ? 0.16 : 0.22); m.emissiveIntensity = 0; }
     }
+    // the hull atlas's size as loaded: a ship with liveries fetches its other paints' maps in the same size
+    this.atlasW = this.mats.RacerBaked?.map?.image?.width || 0;
     this.glowBase = {};
     // engine glows 0.6x the export's: at full strength they bloomed into white blobs
     for (const n of [...GLOWS, ...AVIONICS]) if (this.mats[n]) this.glowBase[n] = this.mats[n].emissiveIntensity * (GLOWS.includes(n) ? 0.6 : 1);
 
     if (base) {                        // same hull: same probes, tips and span, nozzles, parts atlas
-      for (const k of ['probes', 'bottom', 'tipR', 'tipL', 'halfSpan', 'length', 'tangentsFixed', 'nozzles', 'parts']) this[k] = base[k];
+      for (const k of ['probes', 'lows', 'bottom', 'tipR', 'tipL', 'halfSpan', 'length', 'tangentsFixed', 'nozzles', 'parts']) this[k] = base[k];
     } else {
       this.repairTangents();
       this.root.updateMatrixWorld(true);
       this.measure();
     }
     if (opts.team) this.paint(opts.team);
+    else if (base && this.mats.RacerBaked?.isMeshPhysicalMaterial) this.hullPatch(this.mats.RacerBaked);   // (a copy: see hullPatch)
     // the engine's colour: rings, cores, conduits, plumes, halos, sparks (each team its own)
     this.engineColor = new THREE.Color(...(opts.engine || [0.1, 0.42, 1.0]));
     const white = new THREE.Color(1, 1, 1);
     if (this.mats.EngineGlow) this.mats.EngineGlow.emissive.copy(this.engineColor);
     this.lookU.accentCol.value.copy(this.engineColor).multiplyScalar(12);
     if (this.mats.EngineCore) this.mats.EngineCore.emissive.copy(this.engineColor).lerp(white, 0.6);
+    // the pulse engine: every stage its own material (each fires on its own), in the engine's colour; the core's dome
+    // whiter. The balls ride their anchors; the headlamp's middle is where the headlight's beam starts (main.js)
+    for (const p of this.pulses) {
+      p.mat = p.node.material = p.node.material.clone();
+      p.mat.emissive.copy(this.engineColor);
+      if (p.stage < 0) p.mat.emissive.lerp(white, 0.6);
+      p.base = p.mat.emissiveIntensity * 0.6;
+    }
+    for (const b of balls) {
+      const ob = this.orbits.find((q) => q.node === b.node.parent);
+      if (ob) ob.balls.push({ ...b, rest: b.node.position.clone() });
+      b.node.traverse((o) => { o.castShadow = false; });   // (small and quick: their shadows only crawled over the hull)
+    }
+    this.lampBase = {};
+    for (const l of this.lamps) {
+      this.lampBase[l.kind] = l.node.material.emissiveIntensity;
+      if (l.kind === 'head') {
+        this.model.updateMatrixWorld(true);
+        this.headLampPos = new THREE.Box3().setFromObject(l.node).getCenter(new THREE.Vector3());
+      }
+    }
     // the glow rings as HDR light: white-hot along the ring's centre line, the engine colour at its edges (the Cycles
     // look's ring shader: a gaussian across the ring); each ring its own radius
     // (a rival has none of its own: its rings are in the parts atlas it cloned, lit through setupParts)
@@ -1108,6 +1294,8 @@ export class Ship {
       const c = b.getCenter(new THREE.Vector3());
       this.retros.push(new Plume(this.visual, new THREE.Vector3(c.x, c.y, b.min.z - 0.1), 0.32, 1.6, this.engineColor, true));
     }
+    // the Anvil's pulse exhaust on each of its plumes (a ship with pulse stages)
+    this.pulseFx = this.pulses.length ? this.plumes.map((p) => new PulseExhaust(this.visual, p, this.engineColor)) : [];
     this.exhaustLights = (opts.lights === false ? [] : this.plumes.slice(0, 2)).map((p) => {
       const l = new THREE.PointLight(this.engineColor.clone().lerp(new THREE.Color(1, 1, 1), 0.3), 0, 16, 2);
       l.position.copy(p.outer.position).add(new THREE.Vector3(0, 0, 2.5));
@@ -1209,7 +1397,7 @@ export class Ship {
   // frame. Rotors, the canopy and the engine rings (each ring its own shader, in its own local space) stay apart; the
   // merged meshes keep their materials and vertices, so nothing changes on screen.
   mergeStatic() {
-    const moving = new Set([...this.rotors.map((r) => r.node), this.canopy && this.canopy.node].filter(Boolean));
+    const moving = new Set([...this.rotors.map((r) => r.node), this.canopy && this.canopy.node, ...this.ownMoving()].filter(Boolean));
     const rings = new Set(this.ringMats), groups = new Map();
     this.model.updateMatrixWorld(true);
     const inv = this.model.matrixWorld.clone().invert();
@@ -1246,8 +1434,13 @@ export class Ship {
   // widest first (width over culling threshold), so the parts still on at a distance are always the front of its index:
   // buildDetails' per-part culling becomes a draw range (setLod), same widths, same thresholds; the distance level is
   // built per part (buildLods), each part simplified exactly as when it was a mesh of its own.
+  // the parts that move or light on their own (the Anvil's ball anchors, pulse stages and lamps): never merged or atlased
+  ownMoving() {
+    return [...this.orbits.map((o) => o.node), ...this.pulses.map((p) => p.node), ...this.lamps.map((l) => l.node)];
+  }
+
   buildParts() {
-    const moving = new Set([...this.rotors.map((r) => r.node), this.canopy && this.canopy.node].filter(Boolean));
+    const moving = new Set([...this.rotors.map((r) => r.node), this.canopy && this.canopy.node, ...this.ownMoving()].filter(Boolean));
     this.model.updateMatrixWorld(true);
     const inv = this.model.matrixWorld.clone().invert(), list = [];
     this.model.traverse((o) => {
@@ -1474,16 +1667,7 @@ export class Ship {
       });
       m.name = 'RacerBaked';
       m.userData.clearcoat = 0.25;                     // (Laptop mode drops it: quality.js setLite)
-      const rg = !!nm?.userData.rg;
-      m.onBeforeCompile = (sh) => {
-        deckPatch(sh, this.deckU);
-        microPatch(sh);
-        finishPatch(sh, this.lookU);
-        sh.fragmentShader = sh.fragmentShader.replace('#include <lights_physical_fragment>',
-          '#include <lights_physical_fragment>\n#ifdef USE_CLEARCOAT\n  material.clearcoat *= clamp(1.0 - metalnessFactor, 0.0, 1.0);\n#endif');
-        if (rg) sh.fragmentShader = rgNormalChunk(sh.fragmentShader);
-      };
-      m.customProgramCacheKey = () => (rg ? 'feather-hull-rg' : 'feather-hull');
+      this.hullPatch(m);
       releaseAfterUpload(m.map); releaseAfterUpload(m.aoMap); releaseAfterUpload(m.roughnessMap); releaseAfterUpload(m.metalnessMap);
       this.model.traverse((o) => { if (o.isMesh && o.material === old) o.material = m; });
       old.dispose();
@@ -1494,6 +1678,25 @@ export class Ship {
         if (mat[k]) { mat[k].anisotropy = maxAniso; mat[k].needsUpdate = true; }
       }
     }
+  }
+
+  // The hull's own shading: the deck's light, the micro-shadowing, the paint finish, the clear coat kept off the metal,
+  // the RG normal map read as RG. On the ship's physical material - and on a copy's: Material.clone() leaves
+  // onBeforeCompile behind, so a showroom ship (a copy of the one in memory) drew its RG normal map as RGB (z = -1:
+  // every normal turned inside out, the hull dark and its colours gone - "looks so bad compared to blender ... the
+  // colors are off" in the ship menu, on every ship). A copy's patch uses its own uniforms.
+  hullPatch(m) {
+    const rg = !!m.normalMap?.userData.rg;
+    m.onBeforeCompile = (sh) => {
+      deckPatch(sh, this.deckU);
+      microPatch(sh);
+      finishPatch(sh, this.lookU);
+      sh.fragmentShader = sh.fragmentShader.replace('#include <lights_physical_fragment>',
+        '#include <lights_physical_fragment>\n#ifdef USE_CLEARCOAT\n  material.clearcoat *= clamp(1.0 - metalnessFactor, 0.0, 1.0);\n#endif');
+      if (rg) sh.fragmentShader = rgNormalChunk(sh.fragmentShader);
+      sharpPatch(sh, this.edgeU);
+    };
+    m.customProgramCacheKey = () => (rg ? 'feather-hull-rg-sharp' : 'feather-hull-sharp');
   }
 
   paint(team) {
@@ -1549,6 +1752,7 @@ export class Ship {
     const v = new THREE.Vector3();
     let maxX = -1e9;
     const tipCandidates = [];
+    const env = new Map();               // the underside: the lowest point in each 0.4 m square of the plan
     this.model.traverse((o) => {
       if (!o.isMesh) return;
       const p = o.geometry.attributes.position;
@@ -1562,9 +1766,23 @@ export class Ship {
           if (v.x > maxX) maxX = v.x;
           tipCandidates.push(v.clone());
         }
+        const key = Math.round(v.x * 2.5) * 4096 + Math.round(v.z * 2.5), e = env.get(key);
+        if (!e || v.y < e.y) env.set(key, v.clone());
       }
     });
     this.probes = pts;
+    // the deck clearance's points (animate): the underside's lowest for every tilt it meets on the deck - straight down
+    // and 3 - 40 deg off it every 15 deg round (a lean with the nose dipped: the middle of the Anvil's belly edge went
+    // under, between the corners the 26 probes hold) - and those probes, each point once
+    const under = [...env.values()], seen = new Set(), lows = [];
+    const keep = (q) => { const k = q.toArray().join(); if (!seen.has(k)) { seen.add(k); lows.push(q); } };
+    pts.forEach(keep);
+    for (const t of [0, 3, 6, 10, 15, 22, 30, 40]) for (let a = 0; a < (t ? 24 : 1); a++) {
+      const r = Math.sin(t * Math.PI / 180), az = a * Math.PI / 12;
+      const d = v.set(r * Math.cos(az), -Math.cos(t * Math.PI / 180), r * Math.sin(az));
+      keep(under.reduce((m, q) => (q.dot(d) > m.dot(d) ? q : m)));
+    }
+    this.lows = lows;
     this.bottom = best[dirs.findIndex((d) => d.y < -0.99)];      // origin to the lowest point (m)
     const tip = tipCandidates.filter((p) => p.x > maxX - 0.05).reduce((a, b) => (b.z > a.z ? b : a));
     this.tipR = tip.clone();
@@ -1642,9 +1860,16 @@ export class Ship {
       if (this.mats[n]) this.mats[n].emissiveIntensity = this.glowBase[n] * ease(this.avionics);
     }
     for (const n of BAY_FILL) if (this.mats[n]) this.mats[n].emissiveIntensity = ease(this.avionics);
-    this.lookU.accentOn.value = 0.6 + 0.4 * Math.max(this.spin, ease(this.avionics));
+    // (the accent strips are drawn at the Feather's places: none on the Anvil)
+    this.lookU.accentOn.value = this.orbits.length ? 0 : 0.6 + 0.4 * Math.max(this.spin, ease(this.avionics));
     // the brake lights: red with the brake (or what the caller says is braking), if the setting has them on
     const lamp = Ship.brakeLights !== false ? smoothstep(0.08, 0.6, ctrl.brakeLight ?? brake) : 0;
+    if (this.orbits.length || this.pulses.length || this.lamps.length) this.updatePulse(dt, thr1, boost1, lamp, ctrl.speed || 0);
+    if (this.kind && LIVERIES[this.kind]) {        // the player's and the showroom's ships wear the chosen livery
+      const want = Ship.liveries?.[this.kind] || LIVERIES[this.kind].names[0];
+      if (want !== this.liveryShown) this.applyLivery(want);
+      this.edgeU.edgeOn.value = Ship.sharpEdges !== false && this.edgeU.edgeMap.value ? 1 : 0;
+    }
     if (this.partE.length) this.updateParts(0.03 + 0.97 * this.spin, drive, ease(this.avionics), lamp);     // (the same, atlased)
     // plumes and exhaust light
     const kick = Math.max(this.boostKick, this.accelKick * 0.6);   // a pad or a hard launch: the plumes flare, then settle
@@ -1659,6 +1884,19 @@ export class Ship {
     // differential thrust: in a turn the outer engine works harder (plumes[0] is the right nacelle, [1] the left)
     const st = clamp(ctrl.steer || 0, -1, 1);
     this.plumes.forEach((p, k) => p.update(this.t, this.spin, thrust * (k === 0 ? 1 - 0.4 * st : k === 1 ? 1 + 0.4 * st : 1), Math.min(1, boost + kick)));
+    if (this.pulseFx.length) {
+      // the pulse engine's jet: longer, hotter, kicking on every pulse; its rings and shock diamonds
+      const pk = this.pulseKick || 0;
+      for (const p of this.plumes) {
+        p.outer.scale.z *= 1.25 + 0.5 * pk;
+        p.inner.scale.z *= 1.3 + 0.6 * pk;
+        p.inner.material.uniforms.power.value *= 1.3 + 0.9 * pk;
+        p.outer.material.uniforms.power.value *= 1.15 + 0.5 * pk;
+        p.halo.scale.multiplyScalar(1.15 + 0.5 * pk);
+        p.haloA = Math.min(0.95, p.haloA * (1.2 + 0.9 * pk));
+      }
+      this.pulseFx.forEach((f) => f.update(dt, Ship.pulseRings === false ? 0 : this.spin, clamp(thr, 0, 1), Math.min(1, boost + kick), pk));
+    }
     // a hint of blue on the road under the nozzles (220 cd painted the whole road blue)
     for (const l of this.exhaustLights) l.intensity = 30 * this.spin * (0.25 + thrust);
     this.animate(dt, ctrl);
@@ -1680,6 +1918,117 @@ export class Ship {
     const tip = this._tip || (this._tip = new THREE.Vector3());
     this.trails[0].update(tip.copy(this.tipR).applyMatrix4(this.root.matrixWorld), s, camera);
     this.trails[1].update(tip.copy(this.tipL).applyMatrix4(this.root.matrixWorld), s, camera);
+  }
+
+  // The Anvil's pulse engines (look_heavy.py / heavy_engine.py). The core fires and each pulse runs out through the
+  // coils, the deepest stage first, to the mouth - a slow beat as the engine spools up, faster with the throttle, a
+  // strobe on the boost. The magnet balls: docked in their cups until the ship gets moving; then they lift off,
+  // fly out of the bores and swing into orbit round the housings (the export's LAUNCH path, in each anchor's frame:
+  // Blender axes, metres), faster with the throttle and the boost, the two engines' turning opposite ways; home again
+  // when it stops. The headlamp lights with the power, the tail lamp with the avionics and brighter on the brake.
+  updatePulse(dt, thr, boost, lamp, speed) {
+    const rate = this.spin * (0.9 + 2.6 * thr + 13 * boost);          // pulses a second
+    const ph0 = this.pulsePh ?? 0;
+    this.pulsePh = (ph0 + dt * rate) % 1e4;
+    // a pulse leaving the mouth: a ring out of each muzzle, the jet kicking with it
+    this.pulseKick = (this.pulseKick ?? 0) * Math.exp(-dt / 0.07);
+    if (rate > 0 && Math.floor(this.pulsePh - 0.68) !== Math.floor(ph0 - 0.68) && this.power > 0.2) {
+      for (const f of this.pulseFx) f.fire();
+      this.pulseKick = 1;
+    }
+    for (const p of this.pulses) {
+      const x = (((this.pulsePh - (p.stage < 0 ? 0 : 0.08 + 0.1 * p.stage)) % 1) + 1) % 1;
+      const k = Math.exp(-((x / 0.07) ** 2));
+      p.mat.emissiveIntensity = p.base * (0.03 + this.spin * (0.3 + 2.6 * k));
+    }
+    if (this.mats.BallGlow) this.mats.BallGlow.emissiveIntensity = (this.ballGlow ??= this.mats.BallGlow.emissiveIntensity * 0.6)
+      * (0.12 + 0.88 * this.spin) * (1 + 0.6 * boost);
+    // the balls stay home in their cups until the ship gets moving (the engine running is not enough: parked, on the
+    // grid and on the showroom's stand they sit docked), and go home when it stops again
+    if (!this.engineOn || this.power < 0.3) this.orbitGo = 0;
+    else if (speed > 6) this.orbitGo = 1;
+    else if (speed < 1.5) this.orbitGo = 0;
+    const want = this.orbitGo || 0;
+    this.orbitU = clamp((this.orbitU ?? 0) + (want ? dt / 1.1 : -dt / 1.6), 0, 1);
+    this.orbitA = ((this.orbitA ?? 0) + dt * this.spin * (1.6 + 1.6 * thr + 5.5 * boost)) % (Math.PI * 2000);
+    const u = this.orbitU, e2 = ease(clamp((u - 0.45) / 0.55, 0, 1));
+    for (const ob of this.orbits) {
+      const m = ob.m, P = m.launch;
+      let r = P[P.length - 1][1], d = P[P.length - 1][2];
+      for (let i = 0; i < P.length - 1; i++) {
+        const [u0, r0, d0] = P[i], [u1, r1, d1] = P[i + 1];
+        if (u <= u1) { const t = u1 > u0 ? ease((u - u0) / (u1 - u0)) : 1; r = r0 + (r1 - r0) * t; d = d0 + (d1 - d0) * t; break; }
+      }
+      for (const b of ob.balls) {
+        if (u <= 0) { b.node.position.copy(b.rest); continue; }
+        const a = b.phase + m.dir * e2 * (m.launch_twist + this.orbitA);
+        // (Blender (x, y, z) in the anchor -> three (x, z, -y))
+        b.node.position.set(r * Math.cos(a), m.z * e2 + r * Math.sin(a), -d);
+        b.node.rotation.x += dt * this.spin * (2 + 7 * boost);
+      }
+    }
+    for (const l of this.lamps) {
+      const base = this.lampBase[l.kind];
+      l.node.material.emissiveIntensity = l.kind === 'head' ? base * (0.05 + 0.95 * this.power)
+        : base * (0.25 * ease(this.avionics) + 2.2 * lamp);
+    }
+  }
+
+  // A ship's liveries (Settings, ships.js LIVERIES): its hull atlas's colour and roughness / metal maps swapped - the UVs,
+  // the normals and the occlusion are the same for all of them. The first is the GLB's own; the others load once (the
+  // largest size there is that is not over the ship's own atlas) and go on when both maps are in, so the hull never
+  // shows a half-loaded paint.
+  applyLivery(name) {
+    const m = this.mats.RacerBaked, LV = LIVERIES[this.kind];
+    this.liveryShown = name;
+    if (!m || !LV) return;
+    this.liveryTex ||= { [LV.names[0]]: { map: m.map, orm: m.roughnessMap } };
+    this.loadEdges(name, this.atlasW || LV.res[0]);
+    const put = (T) => {
+      const mm = this.mats.RacerBaked;              // (the material as it is then: upgradeMaterials replaces it)
+      if (!mm || this.liveryShown !== name) return;
+      mm.map = T.map;
+      mm.roughnessMap = mm.metalnessMap = mm.aoMap = T.orm;
+    };
+    if (this.liveryTex[name]) { if (this.liveryTex[name].ready !== false) put(this.liveryTex[name]); return; }
+    const fit = LV.res.filter((r) => r <= (this.atlasW || 8192)), res = fit.length ? Math.max(...fit) : Math.min(...LV.res);
+    const T = { ready: false }, L = new THREE.TextureLoader();
+    let n = 0;
+    const load = (f, srgb) => L.load(`assets/liveries/${this.kind}/${name}_${f}_${res / 1024}k.webp${BAKE}`, (t) => {
+      t.flipY = false;
+      t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      t.anisotropy = m.map.anisotropy;
+      t.wrapS = m.map.wrapS; t.wrapT = m.map.wrapT;
+      t.needsUpdate = true;
+      if (++n === 2) { T.ready = true; put(T); }
+    });
+    T.map = load('albedo', true);
+    T.orm = load('orm', false);
+    this.liveryTex[name] = T;
+  }
+
+  // A livery's edge map (sharpPatch), loaded once: on the hull while that livery is shown. Missing (an older ship
+  // file), the edges are drawn as baked.
+  loadEdges(name, res) {
+    const E = (this.edgeTex ||= {});
+    const put = () => {
+      if (this.liveryShown !== name || !E[name]?.image) return;
+      this.edgeU.edgeMap.value = E[name];
+      this.edgeU.edgeTexel.value.set(1 / E[name].image.width, 1 / E[name].image.height);
+    };
+    this.edgeU.edgeMap.value = null;
+    if (E[name] !== undefined) { if (E[name]) put(); return; }
+    E[name] = false;
+    new THREE.TextureLoader().load(`assets/liveries/${this.kind}/${name}_edges_${res / 1024}k.webp${BAKE}`, (t) => {
+      t.flipY = false;
+      t.colorSpace = THREE.NoColorSpace;
+      t.generateMipmaps = false;
+      t.minFilter = t.magFilter = THREE.LinearFilter;
+      t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+      t.needsUpdate = true;
+      E[name] = t;
+      put();
+    }, undefined, () => {});
   }
 
   // The animation layer on the visual group - never fed back to the physics:
@@ -1731,15 +2080,25 @@ export class Ship {
     const jr = (noise2(t * 4.5, 1.9) - 0.5) * 0.02 * j;
     this.visual.position.set(a.sway + jx + Math.sin(t * 61.0) * hz, a.lift + bob + buzz + jy + Math.sin(t * 53.0 + 1.0) * hz, 0);
     this.visual.rotation.set(a.pitch + rockX, a.yaw + a.yawOff, a.lean + rockZ + jr, 'YXZ');
-    // the low side stays clear of the deck however hard it leans ("when they steer the engines hit the ground"): the
-    // hull's extreme points under this frame's rotation; the body rises by whatever the lowest would go under the deck
-    // plus 30 cm. Visual only - the physics never sees it.
-    if (c.height != null && this.probes) {
+    // the low side stays clear of the deck however hard it leans ("when they steer the engines hit the ground"), and
+    // the ends and corners where the deck turns under the hull (a twist, a loop - c.deckHeight: each point's height
+    // over the deck at its own place along the track; else the deck is the plane under the middle): the hull's
+    // extreme points under this frame's rotation; the body rises by whatever the lowest would go under the deck plus
+    // 30 cm (a second pass: a rise along the hull's up is a little less along a turned deck's). Visual only - the
+    // physics never sees it.
+    if (c.height != null && this.lows) {
       _lq.setFromEuler(this.visual.rotation);
-      let low = Infinity;
-      for (const p of this.probes) low = Math.min(low, _lv.copy(p).applyQuaternion(_lq).y);
-      const under = -(this.bottom + c.height) + 0.3 - (low + this.visual.position.y);
-      if (under > 0) this.visual.position.y += under;
+      const deck = c.deckHeight, R = this.root;
+      for (let pass = 0; pass < 2; pass++) {
+        let under = 0;
+        for (const p of this.lows) {
+          _lv.copy(p).applyQuaternion(_lq).add(this.visual.position);
+          const h = deck ? deck(_lv.applyQuaternion(R.quaternion).add(R.position)) : _lv.y + this.bottom + c.height;
+          under = Math.max(under, 0.3 - h);
+        }
+        if (under <= 0.001) break;
+        this.visual.position.y += under;
+      }
     }
     const su = this.shield.material.uniforms;
     su.time.value = t;
@@ -1772,6 +2131,7 @@ export class Ship {
   // light missing from that list rendered as a black square)
   fxObjects() {
     return [...this.plumes, ...(this.retros || [])].flatMap((p) => [p.outer, p.inner, p.halo])
+      .concat((this.pulseFx || []).flatMap((f) => f.objects()))
       .concat(this.brakeLights || [], this.shield ? [this.shield] : [], (this.trails || []).map((t) => t.mesh),
         (this.engineTrails || []).map((t) => t.mesh), this.exhaust ? [this.exhaust.mesh] : []);
   }

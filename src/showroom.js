@@ -153,7 +153,7 @@ export class Showroom {
     addEventListener('pointerup', () => { drag = null; });
     addEventListener('wheel', (e) => {
       if (busy(e)) return;
-      this.dist = THREE.MathUtils.clamp(this.dist * Math.exp(e.deltaY * 0.001), 11, 34);
+      this.dist = THREE.MathUtils.clamp(this.dist * Math.exp(e.deltaY * 0.001), 11, 34 * (this.shownLen || 13.3) / 13.3);
     }, { passive: true });
   }
 
@@ -203,8 +203,13 @@ export class Showroom {
     this.id = id;
     for (const k in this.ships) this.hideBut(k, id);
     const s = await this.ensure(id);
+    s.kind = id;                                   // (which ship: its livery - Settings)
     if (this.id !== id) { s.root.visible = false; return; }
     s.root.visible = true;
+    // a bigger ship (the Anvil) stands further off: the view keeps its framing whichever ship is on the stand
+    const prev = this.shownLen || 13.3;
+    this.shownLen = s.length || 13.3;
+    this.dist = THREE.MathUtils.clamp(this.dist * this.shownLen / prev, 11, 40);
     s.setEngine(false);
     Object.assign(s, { canopyOpen: true, canopyT: 1, power: 0, spin: 0, avionics: 0 });
     this.startAt = this.t + 1.2;

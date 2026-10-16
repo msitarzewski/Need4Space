@@ -2,6 +2,17 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.7.0', date: '16 Oct 2026', name: 'The Anvil',
+    notes: [
+      'A third ship: the Anvil H1 - a heavy armoured lifting body, two pulse engines in its housings with magnet balls orbiting them, headlamps across its nose and a cockpit under the canopy',
+      'It flies heavy: a little slower off the line and in the turns, harder on the boost, and a knock costs it a third less',
+      'Three paints for every ship, chosen on the Ship screen (left / right, or click one) - the ship on the stand changes as you pick',
+      'Sharper ships up close: every ship\'s textures baked again - clean paint edges, smooth shading, no more blocky or pixelated patches in the showroom',
+      'Switches in Settings for the Anvil\'s pulse rings and for the sharp paint edges',
+      'No ship dips into the road any more where the track twists into a roll: the long hulls\' tail corners went under it',
+    ],
+  },
+  {
     version: '1.6.4', date: '16 Oct 2026', name: 'Where it lands',
     notes: [
       'The splashes of the rain stay where they hit: on the track and on the sea they no longer slide along with the camera as you race by',

@@ -1828,7 +1828,7 @@ const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck i
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck
 
 const _H = new THREE.Vector3(), _R = new THREE.Vector3(), _B = new THREE.Vector3(), _F = new THREE.Vector3();
-const _M = new THREE.Matrix4(), _Q = new THREE.Quaternion();
+const _M = new THREE.Matrix4(), _Q = new THREE.Quaternion(), _DV = new THREE.Vector3();
 
 export class TrackRacer {
   constructor(ship, track) {
@@ -1901,13 +1901,28 @@ export class TrackRacer {
   static drifting = true;              // settings: "Drift (brake + throttle in a corner)"
   static airPitch = true;              // settings: "Pitch in the air (nose down to land sooner)"
 
+  // a point's height over the deck at its own place along the track (world, m). The hull sits square to the deck
+  // under its middle, but a long, wide hull reaches metres fore and aft: where the deck twists into a roll its tail
+  // corners were already over deck turned up under them - the Anvil's sank 1.2 m into the road on the space circuit's
+  // twist. Off the deck (beyond its edges, over a cut): none under it.
+  deckHeight(w) {
+    const f = (this.dk ||= {});
+    let s = this.s + _DV.subVectors(w, this.pos).dot(this.f.T);         // (along the frame under the middle, then
+    this.track.frame(s, f);                                               // one step onto the point's own)
+    s += _DV.subVectors(w, f.P).dot(f.T);
+    this.track.frame(s, f);
+    _DV.subVectors(w, f.P);
+    return Math.abs(_DV.dot(f.R)) > TRACK_W / 2 || this.track.inGap(s) ? Infinity : _DV.dot(f.U);
+  }
+
   // what the animation layer reads each frame (the landing impulse is consumed)
   animState() {
     const land = this.landImp, yawKick = this.yawKick;
     this.landImp = 0;
     this.yawKick = 0;
     return { steer: this.steerS, lat: this.latS, accel: this.accS, vy: this.vy, airbrake: this.airIn, land, air: this.airT,
-      brake: this.brakeS || 0, yawKick, height: this.y, drift: this.driftS * (this.drift || this.driftSide || 0), slip: this.slip };
+      brake: this.brakeS || 0, yawKick, height: this.y, drift: this.driftS * (this.drift || this.driftSide || 0), slip: this.slip,
+      deckHeight: (this.deckFn ||= (w) => this.deckHeight(w)) };
   }
 
   get speed() { return Math.hypot(this.vs, this.vx, this.vy * 0.2); }

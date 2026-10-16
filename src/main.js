@@ -126,6 +126,7 @@ async function boot() {
   status(`Loading the ${SHIP_NAME}` + got);
   progress('ship', gotF);
   const ship = await shipLoad;
+  ship.kind = SHIP;                                        // (which ship: its livery - Settings)
   const rivalShip = rivalLoad ? await rivalLoad : ship;
   await world.ready;                                   // (a world's own models: the space station's - before the warm-up)
   ship.upgradeMaterials(renderer.capabilities.getMaxAnisotropy(), renderer);
@@ -223,6 +224,12 @@ async function boot() {
     const h = world.headlight;
     headlight.position.set(...h.pos); headlight.target.position.set(...h.at);
     Object.assign(headlight, { angle: h.angle, penumbra: h.penumbra, distance: h.distance });
+  }
+  // a ship with a headlamp of its own (the Anvil's band across its nose): the beam comes out of it, aimed as before
+  if (ship.headLampPos) {
+    const d = headlight.target.position.clone().sub(headlight.position);
+    headlight.position.copy(ship.headLampPos);
+    headlight.target.position.copy(ship.headLampPos).add(d);
   }
   ship.root.add(headlight, headlight.target);
   const rivalLights = [0, 1, 2].map(() => { const l = new THREE.PointLight(0xffffff, 0, 70, 1.6); l.userData.rivalLight = true; scene.add(l); return l; });
@@ -544,6 +551,10 @@ async function boot() {
     heat.enabled = v.engineHeat !== false;
     Ship.trailStyle = v.engineTrails || 'puffs';
     Ship.nozzleMotion = v.nozzleMotion !== false;
+    // each ship's paint (the player's and the showroom's ships take theirs: Ship.update; the rivals keep their teams')
+    Ship.liveries = { feather: v.featherLivery || 'classic', rocket: v.cometLivery || 'titanium', heavy: v.heavyLivery || 'hazard' };
+    Ship.pulseRings = v.pulseRings !== false;
+    Ship.sharpEdges = v.sharpEdges !== false;
     blurOn = v.blur;
     Ship.brakeLights = v.brakeLights;
     deck.k = v.deckLight !== false ? 1 : 0;           // the deck's light on the ships

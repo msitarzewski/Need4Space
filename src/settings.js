@@ -1,12 +1,13 @@
 // Settings (O): every look feature has a switch that changes the picture and costs what it costs; saved per browser.
 import { VERSION } from './changelog.js';
+import { LIVERIES, shipName } from './ships.js';
 
 const KEY = 'feather.settings.v4';
 export const DEFAULTS = { ship: 'feather', tonemap: 'aces', ao: true, bloom: true, shadows: 'high', scale: 1, exposure: 0, fps: true,
   blur: true, reflections: true, streaks: true, ai: 'easy', music: 'high', sfx: 'high', aa: 'smaa', aoRes: 'auto',
   brakeLights: true, laptop: false, touch: 'auto', map: 'space', shafts: true, lensWater: true, iceSnow: true, iceDust: true, aurora: true,
   iceStorm: true, iceGeysers: true, wreckFx: true, wreckMist: true, airPitch: true, sandFx: true, dustDevils: true, heatHaze: true,
-  sandstorm: true, caveFx: true, canyonAO: true, engineHeat: true, engineTrails: 'puffs', colossus: true, nozzleMotion: true, showroom: true,
+  sandstorm: true, caveFx: true, canyonAO: true, engineHeat: true, engineTrails: 'puffs', colossus: true, nozzleMotion: true, featherLivery: 'classic', cometLivery: 'titanium', heavyLivery: 'hazard', pulseRings: true, sharpEdges: true, showroom: true,
   deckLight: true, hullShadows: true, engineFaces: 'dark', shipPaint: 'gloss', shipTrim: 'dark', shipAccents: true,
   seaLife: true, seaReflect: true, oceanStorm: true, shipWet: true, kraken: true, oceanRain: true, oceanPillars: true };
 // Graphics quality presets ("low, which would be laptop, balanced in between, and high the actual default"): each sets
@@ -52,6 +53,9 @@ const ROWS = [
   ['engineHeat', 'Engine heat shimmer', [[true, 'On'], [false, 'Off']]],
   ['engineTrails', 'Engine trails', [['puffs', 'Glowing gas'], ['ribbon', 'Light ribbons']]],
   ['nozzleMotion', 'Rocket nozzle: spinning, folding teeth (Comet)', [[true, 'On'], [false, 'Off']]],
+  ...Object.entries(LIVERIES).map(([id, L]) => [L.key, `${shipName(id)} livery`, L.names.map((n, k) => [n, L.labels[k]])]),
+  ['pulseRings', 'Pulse engine rings and shock diamonds (Anvil)', [[true, 'On'], [false, 'Off']]],
+  ['sharpEdges', 'Sharp paint edges up close', [[true, 'On'], [false, 'Off']]],
   ['showroom', 'Ship screen: the ships in a showroom', [[true, 'On'], [false, 'Off']]],
   ['streaks', 'Light streaks', [[true, 'On'], [false, 'Off']]],
   ['blur', 'Speed blur', [[true, 'On'], [false, 'Off']]],
