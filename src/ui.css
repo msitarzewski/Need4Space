@@ -192,6 +192,23 @@ body.lite .hp { background: linear-gradient(115deg, rgba(9, 13, 19, 0.86), rgba(
 #hulv { font: 900 1.5rem/1 var(--display); color: #fff; text-align: right; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
 #hulv::after { content: '%'; font-size: 0.55em; color: var(--dim); margin-left: 0.1em; }
 #hullbar.hit #hulv { animation: hull-num 0.5s ease-out; }
+/* the rivals the player has just hurt: their hull over them for 3 s (hud.js tags), edged in their team colour */
+#tags { position: absolute; inset: 0; overflow: hidden; }
+#tags .tag { position: absolute; left: 0; top: 0; width: 5.6rem; height: 0.5rem; padding: 2px; opacity: 0;
+  background: rgba(9, 13, 19, 0.65); border: 1px solid rgba(255, 255, 255, 0.28); border-left: 3px solid var(--c, #fff);
+  transform: translate(-50%, -100%); will-change: transform, opacity; }
+#tags .tag i { display: block; height: 100%; transform-origin: left; background: #8ff0c0; transition: transform 0.25s ease-out; }
+#tags .tag[data-band="amber"] i { background: #ffc24a; }
+#tags .tag[data-band="red"] i { background: #ff5a46; }
+/* the airbrake attack in reach: a chevron on that side (the arrow key / airbrake to push with) */
+#atkhint i { position: absolute; top: 52%; width: 2.6rem; height: 2.6rem; margin-top: -1.3rem; opacity: 0;
+  border: solid #ff8a3a; border-width: 0 0.55rem 0.55rem 0; filter: drop-shadow(0 0 0.6rem #ff6a20);
+  transition: opacity 0.12s, transform 0.12s; }
+#atkhint i.l { left: 28%; transform: rotate(135deg) scale(0.75); }
+#atkhint i.r { right: 28%; transform: rotate(-45deg) scale(0.75); }
+#atkhint[data-side="l"] i.l { opacity: 1; transform: rotate(135deg) scale(1); }
+#atkhint[data-side="r"] i.r { opacity: 1; transform: rotate(-45deg) scale(1); }
+#hud:not([data-kind="race"]) #tags, #hud:not([data-kind="race"]) #atkhint { display: none; }
 @keyframes hull-num { 0% { color: #ff6a50; transform: scale(1.25); } 100% { color: #fff; transform: none; } }
 /* the drift's charge: there while drifting, its colour the step reached */
 .meter.drift { opacity: 0; transition: opacity 0.25s; }

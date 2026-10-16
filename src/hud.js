@@ -232,6 +232,26 @@ export class HUD {
       if (ready !== this.abReady) { $('abr').parentElement.classList.toggle('ready', ready); this.abReady = ready; }
       this.ab = ab;
     }
+    // the rivals the player has just hurt: a hull bar over each (main.js tags: screen x, y 0..1, fading in and out)
+    {
+      const box = $('tags'), seen = new Set();
+      this.tagEls ||= new Map();
+      for (const t of s.tags || []) {
+        let el = this.tagEls.get(t.id);
+        if (!el) { el = document.createElement('div'); el.className = 'tag'; el.innerHTML = '<i></i>'; box.appendChild(el); this.tagEls.set(t.id, el); }
+        seen.add(t.id);
+        el.style.transform = `translate(${(t.x * innerWidth).toFixed(1)}px, ${(t.y * innerHeight).toFixed(1)}px) translate(-50%, -100%)`;
+        el.style.opacity = t.a.toFixed(2);
+        el.style.setProperty('--c', t.css);
+        el.firstChild.style.transform = `scaleX(${Math.max(0, t.hp).toFixed(3)})`;
+        const band = t.hp < 0.25 ? 'red' : t.hp < 0.5 ? 'amber' : '';
+        if (el.dataset.band !== band) el.dataset.band = band;
+      }
+      for (const [id, el] of this.tagEls) if (!seen.has(id) && el.style.opacity !== '0') el.style.opacity = '0';
+    }
+    // the airbrake attack in reach: a chevron on that side of the screen
+    const hint = s.atkHint > 0 ? 'r' : s.atkHint < 0 ? 'l' : '';
+    if (hint !== this.hint) { $('atkhint').dataset.side = hint; this.hint = hint; }
     // the hull (the bar along the bottom): full .. empty, amber under half, red under a quarter, the ghost colour while
     // a wreck is flown through. A hit flares it and the chunk it took lingers before draining (the trail); filled again
     // (a wreck's new hull, a new race) the trail jumps with it

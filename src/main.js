@@ -41,6 +41,7 @@ import { Showroom } from './showroom.js';
 const MAP = { meadow: 'meadow', forest: 'forest', space: 'space', ice: 'ice', desert: 'desert', ocean: 'ocean' }[new URLSearchParams(location.search).get('map') || savedSettings().map] || 'space';
 // the ship: the one chosen in the menu (saved), or ?ship=feather / rocket (ships.js); its model by memory tier
 const SHIP = shipChoice(savedSettings().ship), SHIP_URL = SHIP_URLS[SHIP], SHIP_NAME = shipName(SHIP);
+const TAG_P = new THREE.Vector3();
 const LUTS = ['assets/agx_punchy_lut65.bin', 'assets/agx_mhc_lut65.bin'];   // Blender's AgX looks: Punchy, Medium High Contrast
 const status = (t) => (document.getElementById('loadtext').textContent = t);
 // The loading bar: each step's share of it (by how long it usually takes) and how far into it. The page's first script
@@ -1094,7 +1095,22 @@ async function boot() {
     else if (ship.engineOn) { state = ctl.boosting > 0.5 ? 'BOOST' : (mode === 'race' ? 'RACE' : 'FREE FLIGHT'); cls = 'ok'; }
     else if (ship.power > 0.01) { state = 'SHUTTING DOWN'; cls = 'warn'; }
     const f = ctl.forward;
-    hud.update(dt, { speed: ctl.speed, agl: MAP !== 'meadow' && mode === 'free' ? NaN : ctl.agl, throttle: ctl.throttle,
+    // the rivals the player has just hurt: their hull over them (3 s, fading); the attack in reach: an arrow that side
+    // (an airbrake charge ready)
+    const tags = [];
+    let atkHint = 0;
+    if (race && mode === 'race' && race.racing) {
+      for (const e of race.entries) {
+        const age = race.time - (e.playerHitT ?? -99);
+        if (e.player || age < 0 || age > 3) continue;
+        TAG_P.set(0, 3.6, 0).applyQuaternion(e.ship.root.quaternion).add(e.ship.root.position).project(camera);
+        if (TAG_P.z > 1 || Math.abs(TAG_P.x) > 1.05 || Math.abs(TAG_P.y) > 1.05) continue;
+        tags.push({ id: e.idx, x: (TAG_P.x + 1) / 2, y: (1 - TAG_P.y) / 2, hp: e.racer.health / e.racer.maxHealth,
+          a: Math.min(1, age / 0.12, (3 - age) / 0.5), css: e.team.css });
+      }
+      if ((inp.airCharge ?? 1) * (inp.airCharges || 1) >= 0.999) atkHint = race.attackSide();
+    }
+    hud.update(dt, { speed: ctl.speed, agl: MAP !== 'meadow' && mode === 'free' ? NaN : ctl.agl, throttle: ctl.throttle, tags, atkHint,
       boostEnergy: ctl.boostEnergy, boosting: ctl.boosting, airCharge: inp.airCharge, airCharges: inp.airCharges, state, stateClass: cls, camera: rig.name, assist: ctl.assist,
       health: mode === 'race' && racer ? racer.health / racer.maxHealth : null, ghost: mode === 'race' && racer ? racer.ghost : 0,
       drifting: mode === 'race' && !!ctl.drift, driftCharge: ctl.driftCharge, driftTier: ctl.driftTier || 0, driftChain: ctl.chain || 0,

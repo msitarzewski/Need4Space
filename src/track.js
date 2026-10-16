@@ -1838,14 +1838,15 @@ export const damageSpeed = (v) => clamp((Math.abs(v) - DAMAGE.v0) / (DAMAGE.v1 -
 // more stable, so its like an attack"; "actually shoves in them when in range"). Fired toward a hull alongside -
 // overlapping along, at most range m of air between them across - the ship slides across into it: level, its nose
 // held straight (the airbrake press goes into the push - no turn, no drag until let go: TrackRacer airSpent), eased up to lunge m/s at
-// lungeAcc m/s2, for lungeT s or until they meet ("it should move ... not jump on a wing"). The blow ("it should
-// literally push the enemy in the opposite direction ... make it more punchy"): the other thrown slamShove m/s away
-// (at most cap) and knocked loose - its grip down to loose of itself, back over knock s, so it slides right across -
+// lungeAcc m/s2, for lungeT s or until they meet ("it should move ... not jump on a wing"). The blow ("literally
+// smashing in it", "push the enemy in the opposite direction ... more punchy"): the attacker drives on through it,
+// pressing for push s more, the other thrown ahead of it - at the attacker's speed across and slamShove m/s more (at
+// most cap) - and knocked loose (its grip down to loose of itself, back over knock s), so it slides right across -
 // turned off its heading (slamYaw rad), slowed (slamLoss of its speed), dmg times a knock's damage (a knock of at
 // least slamMin m/s); the attacker stops across and holds its line, keep of its share of the damage. An airbrake out
 // toward a hull already touching (no slide): the lighter shove / loss / min.
-export const ATTACK = { range: 7, lunge: 24, lungeAcc: 220, lungeT: 0.45, slamShove: 40, cap: 50, knock: 0.6, loose: 0.2,
-  slamYaw: 0.16, slamLoss: 0.09, slamMin: 22, shove: 20, loss: 0.06, min: 16, dmg: 4, keep: 0.3 };
+export const ATTACK = { range: 7, lunge: 30, lungeAcc: 320, lungeT: 0.5, push: 0.22, slamShove: 14, cap: 50, knock: 0.6,
+  loose: 0.2, slamYaw: 0.16, slamLoss: 0.09, slamMin: 22, shove: 20, loss: 0.06, min: 16, dmg: 4, keep: 0.3 };
 const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck
 

@@ -542,6 +542,8 @@ export class Race {
     }
     if (ev.type === 'damage') {
       if (ev.why === 'wall') e.dmgWall += ev.amount; else e.dmgShip += ev.amount;
+      // (thrown into a wall by the player's hit: still the player's doing - its hull stays up over it)
+      if (!e.player && this.time - (e.playerHitT ?? -99) < 2) e.playerHitT = this.time;
       this.events.push({ type: 'damage', amount: ev.amount, why: ev.why, at: ev.at, player: e.player, entry: e });
     }
     if (ev.type === 'wreck') {
@@ -621,20 +623,31 @@ export class Race {
         else r.vx += r.lunge.dir * Math.min(Math.max(0, ATTACK.lunge - r.lunge.dir * r.vx), ATTACK.lungeAcc * dt);
       }
       if (!a || a === was || r.ghost > 0 || r.y > 4 || e.finished || (e.player ? !playerActive : !e.driver?.attacking)) continue;
-      let best = null, bx = Infinity;
-      for (const o of this.entries) {
-        if (o === e || o.racer.ghost > 0 || (o.player && !playerActive) || Math.abs(o.racer.y - r.y) > 4) continue;
-        const ds = this.gap(o.racer.s, r.s), dx = (o.racer.x - r.x) * a;
-        if (Math.abs(ds) > this.len(e, o) * 0.9 || dx <= 0) continue;
-        const air = dx - this.wid(e, o), range = e.rank <= 3 && o.rank <= 3 ? ATTACK.range + 2 : ATTACK.range;
-        if (air <= range && air < bx) { bx = air; best = o; }
-      }
+      const best = this.reach(e, a, playerActive)?.o;
       if (!best) continue;
       r.lunge = { dir: a, t: ATTACK.lungeT };
       r.airSpent = a;
       this.events.push({ type: 'lunge', entry: e, dir: a, player: e.player });
     }
   }
+
+  // the nearest hull in reach of e's airbrake attack on side dir (+1 right, -1 left, 0 either): { o, side } or null
+  reach(e, dir = 0, playerActive = true) {
+    const r = e.racer;
+    if (r.ghost > 0 || r.y > 4 || e.finished) return null;
+    let best = null, bx = Infinity;
+    for (const o of this.entries) {
+      if (o === e || o.racer.ghost > 0 || (o.player && !playerActive) || Math.abs(o.racer.y - r.y) > 4) continue;
+      const ds = this.gap(o.racer.s, r.s), dx = o.racer.x - r.x, side = Math.sign(dx) || 1;
+      if (Math.abs(ds) > this.len(e, o) * 0.9 || (dir && side !== dir)) continue;
+      const air = Math.abs(dx) - this.wid(e, o), range = e.rank <= 3 && o.rank <= 3 ? ATTACK.range + 2 : ATTACK.range;
+      if (air <= range && air < bx) { bx = air; best = { o, side }; }
+    }
+    return best;
+  }
+
+  // the side a hull is in reach of the player's airbrake attack (the HUD's arrow): +1 right, -1 left, 0 none
+  attackSide() { return this.racing ? this.reach(this.player)?.side || 0 : 0; }
 
   // a ghost's time runs out only clear of every other hull (it would come back solid inside one)
   unghost() {
@@ -655,6 +668,8 @@ export class Race {
   ram(ea, eb, v, atk = 0) {
     const k = DAMAGE.ship * Math.max(0, v - DAMAGE.shipGraze) * damageSpeed(Math.max(ea.racer.vs, eb.racer.vs));
     if (k <= 0) return;
+    if (ea.player) eb.playerHitT = this.time;          // (the HUD: the hull of a rival the player has just hurt)
+    if (eb.player) ea.playerHitT = this.time;
     ea.racer.hurt(k * (eb.racer.handling.ram || 1) * (atk < 0 ? ATTACK.dmg : atk > 0 ? ATTACK.keep : 1), 'ship');
     eb.racer.hurt(k * (ea.racer.handling.ram || 1) * (atk > 0 ? ATTACK.dmg : atk < 0 ? ATTACK.keep : 1), 'ship');
   }
@@ -712,12 +727,13 @@ export class Race {
             if (atk) {                                         // the attack's blow: the other shoved off and slowed
               const att = atk > 0 ? A : B, vic = atk > 0 ? B : A, out = atk > 0 ? sx : -sx;
               slam = !!att.lunge;
-              if (slam) {                                      // thrown across, knocked loose and off its heading; the
-                vic.vx = out * Math.min(Math.max(out * vic.vx, 0) + ATTACK.slamShove, ATTACK.cap);   // attacker stops dead
+              if (slam) {                                      // smashed into: thrown ahead of the attacker, knocked loose
+                const drive = Math.max(out * att.vx, ATTACK.lunge * 0.8);       // and off its heading; the attacker
+                vic.vx = out * Math.min(Math.max(out * vic.vx, drive) + ATTACK.slamShove, ATTACK.cap);   // presses on a moment
                 vic.knocked = ATTACK.knock;
                 const kick = out * ATTACK.slamYaw;
                 vic.psi += kick; vic.yawKick += kick;
-                att.vx *= 0.15; att.lunge = null;
+                att.lunge.t = Math.min(att.lunge.t, ATTACK.push);
               } else { vic.vx = out * Math.min(Math.max(out * vic.vx, 0) + ATTACK.shove, ATTACK.cap); vic.knocked = ATTACK.knock * 0.5; }
               vic.slow = (vic.slow || 0) + vic.vs * (slam ? ATTACK.slamLoss : ATTACK.loss) * vic.handling.impact;
               v = slam ? ATTACK.slamMin : ATTACK.min;          // (the blow is the attack's own size, not the closing speed)
