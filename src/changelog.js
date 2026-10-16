@@ -2,6 +2,12 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.6.4', date: '16 Oct 2026', name: 'Where it lands',
+    notes: [
+      'The splashes of the rain stay where they hit: on the track and on the sea they no longer slide along with the camera as you race by',
+    ],
+  },
+  {
     version: '1.6.3', date: '16 Oct 2026', name: 'Into the clouds',
     notes: [
       'The alien pillars go up out of sight: kilometres tall and far broader, they rise into the cloud and vanish - nobody sees where they end',

@@ -1033,9 +1033,7 @@ export class OceanWorld {
         }
         lamps.sort((a, b) => a.d - b.d);
       }
-      const fr = (this._rainFr ||= Array.from({ length: 4 }, () => ({})));
-      fr.forEach((f, i) => this.track.frame(this.track.wrap(s - 15 + i * 25), f));
-      this.rain.update(t, dt, camera, under, lamps, fr, this.ocean.U.seTime.value);
+      this.rain.update(t, dt, camera, under, lamps, this.track, s, this.ocean.U.seTime.value);
       if (this.track.deckRainU) this.track.deckRainU.deckTime.value = t;
       this.ocean.U.seRain.value = under ? 0 : 1;
       this.rainLevel = under ? 0 : 1;                   // (its sound: audio.js)

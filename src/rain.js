@@ -4,6 +4,8 @@
 //    speed they fly at the lens), faint but where light catches them: the moon's glow ahead, the ships' headlights
 //  - splashes leaping off the deck round the camera, each a crown of droplets for a moment, then somewhere else
 //  - splashes off the sea round the camera: a crown and a jet up out of the middle of it, on the swell itself
+// Each splash stays where it hit for its life: its spot is fixed in the world (an arc length on the deck, a point on the
+// sea), only the choice of spots goes round with the camera, wrapping where none are drawn.
 // None under the sea. (The rings the drops make on the sea are the sea's own: sea.js, seRain.)
 import * as THREE from 'three';
 import { mulberry32 } from './noise.js';
@@ -14,7 +16,9 @@ import { TRACK_W } from './track.js';
 export const RAIN_WIND = new THREE.Vector3(3.5, 0, -2.0);       // the wind carrying it (m/s)
 const FALL = 11;                                                    // how fast it falls (m/s)
 const BOX = 70, BOXV = 40;                                          // the box of it round the camera (m)
-const SPAN = 75, SEGS = 3;                                          // the splashes: the stretch of deck (m), its pieces
+const SPAN = 75, AHEAD = 22.5, DSTEP = 10, NF = 10;               // the deck's splashes: the stretch (m), its middle
+                                                                    // past the ship, its frames (every DSTEP m)
+const SEA_BOX = 232;                                                // the sea's splashes: the square round the camera
 
 // the light a drop catches (dir: from the camera to it): the night's own, the moon's glow looking toward it, a ship's
 // headlight shining through it (hP: where the lamp is, w its strength; hF: the way it shines)
@@ -91,19 +95,23 @@ export class Rain {
           gl_FragColor = vec4(vC * m * vA, 1.0);
         }`,
     }));
-    // ---- the splashes on the deck: each in turn at a new place on the stretch ahead of the camera, a crown of droplets
-    // thrown up and falling back over a fifth of a second (the deck's line: dP / dR / dU at SEGS + 1 points along it)
+    // ---- the splashes on the deck: each in turn at a new place on the stretch round the ship, a crown of droplets
+    // thrown up and falling back over a fifth of a second. The place is an arc length of the track's own (dSpan divides
+    // its length, so a lap ends where it began), taken round the stretch's middle dC: it stays put while the ship goes
+    // by. The deck there: dP / dR / dU, NF frames every dStep m of the same arc length from dC + dF0.
     const NP = Math.round(1600 * dens);
-    this.dP = Array.from({ length: SEGS + 1 }, () => new THREE.Vector3(0, -1e5, 0));
-    this.dR = Array.from({ length: SEGS + 1 }, () => new THREE.Vector3(1, 0, 0));
-    this.dU = Array.from({ length: SEGS + 1 }, () => new THREE.Vector3(0, 1, 0));
+    this.dP = Array.from({ length: NF }, () => new THREE.Vector3(0, -1e5, 0));
+    this.dR = Array.from({ length: NF }, () => new THREE.Vector3(1, 0, 0));
+    this.dU = Array.from({ length: NF }, () => new THREE.Vector3(0, 1, 0));
+    this.deckU = { dSpan: { value: SPAN }, dStep: { value: DSTEP }, dC: { value: 0 }, dF0: { value: 0 } };
+    this._f = {};
     this.splashes = new THREE.Mesh(quads(NP, (r) => [r(), r(), r(), r()], 6262), new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-      uniforms: { ...U, dP: { value: this.dP }, dR: { value: this.dR }, dU: { value: this.dU } },
+      uniforms: { ...U, ...this.deckU, dP: { value: this.dP }, dR: { value: this.dR }, dU: { value: this.dU } },
       vertexShader: /* glsl */`
         ${SEA_GLSL}
         ${LIGHT}
-        uniform float time, k; uniform vec3 cam; uniform vec3 dP[${SEGS + 1}], dR[${SEGS + 1}], dU[${SEGS + 1}];
+        uniform float time, k, dSpan, dStep, dC, dF0; uniform vec3 cam; uniform vec3 dP[${NF}], dR[${NF}], dU[${NF}];
         attribute vec4 seed;
         varying vec2 vUv; varying float vA, vT; varying vec3 vC; varying vec2 vJ;
         vec2 rnH(vec2 p) { p = mod(p, 289.0); return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453); }
@@ -111,15 +119,16 @@ export class Rain {
           vUv = uv;
           float per = 0.5 + 0.7 * seed.w, cyc = time / per + seed.z, life = fract(cyc) * per;
           vec2 h = rnH(seed.xy * 97.0 + floor(cyc) * 1.37);
-          float along = h.x * ${(SPAN / SEGS).toFixed(3)} * ${SEGS.toFixed(1)}, lat = (h.y * 2.0 - 1.0) * ${(TRACK_W / 2 - 0.8).toFixed(2)};
-          float fi = min(floor(along / ${(SPAN / SEGS).toFixed(3)}), ${(SEGS - 1).toFixed(1)}), f = along / ${(SPAN / SEGS).toFixed(3)} - fi;
+          float rel = mod(h.x * dSpan - dC + dSpan * 0.5, dSpan) - dSpan * 0.5, lat = (h.y * 2.0 - 1.0) * ${(TRACK_W / 2 - 0.8).toFixed(2)};
+          float x = (rel - dF0) / dStep, fi = clamp(floor(x), 0.0, ${(NF - 2).toFixed(1)}), f = clamp(x - fi, 0.0, 1.0);
           int i = int(fi);
           vec3 P = mix(dP[i], dP[i + 1], f), R = normalize(mix(dR[i], dR[i + 1], f)), Up = normalize(mix(dU[i], dU[i + 1], f));
           vec3 base = P + R * lat + Up * 0.03;
           vT = clamp(life / 0.2, 0.0, 1.0);
           float a = (1.0 - smoothstep(0.12, 0.2, life)) * smoothstep(0.0, 0.015, life) * step(SE_Y + 0.5, base.y) * k;
           vec3 toCam = cam - base; float d = length(toCam);
-          a *= smoothstep(70.0, 40.0, d) * smoothstep(1.5, 4.0, d);
+          // (fading in as the stretch's front comes up to it, out before its back: never a pop where the choice wraps)
+          a *= smoothstep(70.0, 40.0, d) * smoothstep(1.5, 4.0, d) * smoothstep(0.5, 0.36, rel / dSpan) * smoothstep(-0.5, -0.46, rel / dSpan);
           vec3 side = normalize(cross(Up, toCam / max(d, 1e-3)));
           float wd = 0.26 + 0.55 * vT, ht = 0.08 + 0.3 * smoothstep(0.0, 0.5, vT);
           vJ = h * 6.2831853;
@@ -144,9 +153,10 @@ export class Rain {
           gl_FragColor = vec4(vC * min(1.0, arc + foot) * vA, 1.0);
         }`,
     }));
-    // ---- the splashes on the sea: each at a new place in a disc round the camera every so often, on the swell there
-    // (the sea's own waves: seHeight), a crown thrown up and a jet out of its middle, over a quarter of a second
-    const NW = Math.round(1400 * dens);
+    // ---- the splashes on the sea: each at a new place round the camera every so often, on the swell there (the sea's
+    // own waves: seHeight), a crown thrown up and a jet out of its middle, over a quarter of a second. The place is a
+    // point of the sea, fixed: the square of them round the camera wraps past the furthest drawn (115 m)
+    const NW = Math.round(2000 * dens);
     this.seaU = { seT: { value: 0 } };
     this.seaSplashes = new THREE.Mesh(quads(NW, (r) => [r(), r(), r(), r()], 7373), new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -162,8 +172,7 @@ export class Rain {
           vUv = uv;
           float per = 0.6 + 0.8 * seed.w, cyc = time / per + seed.z, life = fract(cyc) * per;
           vec2 h = rnH(seed.xy * 97.0 + floor(cyc) * 1.37);
-          float ang = h.x * 6.2831853, rad = 4.0 + sqrt(h.y) * 110.0;
-          vec2 xz = cam.xz + vec2(cos(ang), sin(ang)) * rad;
+          vec2 xz = mod(h * ${SEA_BOX.toFixed(1)} - cam.xz + ${(SEA_BOX / 2).toFixed(1)}, ${SEA_BOX.toFixed(1)}) - ${(SEA_BOX / 2).toFixed(1)} + cam.xz;
           vec3 base = vec3(xz.x, seHeight(xz, seT), xz.y);
           vT = clamp(life / 0.26, 0.0, 1.0);
           float a = (1.0 - smoothstep(0.16, 0.26, life)) * smoothstep(0.0, 0.015, life) * k;
@@ -204,9 +213,9 @@ export class Rain {
   setOn(on) { this.on = on; for (const m of this.meshes) m.visible = on; }
 
   // every frame: the camera (its speed draws the streaks out), under the sea or not, the ships' headlights
-  // ([{ pos, fwd, power }], nearest first), the deck's line ahead of the camera (frames: SEGS + 1 of { P, R, U })
+  // ([{ pos, fwd, power }], nearest first), the track and the ship's arc length on it (where the deck's splashes go)
   // seT: the sea's own clock (its swell: where a splash on it stands)
-  update(t, dt, camera, under, lamps, frames, seT = t) {
+  update(t, dt, camera, under, lamps, track, s, seT = t) {
     const U = this.U;
     U.time.value = t;
     this.seaU.seT.value = seT;
@@ -220,6 +229,14 @@ export class Rain {
       const L = lamps[i];
       if (L) { U.hP.value[i].set(L.pos.x, L.pos.y, L.pos.z, L.power); U.hF.value[i].copy(L.fwd); } else U.hP.value[i].set(0, -1e5, 0, 0);
     }
-    frames.forEach((f, i) => { this.dP[i].copy(f.P); this.dR[i].copy(f.R); this.dU[i].copy(f.U); });
+    // the deck round the stretch: its frames on a grid of the track's own arc length (the step divides its length too)
+    const D = this.deckU, L = track.length;
+    if (this._L !== L) { this._L = L; D.dSpan.value = L / Math.max(1, Math.round(L / SPAN)); D.dStep.value = L / Math.round(L / DSTEP); }
+    const c = track.wrap(s + AHEAD), st = D.dStep.value, s0 = Math.floor((c - D.dSpan.value / 2) / st) * st;
+    D.dC.value = c; D.dF0.value = s0 - c;
+    for (let i = 0; i < NF; i++) {
+      const f = track.frame(track.wrap(s0 + i * st), this._f);
+      this.dP[i].copy(f.P); this.dR[i].copy(f.R); this.dU[i].copy(f.U);
+    }
   }
 }
