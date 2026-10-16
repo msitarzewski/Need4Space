@@ -1836,13 +1836,16 @@ export const DAMAGE = { wall: 1.0, graze: 6, cap: 24, ship: 0.15, shipGraze: 5, 
 export const damageSpeed = (v) => clamp((Math.abs(v) - DAMAGE.v0) / (DAMAGE.v1 - DAMAGE.v0), 0, 1.4);
 // The airbrake as a weapon ("air brake on the side when next to an enemy should go harder on them and keep the ship
 // more stable, so its like an attack"; "actually shoves in them when in range"). Fired toward a hull alongside -
-// overlapping along, at most range m of air between them across - the ship throws itself at it: a lunge across at
-// lunge m/s (held for lungeT s or until they meet). The blow: the other shoved slamShove m/s away and turned off its
-// heading (slamYaw rad), slowed (slamLoss of its speed), dmg times a knock's damage (a knock of at least slamMin
-// m/s); the attacker stops its lunge and holds its line, keep of its share of the damage. An airbrake out toward a
-// hull already touching (no lunge): the lighter shove / loss / min.
-export const ATTACK = { range: 7, lunge: 24, lungeT: 0.45, slamShove: 18, slamYaw: 0.16, slamLoss: 0.09, slamMin: 22,
-  shove: 7, loss: 0.06, min: 16, dmg: 4, keep: 0.3 };
+// overlapping along, at most range m of air between them across - the ship slides across into it: level, its nose
+// held straight (the airbrake press goes into the push - no turn, no drag until let go: TrackRacer airSpent), eased up to lunge m/s at
+// lungeAcc m/s2, for lungeT s or until they meet ("it should move ... not jump on a wing"). The blow ("it should
+// literally push the enemy in the opposite direction ... make it more punchy"): the other thrown slamShove m/s away
+// (at most cap) and knocked loose - its grip down to loose of itself, back over knock s, so it slides right across -
+// turned off its heading (slamYaw rad), slowed (slamLoss of its speed), dmg times a knock's damage (a knock of at
+// least slamMin m/s); the attacker stops across and holds its line, keep of its share of the damage. An airbrake out
+// toward a hull already touching (no slide): the lighter shove / loss / min.
+export const ATTACK = { range: 7, lunge: 24, lungeAcc: 220, lungeT: 0.45, slamShove: 40, cap: 50, knock: 0.6, loose: 0.2,
+  slamYaw: 0.16, slamLoss: 0.09, slamMin: 22, shove: 20, loss: 0.06, min: 16, dmg: 4, keep: 0.3 };
 const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck
 
@@ -1941,7 +1944,7 @@ export class TrackRacer {
     const at = this.pos.clone();
     if (this.drift) this.endDrift(false);
     this.vs = 0; this.vx = 0; this.psi = 0; this.yawRate = 0; this.slow = 0; this.driftKick = 0;
-    this.throttle = 0; this.boosting = 0; this.lunge = null;
+    this.throttle = 0; this.boosting = 0; this.lunge = null; this.airSpent = 0;
     this.health = this.maxHealth;
     this.ghost = DAMAGE.ghost;
     this.emit({ type: 'wreck', at });
@@ -1988,7 +1991,14 @@ export class TrackRacer {
     // for 1.4 s before any braking); W spools back up in under a second
     const braking = ship.ready && inp.throttleDown > 0.5;
     const air = this.y > HOVER + 1.2, flipU = tr.flipAt(this.s);
-    const steer = clamp(inp.yaw + inp.roll, -1, 1), brakeL = inp.airL > 0.5 ? 1 : 0, brakeR = inp.airR > 0.5 ? 1 : 0;
+    const steer = clamp(inp.yaw + inp.roll, -1, 1);
+    let brakeL = inp.airL > 0.5 ? 1 : 0, brakeR = inp.airR > 0.5 ? 1 : 0;
+    this.airRaw = brakeR - brakeL;                      // (the airbrake as pressed: an attack starts on it - race.js)
+    // a press spent on an attack (race.js airSpent): it went into the push - no turn, no drag, the hull level - and it
+    // does nothing more until it is let go
+    if (this.airSpent && this.airRaw !== this.airSpent) this.airSpent = 0;
+    if (this.airSpent) brakeL = brakeR = 0;
+    if (this.knocked > 0) this.knocked = Math.max(0, this.knocked - dt);    // (knocked loose by an attack: grip comes back)
     // the drift: the brake touched and the stick thrown over, on the deck at speed; held while the slide lasts and a
     // pedal is down, ended by catching it (or a rival saying so)
     const pressing = inp.throttleAxis != null ? inp.throttleAxis > 0.5 : inp.throttleUp > 0.5;
@@ -2064,7 +2074,8 @@ export class TrackRacer {
     // the slide's speed turned forward - a slide never gains speed, it drags with its angle
     const along = this.vs * hs + this.vx * hx, across = -this.vs * hx + this.vx * hs;
     const push = this.drift ? clamp(steer * this.drift, 0, 1) : 0;    // steered into the slide (else it grips again)
-    let kept = across * Math.exp(-(air ? 0.4 : gripAt(sp / vR) * vR * H.turn * (1 - (1 - DRIFT.grip + 0.07 * ch) * dk * (0.35 + 0.65 * push))) * dt);
+    const loose = this.knocked > 0 ? 1 - (1 - ATTACK.loose) * Math.min(1, this.knocked / (ATTACK.knock * 0.5)) : 1;
+    let kept = across * Math.exp(-(air ? 0.4 : gripAt(sp / vR) * vR * H.turn * loose * (1 - (1 - DRIFT.grip + 0.07 * ch) * dk * (0.35 + 0.65 * push))) * dt);
     let al2 = along + (air ? 0 : Math.abs(across - kept) * (0.5 + (DRIFT.keep - 0.5) * dk) * Math.sign(along || 1));
     if (dk > 0) {
       const was = Math.hypot(along, across), now = Math.hypot(al2, kept);

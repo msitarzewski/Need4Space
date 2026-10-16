@@ -2,6 +2,14 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.9.1', date: '17 Oct 2026', name: 'Punchier',
+    notes: [
+      'The airbrake attack: your ship slides across level into the other and holds its line - no more rolling up onto a wing; the press goes into the push, not a turn',
+      'The ship hit is thrown hard across the track and knocked loose for a moment',
+      'No more stall when your own hull is destroyed',
+    ],
+  },
+  {
     version: '1.9.0', date: '17 Oct 2026', name: 'Fight for it',
     notes: [
       'The airbrake attack: fire the airbrake toward a ship alongside - up to 7 m away - and yours throws itself at it. The slam shoves it across the track and off its line and tears its hull, in a burst of light, shockwaves and sparks; you hold your line',

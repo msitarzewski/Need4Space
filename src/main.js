@@ -950,9 +950,10 @@ async function boot() {
           // the one hit is shaken hard, the attacker barely
           const A = e.attacker, B = e.victim, vel = A.racer.vel.clone().add(B.racer.vel).multiplyScalar(0.5);
           if (camera.position.distanceTo(e.at) < 320) fx.attack(e.at, vel, e.dir, new THREE.Color(...(A.team.engine || [0.1, 0.42, 1.0])), e.slam);
-          audio.bump(e.at, e.slam ? 40 : 20);
-          if (B.player && mode === 'race') { rig.shake = Math.max(rig.shake, e.slam ? 1.1 : 0.6); hud.flash('rgba(255, 60, 30, 0.6)', 0.6); }
-          if (A.player && mode === 'race') { rig.shake = Math.max(rig.shake, 0.25); hud.flash('rgba(140, 200, 255, 0.35)', 0.35); }
+          audio.bump(e.at, e.slam ? 60 : 30);
+          if ((A.player || B.player) && mode === 'race') audio.crash(e.at);      // (yours: the full crunch)
+          if (B.player && mode === 'race') { rig.shake = Math.max(rig.shake, e.slam ? 1.3 : 0.8); hud.flash('rgba(255, 60, 30, 0.65)', 0.6); }
+          if (A.player && mode === 'race') { rig.shake = Math.max(rig.shake, 0.45); hud.flash('rgba(140, 200, 255, 0.4)', 0.35); }
         } else if (e.type === 'wreck') {
           // a hull gone: sparks off it (a fireball left behind at these speeds streaked the whole screen) and its shield
           // lit; it races on from there, flown through for 3 s

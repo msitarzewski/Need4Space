@@ -431,8 +431,8 @@ export class FX {
     this.wave(at, basis, hot, 5 + 7 * K, 0.3, vel);
     this.wave(at.clone().addScaledVector(Y, 1.5), basis, white, 6 + 8 * K, 0.4, vel);
     const tint = colour.clone().lerp(new THREE.Color(1, 1, 1), 0.45);
-    for (let i = 0, n = Math.round(130 * K); i < n; i++) {
-      const a = Math.random() * Math.PI * 2, sp = 20 + Math.random() * 34;
+    for (let i = 0, n = Math.round(200 * K); i < n; i++) {
+      const a = Math.random() * Math.PI * 2, sp = 22 + Math.random() * 40;
       V.copy(X).multiplyScalar(Math.cos(a) * sp).addScaledVector(Z, Math.sin(a) * sp).addScaledVector(Y, Math.random() * 12).add(vel);
       this.sparks.emit(at, V, Math.random() < 0.5 ? tint : WHITE, { size: 0.06 + Math.random() * 0.07, life: 0.3 + Math.random() * 0.4,
         alpha: 2.2, drag: 0.4, grav: 4, fadeIn: 0.01, stretch: 0.025 });
@@ -442,7 +442,7 @@ export class FX {
       V.copy(Y).multiplyScalar(30 + Math.random() * 45).addScaledVector(X, (Math.random() - 0.5) * 10).addScaledVector(Z, (Math.random() - 0.5) * 10).add(vel);
       this.ions.emit(from, V, hot, { size: 0.12 + Math.random() * 0.1, life: 0.18 + Math.random() * 0.15, alpha: 2.6, drag: 0.4, fadeIn: 0.01, stretch: 0.04 });
     }
-    this.glints.emit(at, vel.clone(), new THREE.Color(1, 0.95, 0.9), { size: 5 + 6 * K, grow: 26, life: 0.2, alpha: 3.5, drag: 0, fadeIn: 0.01 });
+    this.glints.emit(at, vel.clone(), new THREE.Color(1, 0.95, 0.9), { size: 7 + 8 * K, grow: 34, life: 0.22, alpha: 4, drag: 0, fadeIn: 0.01 });
   }
 
   // A damaged hull (race.js visuals: under half its hull): smoke torn off it, thicker the worse it is; under a quarter

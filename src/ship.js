@@ -2105,22 +2105,14 @@ export class Ship {
     su.time.value = t;
     su.amount.value = Math.max(0, su.amount.value - dt * 1.8);
     // a wreck being flown through: the shell up while it lasts (in over 0.2 s, out over its last half second), and the
-    // ship blinking in and out of existence ("appear and dissapear out of existance, like blinking") - 8 a second
+    // ship blinking in and out of existence ("appear and dissapear out of existance, like blinking") - 8 a second. Only
+    // the hull's model blinks: hiding the whole visual took its exhaust lights out of the scene, and a change in the
+    // light count recompiled every lit shader in the game - a long stall on the player's own wreck
     const g = c.ghost || 0;                        // (s left of the 3)
     su.ghost.value = clamp(Math.min(g / 0.5, (3 - g) / 0.2), 0, 1) * 0.6;
     this.shield.visible = su.amount.value > 0.01 || su.ghost.value > 0.01;
-    this.visual.visible = !(g > 0 && (g * 8) % 1 < 0.45);
+    this.model.visible = !(g > 0 && (g * 8) % 1 < 0.45);
     this.boostKick = Math.max(0, this.boostKick - dt * 1.4);
-  }
-
-  // an airbrake attack's lunge (race.js attacks): the hull throws itself across - a hard roll into the way it goes,
-  // the nose turned in, the body swung over. Visual only.
-  lunge(dir) {
-    const a = this.anim;
-    if (!a) return;
-    a.leanV += -dir * 5.5;
-    a.yawV += -dir * 0.9;
-    a.swayV += dir * 4;
   }
 
   // a knock: the body is shoved along dir (ship frame, metres-ish) and shudders; the shield lights at the contact
