@@ -524,13 +524,13 @@ export class Ocean {
         vec2 seRainRings(vec2 p, float t) {
           vec2 g = vec2(0.0);
           for (int L = 0; L < 2; L++) {
-            float cs = L == 0 ? 1.6 : 2.3;
+            float cs = L == 0 ? 2.4 : 3.4;
             vec2 q = p / cs + float(L) * 7.31, i = mod(floor(q), 289.0), f = fract(q);
             vec2 h = fract(sin(vec2(dot(i, vec2(127.1, 311.7)), dot(i, vec2(269.5, 183.3)))) * 43758.5453);
             float ph = fract(t * (0.9 + 0.5 * h.y) + h.x * 7.0);
             vec2 dv = f - (0.3 + 0.4 * h);
-            float d = length(dv), w = (d - ph * 0.28) / 0.035;
-            g += dv / max(d, 1e-4) * (-w * exp(-w * w)) * (1.0 - ph) * (1.0 - ph) * smoothstep(0.0, 0.06, ph) * 0.55;
+            float d = length(dv), w = (d - ph * 0.34) / 0.04;
+            g += dv / max(d, 1e-4) * (-w * exp(-w * w)) * (1.0 - ph) * (1.0 - ph) * smoothstep(0.0, 0.06, ph) * 0.8;
           }
           return g;
         }
@@ -575,7 +575,7 @@ export class Ocean {
           vec2 sl = (r1.xy - 0.5) * 0.9 * rk1 + (r2.xy - 0.5) * 0.6 * rk2;
           vec3 N = normalize(Ng + vec3(sl.x, 0.0, sl.y));
           // (the rain's rings: from above, and only near - finer than a few pixels they would glitter)
-          float rk = seRain * (1.0 - smoothstep(0.02, 0.06, fpx)) * step(SE_Y, cameraPosition.y);
+          float rk = seRain * (1.0 - smoothstep(0.03, 0.09, fpx)) * step(SE_Y, cameraPosition.y);
           if (rk > 0.0) { vec2 rr = seRainRings(sW.xz, seTime) * rk; N = normalize(N + vec3(rr.x, 0.0, rr.y)); }
           float foamN = r1.a * 0.55 + r2.a * 0.45;
           float foam = smoothstep(0.62, 0.2, sJ) * smoothstep(0.42, 0.7, foamN);

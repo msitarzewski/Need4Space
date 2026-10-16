@@ -655,11 +655,33 @@ export class Track {
     };
     if (TH.moss || TH.seaMoss) {
       // moss creeping in from both walls - in places a hand's width, in places metres - broken up, in the seams (a sea
-      // map's: weed, and only where the deck is under the sea)
+      // map's: weed, and only where the deck is under the sea). The sea map's deck in the rain: puddles (deckRain,
+      // deckTime - its world sets them), dark and smooth as glass, the drops ringing them near the camera
+      const puddle = (this.deckRainU = { deckRain: { value: 0 }, deckTime: { value: 0 } });
       const before = deckMat.onBeforeCompile;
       deckMat.onBeforeCompile = (sh) => {
         before(sh);
-        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nfloat deckMoss = 0.0, deckSeaWet = 0.0;')
+        Object.assign(sh.uniforms, puddle);
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+float deckMoss = 0.0, deckSeaWet = 0.0, deckPuddle = 0.0; vec2 deckPP = vec2(0.0);
+uniform float deckRain, deckTime;
+float pdH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+float pdN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(pdH(i), pdH(i + vec2(1, 0)), f.x), mix(pdH(i + vec2(0, 1)), pdH(i + vec2(1, 1)), f.x), f.y); }
+// the drops' rings in a puddle: one drop in each cell of two grids at a time, its ring inside its cell; the slope
+vec2 deckRipple(vec2 p, float t) {
+  vec2 g = vec2(0.0);
+  for (int L = 0; L < 2; L++) {
+    float cs = L == 0 ? 0.42 : 0.61;
+    vec2 q = p / cs + float(L) * 3.7, i = mod(floor(q), 289.0), f = fract(q);
+    vec2 h = fract(sin(vec2(dot(i, vec2(127.1, 311.7)), dot(i, vec2(269.5, 183.3)))) * 43758.5453);
+    float ph = fract(t * (1.3 + 0.7 * h.y) + h.x * 7.0);
+    vec2 dv = f - (0.3 + 0.4 * h);
+    float d = length(dv), w = (d - ph * 0.3) / 0.05;
+    g += dv / max(d, 1e-4) * (-w * exp(-w * w)) * (1.0 - ph) * (1.0 - ph) * 0.8;
+  }
+  return g;
+}`)
           .replace('#include <map_fragment>', `#include <map_fragment>
   {
     float x = abs(vMapUv.x - 0.5) * ${TRACK_W.toFixed(1)}, along = vMapUv.y * 40.0, edge = ${(TRACK_W / 2).toFixed(1)} - x;
@@ -673,10 +695,30 @@ export class Track {
     // and the glints off it stand out)
     deckSeaWet = smoothstep(-1.0, 2.0, vFogWorld.y);
     diffuseColor.rgb *= 1.0 - 0.42 * deckSeaWet;
+    // the puddles: where the deck dips a little, lying in long patches (none under the weed, none under the sea)
+    {
+      float xs = (vMapUv.x - 0.5) * ${TRACK_W.toFixed(1)}, al = mod(along, 400.0);
+      // (smooth patches a few metres across, more of them in stretches; their edges soft over a hand's width)
+      float n = pdN(vec2(al / 4.5, xs / 2.6)) * 0.62 + pdN(vec2(al / 1.7, xs / 1.2) + 5.3) * 0.18 + pdN(vec2(al / 31.0, 0.7)) * 0.2;
+      deckPuddle = smoothstep(0.6, 0.64, n) * deckSeaWet * deckRain;
+      deckPP = vec2(xs, al);
+      diffuseColor.rgb *= 1.0 - 0.6 * deckPuddle;
+    }
     #endif` : ''}
     diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.035, 0.06, 0.015), vec3(0.08, 0.11, 0.025), n2), deckMoss);
   }`)
-          .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.95, deckMoss) * (1.0 - 0.3 * deckSeaWet);');
+          .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.95, deckMoss) * (1.0 - 0.3 * deckSeaWet);\n  roughnessFactor = mix(roughnessFactor, 0.035, deckPuddle);')
+          .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n  metalnessFactor *= 1.0 - deckPuddle;')
+          // (a puddle's face: flat - the deck's own grain gone under it - and ringed by the drops near the camera)
+          .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+  if (deckPuddle > 0.001) {
+    vec3 nP = nonPerturbedNormal;
+    #if defined( USE_NORMALMAP_TANGENTSPACE ) && defined( USE_FOG )
+    vec2 rr = deckRipple(deckPP, deckTime) * (1.0 - smoothstep(14.0, 40.0, distance(vFogWorld, cameraPosition)));
+    nP = normalize(tbn * vec3(rr, 1.0));
+    #endif
+    normal = normalize(mix(normal, nP, deckPuddle));
+  }`);
       };
     }
     if (TH.frost) {

@@ -308,7 +308,7 @@ export class OceanWorld {
     // the alien pillars: a ring of colossal ancient columns round the whole circuit (pillars.js)
     {
       const lh = this.lighthouseRock.geometry.boundingSphere || (this.lighthouseRock.geometry.computeBoundingSphere(), this.lighthouseRock.geometry.boundingSphere);
-      this.pillars = new AlienPillars(scene, this.track, { avoid: [{ x: lh.center.x, z: lh.center.z, r: 140 }, { x: -130, z: -200, r: 120 }] });
+      this.pillars = new AlienPillars(scene, this.track, { avoid: [{ x: lh.center.x, z: lh.center.z, r: 140 }, { x: -130, z: -200, r: 120 }], skyCube: this.ocean.U.seSky.value });
       this.noAO.push(this.pillars.lights);
     }
     lap('pillars');
@@ -793,6 +793,7 @@ export class OceanWorld {
     this.rainOn = v.oceanRain !== false;
     this.pillars.setOn(v.oceanPillars !== false);
     this.rain.setOn(this.rainOn);
+    if (this.track.deckRainU) this.track.deckRainU.deckRain.value = this.rainOn ? 1 : 0;
     if (!this.mirrorOn) this.ocean.U.seReflOn.value = 0;
   }
 
@@ -1034,7 +1035,8 @@ export class OceanWorld {
       }
       const fr = (this._rainFr ||= Array.from({ length: 4 }, () => ({})));
       fr.forEach((f, i) => this.track.frame(this.track.wrap(s - 15 + i * 25), f));
-      this.rain.update(t, dt, camera, under, lamps, fr);
+      this.rain.update(t, dt, camera, under, lamps, fr, this.ocean.U.seTime.value);
+      if (this.track.deckRainU) this.track.deckRainU.deckTime.value = t;
       this.ocean.U.seRain.value = under ? 0 : 1;
       this.rainLevel = under ? 0 : 1;                   // (its sound: audio.js)
     } else { this.ocean.U.seRain.value = 0; this.rainLevel = 0; }

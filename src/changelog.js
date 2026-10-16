@@ -2,6 +2,14 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.6.3', date: '16 Oct 2026', name: 'Into the clouds',
+    notes: [
+      'The alien pillars go up out of sight: kilometres tall and far broader, they rise into the cloud and vanish - nobody sees where they end',
+      'Puddles on the track in the rain: dark and smooth as glass, mirroring the lights, the drops ringing them as you pass',
+      'Bigger, heavier rain everywhere, bigger splashes off the track, and the rain splashing off the sea all round you - crowns and jets, the reflections broken up by the drops',
+    ],
+  },
+  {
     version: '1.6.2', date: '16 Oct 2026', name: 'The alien pillars',
     notes: [
       'The power line is gone: in its place a ring of colossal alien pillars round the ocean circuit, 650 - 1150 m tall - the drowned civilisation\'s oldest works',

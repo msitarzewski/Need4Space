@@ -1,11 +1,11 @@
 // The alien pillars round the ocean circuit: the drowned civilisation's oldest works, a ring of colossal columns
-// standing out of the sea round the whole track, 650 - 1150 m tall. Each a fluted shaft of five to seven lobes twisting
-// up it, built of segments with narrow joints and heavier collars every few, worn and gouged; root buttresses flaring
-// from its foot into the sea; great conduits clamped up its sides into its collars; a ring gallery round it carrying
-// emitter nodes; on top either a crown of spires drawn together round a beacon or a broken stump, its inner ribs
-// standing out of the break. Girders reach from one pillar toward the next - most broken off part way, one or two still
-// whole. Their light is the city's cyan: faint veins in the flutes, most long dead, the few still alive pulsing slowly
-// upward; the nodes and beacons glowing, breathing slowly. No markings.
+// standing out of the sea round the whole track and going up out of sight - kilometres tall, their heights lost in the
+// cloud: from a kilometre up each fades into the sky through drifting wisps, and nobody sees where one ends. Each a
+// fluted shaft of five to seven lobes twisting up it, built of segments with narrow joints and heavier collars every
+// few, worn and gouged low down; root buttresses flaring from its foot into the sea; great conduits clamped up its sides
+// into its collars; a ring gallery round it carrying emitter nodes. Girders reach from one pillar toward the next - most
+// broken off part way, one or two still whole. Their light is the city's cyan: faint veins in the flutes, most long
+// dead, the few still alive pulsing slowly upward; the nodes glowing, breathing slowly. No markings.
 import * as THREE from 'three';
 import { mulberry32, fbm } from './noise.js';
 import { SEA_Y, SEA_GLSL } from './sea.js';
@@ -15,6 +15,7 @@ const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const TAU = Math.PI * 2;
 const K_BODY = 0, K_METAL = 1, K_NODE = 2;
 const DEEP = SEA_Y - 150;                                     // how far down they go (none of it seen from above)
+const FADE0 = 900, FADE1 = 2600;                              // where they go into the cloud: from here, gone by here (m)
 
 // a builder: positions, normals, kinds and each vertex's place on its pillar's skin (lobe phase, height, segment)
 class Kit {
@@ -88,14 +89,12 @@ function pillarShape(P) {
   const { H, R0, lobes, twist, seg, seed, gouges } = P;
   return (y, th) => {
     const t = Math.max(0, y) / H;
-    let r = R0 * (1 - 0.42 * t) * (1 + 0.45 * Math.exp(-Math.max(0, y) / 70) + (y < 0 ? 0.25 * Math.min(1, -y / 80) : 0));
-    // the capital's flare under the top
-    r *= 1 + 0.32 * Math.max(0, Math.min(1, (t - 0.9) / 0.06)) * (1 - Math.max(0, Math.min(1, (t - 0.97) / 0.03)));
+    let r = R0 * (1 - 0.25 * t) * (1 + 0.5 * Math.exp(-Math.max(0, y) / 120) + (y < 0 ? 0.25 * Math.min(1, -y / 80) : 0));
     // the segments: a narrow joint between each, a heavier collar every fourth
     const sf = ((y + 9999 * seg) / seg) % 1, si = Math.floor((y + 9999 * seg) / seg);
     r *= 1 - 0.07 * Math.pow(1 - Math.sin(Math.PI * sf), 6) + (si % 4 === 0 ? 0.07 * Math.pow(Math.sin(Math.PI * sf), 0.3) : 0);
     // the lobes, twisting up it; the flutes between them
-    const a = lobes * (th + twist * t);
+    const a = lobes * (th + twist * Math.max(0, y) / 1000);
     r *= 1 + 0.11 * Math.cos(a) - 0.05 * Math.pow(Math.abs(Math.sin(a / 2)), 24);
     // worn: a broad unevenness and gouges where pieces have fallen away
     r *= 1 - 0.04 * fbm(Math.cos(th) * 3 + seed, y * 0.012 + Math.sin(th) * 3, 3);
@@ -108,25 +107,25 @@ function pillarShape(P) {
   };
 }
 
-// the skin: rows round the axis from deep under the sea to the top (broken: a jagged break and its face; crowned: the
-// capital), the lobe phase and the height on every vertex (the veins: the material)
+// the skin: rows round the axis from deep under the sea up into the cloud (fine low down, where it is seen close,
+// coarser going up), capped far up; the lobe phase and the height on every vertex (the veins: the material)
 function pillarBody(kit, c, P, rad) {
   const NA = 60, rows = [];
-  for (let y = DEEP; y < P.H; y += 6) rows.push(y);
+  for (let y = DEEP; y < P.H; y += y < 600 ? 6 : y < 1500 ? 12 : y < 3000 ? 40 : 150) rows.push(y);
   rows.push(P.H);
-  const jag = (th) => P.H - (P.broken ? 22 + 40 * fbm(Math.cos(th) * 1.7 + P.seed, Math.sin(th) * 1.7 - P.seed, 3) : 0);
+  const jag = () => P.H;
   const o = kit.P.length / 3;
   for (const y0 of rows) for (let j = 0; j <= NA; j++) {
     const th = (j / NA) * TAU, y = Math.min(y0, jag(th)), r = rad(y, th);
-    kit.vert(V(c.x + Math.cos(th) * r, y, c.z + Math.sin(th) * r), V(0, 1, 0), K_BODY, [P.lobes * (th + P.twist * Math.max(0, y) / P.H), y, P.seed]);
+    kit.vert(V(c.x + Math.cos(th) * r, y, c.z + Math.sin(th) * r), V(0, 1, 0), K_BODY, [P.lobes * (th + P.twist * Math.max(0, y) / 1000), y, P.seed]);
   }
   const W = NA + 1;
   for (let i = 0; i < rows.length - 1; i++) for (let j = 0; j < NA; j++) {
     const a = o + i * W + j, b = a + 1, d = a + W, e = d + 1;
     kit.I.push(a, d, b, b, d, e);
   }
-  // the top: a broken face sinking to a hollow, or the capital closed under its crown
-  const last = o + (rows.length - 1) * W, cy = P.broken ? P.H - 70 : P.H - 6;
+  // the cap, far up in the cloud
+  const last = o + (rows.length - 1) * W, cy = P.H;
   const ci = kit.vert(V(c.x, cy, c.z), V(0, 1, 0), K_BODY, [0, cy, P.seed]);
   for (let j = 0; j < NA; j++) kit.I.push(last + j, last + j + 1, ci);
   return { o, W, rows: rows.length };
@@ -145,7 +144,8 @@ function skinNormals(g, skins) {
 
 export class AlienPillars {
   // track: to keep clear of; avoid: [{ x, z, r }] other things to keep off
-  constructor(scene, track, { avoid = [], clear = 320 } = {}) {
+  // skyCube: the sky as the sea sees it (the moon left out): what the pillars fade into going up
+  constructor(scene, track, { avoid = [], clear = 320, skyCube = null } = {}) {
     const rnd = mulberry32(4711), f = {};
     const pts = [];
     for (let s = 0; s < track.length; s += 25) { track.frame(s, f); pts.push([f.P.x, f.P.z]); }
@@ -157,17 +157,17 @@ export class AlienPillars {
     const N = 8, pil = [];
     for (let k = 0; k < N; k++) {
       const a = (k / N) * TAU + 0.2 + (rnd() - 0.5) * 0.25;
-      const R0 = 55 + rnd() * 30;
+      const R0 = 110 + rnd() * 60;
       let r = 1;
       for (let i = 0; i < 40; i++) {
         const x = cx + Math.cos(a) * rx * r, z = cz + Math.sin(a) * rz * r;
-        if (near(x, z) > clear + R0 * 1.9 && avoid.every((q) => Math.hypot(q.x - x, q.z - z) > q.r + R0 * 2.2 + 60)) break;
+        if (near(x, z) > clear + R0 * 2.1 && avoid.every((q) => Math.hypot(q.x - x, q.z - z) > q.r + R0 * 2.2 + 60)) break;
         r += 0.03;
       }
-      const H = 650 + rnd() * 500, seed = rnd() * 100;
-      const gouges = Array.from({ length: 3 + Math.floor(rnd() * 4) }, () => ({ y: 80 + rnd() * (H - 200), th: rnd() * TAU, h: 15 + rnd() * 40, w: 0.25 + rnd() * 0.35, d: 0.12 + rnd() * 0.18 }));
-      pil.push({ c: V(cx + Math.cos(a) * rx * r, SEA_Y, cz + Math.sin(a) * rz * r), H, R0, lobes: 5 + Math.floor(rnd() * 3), twist: (rnd() < 0.5 ? -1 : 1) * (0.4 + rnd() * 0.8),
-        seg: 38 + rnd() * 18, seed, broken: rnd() < 0.45, gouges });
+      const H = 5500 + rnd() * 3500, seed = rnd() * 100;
+      const gouges = Array.from({ length: 4 + Math.floor(rnd() * 4) }, () => ({ y: 120 + rnd() * 1000, th: rnd() * TAU, h: 25 + rnd() * 60, w: 0.2 + rnd() * 0.3, d: 0.08 + rnd() * 0.12 }));
+      pil.push({ c: V(cx + Math.cos(a) * rx * r, SEA_Y, cz + Math.sin(a) * rz * r), H, R0, lobes: 5 + Math.floor(rnd() * 3), twist: (rnd() < 0.5 ? -1 : 1) * (0.3 + rnd() * 0.6),
+        seg: 45 + rnd() * 25, seed, gouges });
     }
     this.glow = [];
     const kits = pil.map(() => new Kit()), skins = pil.map(() => null);
@@ -180,8 +180,8 @@ export class AlienPillars {
       // ---- the root buttresses: plates flaring from the foot out into the sea, between the lobes
       const nf = 5;
       for (let i = 0; i < nf; i++) {
-        const th = (i / nf) * TAU + rnd() * 0.3, d = outAt(th), sd = V(-d.z, 0, d.x), half = 6 + P.R0 * 0.06;
-        const top = at(95, th, -3), foot = at(DEEP, th, -3), tipW = c.clone().addScaledVector(d, P.R0 * 2.25).setY(SEA_Y + 4), tipD = c.clone().addScaledVector(d, P.R0 * 2.6).setY(DEEP);
+        const th = (i / nf) * TAU + rnd() * 0.3, d = outAt(th), sd = V(-d.z, 0, d.x), half = 8 + P.R0 * 0.07;
+        const top = at(170, th, -4), foot = at(DEEP, th, -4), tipW = c.clone().addScaledVector(d, P.R0 * 1.95).setY(SEA_Y + 5), tipD = c.clone().addScaledVector(d, P.R0 * 2.2).setY(DEEP);
         const q = (p, s) => p.clone().addScaledVector(sd, s * half);
         const faces = [[q(top, 1), q(tipW, 1), q(tipD, 1), q(foot, 1), sd], [q(top, -1), q(foot, -1), q(tipD, -1), q(tipW, -1), sd.clone().negate()],
           [q(top, 1), q(top, -1), q(tipW, -1), q(tipW, 1), tipW.clone().sub(top).cross(sd).normalize().negate()],
@@ -190,22 +190,22 @@ export class AlienPillars {
       }
       // ---- the conduits: two great pipes up the lobes' crests into the collars, clamped every forty metres
       for (let i = 0; i < 2; i++) {
-        const th0 = (Math.floor(rnd() * P.lobes) + i * Math.floor(P.lobes / 2)) * TAU / P.lobes, y0 = 40, y1 = P.H * (0.7 + rnd() * 0.12), r = 5 + rnd() * 2.5;
-        const thAt = (y) => th0 - P.twist * (y / P.H);
+        const th0 = (Math.floor(rnd() * P.lobes) + i * Math.floor(P.lobes / 2)) * TAU / P.lobes, y0 = 60, y1 = FADE1 + 200, r = 9 + rnd() * 4;
+        const thAt = (y) => th0 - P.twist * (y / 1000);
         let prev = null;
-        for (let y = y0; y <= y1; y += 10) {
+        for (let y = y0; y <= y1; y += y < 1200 ? 10 : 40) {
           const th = thAt(y), p = at(y, th, r * 0.8);
           if (prev) kit.cyl(prev, p, r, r, 10, K_METAL);
-          if (Math.round(y - y0) % 40 === 0) kit.cyl(p.clone().addScaledVector(V(0, 1, 0), -1.6), p.clone().addScaledVector(V(0, 1, 0), 1.6), r * 1.45, r * 1.45, 12, K_METAL, true);
+          if (y < 1200 && Math.round(y - y0) % 40 === 0) kit.cyl(p.clone().addScaledVector(V(0, 1, 0), -2.2), p.clone().addScaledVector(V(0, 1, 0), 2.2), r * 1.4, r * 1.4, 12, K_METAL, true);
           prev = p;
         }
       }
       // ---- the gallery: a ring round it at about half its height on struts, nodes standing on it
       {
-        const y = P.H * (0.5 + rnd() * 0.1), segs = 48;
+        const y = 320 + rnd() * 260, segs = 64;
         let rMin = 1e9, rMax = 0;
         for (let j = 0; j < 72; j++) { const r = rad(y, (j / 72) * TAU); rMin = Math.min(rMin, r); rMax = Math.max(rMax, r); }
-        const Ri = rMin * 0.9, Ro = rMax + 24;
+        const Ri = rMin * 0.9, Ro = rMax + 36;
         for (let i = 0; i < segs; i++) {
           const a0 = (i / segs) * TAU, a1 = ((i + 1) / segs) * TAU;
           const pi0 = c.clone().addScaledVector(outAt(a0), Ri).setY(y), pi1 = c.clone().addScaledVector(outAt(a1), Ri).setY(y);
@@ -228,27 +228,16 @@ export class AlienPillars {
           }
         }
       }
-      // ---- the top: a crown of spires drawn together round a beacon, or the break and its ribs
-      if (!P.broken) {
-        const n = P.lobes, rTop = rad(P.H - 8, 0) * 0.9, apex = c.clone().setY(P.H + 150);
-        for (let i = 0; i < n; i++) {
-          const th = (i / n) * TAU - P.twist, b = c.clone().addScaledVector(outAt(th), rTop).setY(P.H - 10);
-          const m = b.clone().lerp(apex, 0.55).addScaledVector(outAt(th), 14);
-          kit.cyl(b, m, 9, 5, 10, K_BODY); kit.cyl(m, apex.clone().addScaledVector(outAt(th), 7), 5, 0.6, 10, K_BODY, true);
-        }
-        kit.cyl(c.clone().setY(P.H - 8), c.clone().setY(P.H + 70), 10, 6, 14, K_METAL, true);
-        kit.sphere(c.clone().setY(P.H + 78), 8, K_NODE);
-        this.glow.push([c.clone().setY(P.H + 78), 2, rnd()]);
-      } else {
-        for (let i = 0; i < 6; i++) {
-          const th = rnd() * TAU, b = c.clone().addScaledVector(outAt(th), rad(P.H - 60, th) * (0.3 + rnd() * 0.4)).setY(P.H - 70), h = 40 + rnd() * 70;
-          kit.cyl(b, b.clone().add(V((rnd() - 0.5) * 20, h, (rnd() - 0.5) * 20)), 3.5 + rnd() * 2, 0.4, 8, K_METAL, true);
-        }
+      // ---- nodes on the collars up the shaft, into the cloud: its lights going up out of sight
+      for (let y = 700; y < FADE1; y += 260 + rnd() * 200) {
+        const th = rnd() * TAU, p = at(y, th, 2);
+        kit.sphere(p, 6, K_NODE);
+        this.glow.push([p, 1.2, rnd()]);
       }
     });
-    // ---- the girders: from each pillar toward the next at about 0.6 of the lower one's height; most broken off
+    // ---- the girders: from each pillar toward the next, 350 - 700 m up; most broken off
     pil.forEach((A, k) => {
-      const B = pil[(k + 1) % N], y = 0.6 * Math.min(A.H, B.H), roll = rnd();
+      const B = pil[(k + 1) % N], y = 350 + rnd() * 350, roll = rnd();
       if (roll < 0.2) return;
       const d = B.c.clone().sub(A.c).setY(0), gap = d.length();
       d.divideScalar(gap);
@@ -258,19 +247,19 @@ export class AlienPillars {
       const reachA = whole ? span : span * (0.18 + rnd() * 0.22), reachB = whole ? 0 : span * (0.12 + rnd() * 0.2);
       const girder = (kit, from, dir, len) => {
         const to = from.clone().addScaledVector(dir, len);
-        kit.beam(from, to, 26, 34, K_METAL);
-        for (let s = 30; s < len - 10; s += 45) { const p = from.clone().addScaledVector(dir, s); kit.beam(p.clone().addScaledVector(V(0, 1, 0), -19), p.clone().addScaledVector(V(0, 1, 0), -19).addScaledVector(dir, 6), 30, 6, K_METAL); }
+        kit.beam(from, to, 40, 52, K_METAL);
+        for (let s = 40; s < len - 10; s += 60) { const p = from.clone().addScaledVector(dir, s); kit.beam(p.clone().addScaledVector(V(0, 1, 0), -28), p.clone().addScaledVector(V(0, 1, 0), -28).addScaledVector(dir, 9), 46, 8, K_METAL); }
         if (len < span - 1) for (let i = 0; i < 7; i++) {
           // (the broken end: the members inside it standing out of the break)
-          const p = to.clone().add(V((rnd() - 0.5) * 18, (rnd() - 0.5) * 26, 0).applyAxisAngle(V(0, 1, 0), -Math.atan2(dir.z, dir.x) + Math.PI / 2));
-          kit.cyl(p.clone().addScaledVector(dir, -4), p.clone().addScaledVector(dir, 8 + rnd() * 22).add(V(0, (rnd() - 0.6) * 8, 0)), 1.4, 0.3, 6, K_METAL, true);
+          const p = to.clone().add(V((rnd() - 0.5) * 30, (rnd() - 0.5) * 40, 0).applyAxisAngle(V(0, 1, 0), -Math.atan2(dir.z, dir.x) + Math.PI / 2));
+          kit.cyl(p.clone().addScaledVector(dir, -5), p.clone().addScaledVector(dir, 10 + rnd() * 30).add(V(0, (rnd() - 0.6) * 10, 0)), 2.2, 0.4, 6, K_METAL, true);
         }
       };
       girder(kits[k], a0, d, reachA);
       if (reachB > 0) girder(kits[(k + 1) % N], b0, d.clone().negate(), reachB);
     });
     // ---- the meshes: one a pillar (each culled on its own)
-    this.mat = alienMaterial();
+    this.mat = alienMaterial(skyCube);
     this.meshes = kits.map((kit, k) => {
       const g = kit.geometry();
       skinNormals(g, [skins[k]]);
@@ -301,14 +290,14 @@ export class AlienPillars {
 // the stone-metal: near black, a green-grey patina streaking down it, a pale salt crust low down and a dark wet band at
 // the sea; the fittings (conduits, gallery, girders) a dark bronze gone to verdigris; the veins in the flutes: most
 // dead, a few alive, cyan pulses running up them slowly; the nodes glowing, breathing
-function alienMaterial() {
+function alienMaterial(skyCube) {
   const m = new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0.2 });
   m.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, LIFE_U);
+    Object.assign(sh.uniforms, LIFE_U, { apSky: { value: skyCube } });
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float kind; attribute vec3 aux; varying float vKind; varying vec3 vAux, vWP;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n  vKind = kind; vAux = aux; vWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
-uniform float lTime;
+uniform float lTime; uniform samplerCube apSky;
 varying float vKind; varying vec3 vAux, vWP;
 float apH(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 float apN(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
@@ -346,14 +335,23 @@ vec3 apGlow = vec3(0.0);`)
   }`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = vKind > 1.5 ? 0.2 : vKind > 0.5 ? 0.55 : 0.8;')
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n  metalnessFactor = vKind > 0.5 && vKind < 1.5 ? 0.6 : 0.1;')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += apGlow;');
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += apGlow;')
+      // (into the cloud: the sky behind it, in the way it is seen, taken over through drifting wisps - none of it from
+      // under the sea's surface)
+      .replace('#include <fog_fragment>', `{
+    float wisp = apN(vec3(vWP.x * 0.004, vWP.y * 0.0025 - lTime * 0.01, vWP.z * 0.004)) * 0.65 + apN(vWP * 0.013 + lTime * 0.02) * 0.35;
+    float up = smoothstep(${FADE0.toFixed(1)}, ${FADE1.toFixed(1)}, vWP.y + (wisp - 0.5) * 700.0);
+    vec3 dir = normalize(vWP - cameraPosition);
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, textureLod(apSky, vec3(dir.x, abs(dir.y), dir.z), 1.0).rgb, up);
+  }
+  #include <fog_fragment>`);
   };
   m.customProgramCacheKey = () => 'alien-pillar';
   return m;
 }
 
-// the nodes' and beacons' glow, seen from far off: soft points breathing slowly (each its own phase), through the mist
-// and the sea as everything else; never under two pixels
+// the nodes' glow, seen from far off: soft points breathing slowly (each its own phase), through the mist and the sea
+// as everything else, gone into the cloud as the pillars are; never under two pixels
 function glowPoints(list) {
   const P = new Float32Array(list.length * 3), A = new Float32Array(list.length * 2);
   list.forEach(([p, size, ph], i) => { P.set([p.x, p.y, p.z], i * 3); A.set([size, ph], i * 2); });
@@ -372,7 +370,7 @@ function glowPoints(list) {
         float px = 14.0 * aL.x * pr * projectionMatrix[1][1] * 360.0 / max(d, 1.0);
         gl_PointSize = clamp(px, 2.5, 64.0);
         float breathe = 0.55 + 0.45 * sin(lTime * 0.6 + aL.y * 6.2832);
-        vC = vec3(0.25, 1.4, 1.8) * breathe * min(1.0, px / 2.5) * seFogT(cameraPosition, position, ${SEA_Y.toFixed(1)});
+        vC = vec3(0.25, 1.4, 1.8) * breathe * min(1.0, px / 2.5) * seFogT(cameraPosition, position, ${SEA_Y.toFixed(1)}) * (1.0 - smoothstep(${(FADE0 + 200).toFixed(1)}, ${(FADE1 - 300).toFixed(1)}, position.y));
       }`,
     fragmentShader: /* glsl */`
       varying vec3 vC;
