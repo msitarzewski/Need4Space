@@ -2,6 +2,14 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.9.3', date: '17 Oct 2026', name: 'Heavy hitter',
+    notes: [
+      'The slam hits far harder: your ship drives in faster and the one hit is thrown across the track, sliding loose into the wall - and a wall it is thrown into hurts more',
+      'Weight counts: the heavier ship throws the lighter one further and hurts it more - the Anvil wrecks a Comet in a slam or two',
+      'Your own slam lands with a zoom punch, a hard shake and a flash',
+    ],
+  },
+  {
     version: '1.9.2', date: '17 Oct 2026', name: 'Smash',
     notes: [
       'The airbrake attack smashes in: your ship drives across into the other and keeps pressing through the hit, the other thrown across ahead of it',

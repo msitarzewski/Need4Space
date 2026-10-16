@@ -1845,8 +1845,11 @@ export const damageSpeed = (v) => clamp((Math.abs(v) - DAMAGE.v0) / (DAMAGE.v1 -
 // turned off its heading (slamYaw rad), slowed (slamLoss of its speed), dmg times a knock's damage (a knock of at
 // least slamMin m/s); the attacker stops across and holds its line, keep of its share of the damage. An airbrake out
 // toward a hull already touching (no slide): the lighter shove / loss / min.
-export const ATTACK = { range: 7, lunge: 30, lungeAcc: 320, lungeT: 0.5, push: 0.22, slamShove: 14, cap: 50, knock: 0.6,
-  loose: 0.2, slamYaw: 0.16, slamLoss: 0.09, slamMin: 22, shove: 20, loss: 0.06, min: 16, dmg: 4, keep: 0.3 };
+// ("the slam should be way harder ... the anvil should do more damage to smaller ships, and push them harder in the
+// wall"): the throw, the damage and the knock scale with the masses (m = the attacker's over the other's, ships.js);
+// a hull knocked loose that meets the wall takes wallCap m/s of it at most (not DAMAGE.cap) and wallK more.
+export const ATTACK = { range: 7, lunge: 38, lungeAcc: 420, lungeT: 0.5, push: 0.3, slamShove: 24, cap: 60, knock: 0.8,
+  loose: 0.15, slamYaw: 0.2, slamLoss: 0.11, slamMin: 22, shove: 20, loss: 0.06, min: 16, dmg: 4, keep: 0.3, wallCap: 32, wallK: 1.25 };
 const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck
 
@@ -2145,7 +2148,9 @@ export class TrackRacer {
           this.scrape = Math.min(1, hit / 20);
           const at = f.P.clone().addScaledVector(f.R, side * TRACK_W / 2).addScaledVector(f.U, 1.2);
           this.emit({ type: 'scrape', at, v: hit, side, wall: true });
-          this.hurt(DAMAGE.wall * clamp(hit - DAMAGE.graze, 0, DAMAGE.cap) * damageSpeed(this.vs), 'wall', at);
+          // (thrown into it by an attack: the full blow - "push them harder in the wall")
+          const thrown = this.knocked > 0;
+          this.hurt(DAMAGE.wall * clamp(hit - DAMAGE.graze, 0, thrown ? ATTACK.wallCap : DAMAGE.cap) * damageSpeed(this.vs) * (thrown ? ATTACK.wallK : 1), 'wall', at);
         }
       }
     }

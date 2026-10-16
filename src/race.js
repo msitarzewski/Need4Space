@@ -665,13 +665,13 @@ export class Race {
   // a knock between two ships: each takes the other's ram (ships.js) - by the closing speed past a brush and by the
   // speed (none at the grid's crawl), at a lower rate than a wall's. atk: an airbrake attack (+1 a on b, -1 b on a) -
   // the one attacked takes ATTACK.dmg times its share, the attacker ATTACK.keep of its own
-  ram(ea, eb, v, atk = 0) {
+  ram(ea, eb, v, atk = 0, mass = 1) {
     const k = DAMAGE.ship * Math.max(0, v - DAMAGE.shipGraze) * damageSpeed(Math.max(ea.racer.vs, eb.racer.vs));
     if (k <= 0) return;
     if (ea.player) eb.playerHitT = this.time;          // (the HUD: the hull of a rival the player has just hurt)
     if (eb.player) ea.playerHitT = this.time;
-    ea.racer.hurt(k * (eb.racer.handling.ram || 1) * (atk < 0 ? ATTACK.dmg : atk > 0 ? ATTACK.keep : 1), 'ship');
-    eb.racer.hurt(k * (ea.racer.handling.ram || 1) * (atk > 0 ? ATTACK.dmg : atk < 0 ? ATTACK.keep : 1), 'ship');
+    ea.racer.hurt(k * (eb.racer.handling.ram || 1) * (atk < 0 ? ATTACK.dmg * mass : atk > 0 ? ATTACK.keep : 1), 'ship');
+    eb.racer.hurt(k * (ea.racer.handling.ram || 1) * (atk > 0 ? ATTACK.dmg * mass : atk < 0 ? ATTACK.keep : 1), 'ship');
   }
 
   // Ship to ship. Overlaps are pushed apart over a few steps (soft: a hull jumping sideways by the whole overlap in
@@ -695,7 +695,7 @@ export class Race {
         this.touch[key] += dt;
         if (first) this.stats.contacts++;
         const ox = WID - Math.abs(dx), os = LEN - Math.abs(ds);
-        let v = 0, side = 0, atk = 0, struck = false, slam = false;
+        let v = 0, side = 0, atk = 0, struck = false, slam = false, mass = 1;
         if (ox < os * 0.75) {                                // side by side: pushed apart sideways
           // at most 25 cm a step: two hulls landing on each other after a jump overlapped by metres and were shoved
           // apart in two or three lurches; the traded speed does the rest
@@ -728,10 +728,13 @@ export class Race {
               const att = atk > 0 ? A : B, vic = atk > 0 ? B : A, out = atk > 0 ? sx : -sx;
               slam = !!att.lunge;
               if (slam) {                                      // smashed into: thrown ahead of the attacker, knocked loose
-                const drive = Math.max(out * att.vx, ATTACK.lunge * 0.8);       // and off its heading; the attacker
-                vic.vx = out * Math.min(Math.max(out * vic.vx, drive) + ATTACK.slamShove, ATTACK.cap);   // presses on a moment
-                vic.knocked = ATTACK.knock;
-                const kick = out * ATTACK.slamYaw;
+                // and off its heading - the heavier the attacker against it, the further and the longer; the attacker
+                // presses on a moment
+                mass = clamp((att.handling.mass || 1) / (vic.handling.mass || 1), 0.4, 2.2);
+                const drive = Math.max(out * att.vx, ATTACK.lunge * 0.8);
+                vic.vx = out * Math.min(Math.max(out * vic.vx, drive) + ATTACK.slamShove * mass, ATTACK.cap * Math.min(1.4, mass));
+                vic.knocked = ATTACK.knock * Math.min(1.5, mass);
+                const kick = out * ATTACK.slamYaw * Math.min(1.5, mass);
                 vic.psi += kick; vic.yawKick += kick;
                 att.lunge.t = Math.min(att.lunge.t, ATTACK.push);
               } else { vic.vx = out * Math.min(Math.max(out * vic.vx, 0) + ATTACK.shove, ATTACK.cap); vic.knocked = ATTACK.knock * 0.5; }
@@ -739,7 +742,7 @@ export class Race {
               v = slam ? ATTACK.slamMin : ATTACK.min;          // (the blow is the attack's own size, not the closing speed)
               struck = true;
             }
-            this.ram(E[a], E[b], v, atk);
+            this.ram(E[a], E[b], v, atk, mass);
           }
           side = sx;
         } else {
@@ -774,13 +777,13 @@ export class Race {
         if (struck) this.stats.attacks = (this.stats.attacks || 0) + 1;
         // the hulls jolt apart, the shields light where they met (an attacker does not budge; the one attacked is
         // shoved across - a jolt, not a roll onto a wing)
-        const at = A.pos.clone().add(B.pos).multiplyScalar(0.5), k = v / 12, kv = Math.min(0.75, k * 0.45);
+        const at = A.pos.clone().add(B.pos).multiplyScalar(0.5), k = v / 12, kv = slam ? 1.5 : Math.min(0.75, k * 0.45);
         if (side) {
           E[a].ship.hit(new THREE.Vector3(-side, 0, 0), atk > 0 ? 0 : atk < 0 ? kv : k, E[a].ship.root.worldToLocal(at.clone()));
           E[b].ship.hit(new THREE.Vector3(side, 0, 0), atk < 0 ? 0 : atk > 0 ? kv : k, E[b].ship.root.worldToLocal(at.clone()));
           if (struck) {
             const att = atk > 0 ? E[a] : E[b], vic = atk > 0 ? E[b] : E[a];
-            this.events.push({ type: 'attack', at, attacker: att, victim: vic, slam, v,
+            this.events.push({ type: 'attack', at, attacker: att, victim: vic, slam, v, mass,
               dir: vic.racer.pos.clone().sub(att.racer.pos).projectOnPlane(this.track.frame(att.racer.s).T).normalize() });
           }
         } else {

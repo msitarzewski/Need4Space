@@ -953,8 +953,13 @@ async function boot() {
           if (camera.position.distanceTo(e.at) < 320) fx.attack(e.at, vel, e.dir, new THREE.Color(...(A.team.engine || [0.1, 0.42, 1.0])), e.slam);
           audio.bump(e.at, e.slam ? 60 : 30);
           if ((A.player || B.player) && mode === 'race') audio.crash(e.at);      // (yours: the full crunch)
-          if (B.player && mode === 'race') { rig.shake = Math.max(rig.shake, e.slam ? 1.3 : 0.8); hud.flash('rgba(255, 60, 30, 0.65)', 0.6); }
-          if (A.player && mode === 'race') { rig.shake = Math.max(rig.shake, 0.45); hud.flash('rgba(140, 200, 255, 0.4)', 0.35); }
+          if (B.player && mode === 'race') { rig.shake = Math.max(rig.shake, e.slam ? 1.5 : 0.8); rig.punch = 0.6; hud.flash('rgba(255, 60, 30, 0.7)', 0.6); }
+          if (A.player && mode === 'race') {
+            // the player's own slam: it should feel like one - a zoom punch, a hard shake, a hot flash
+            rig.shake = Math.max(rig.shake, e.slam ? 0.8 * Math.min(1.3, e.mass || 1) : 0.45);
+            if (e.slam) rig.punch = 1;
+            hud.flash(`rgba(255, 170, 90, ${e.slam ? 0.5 : 0.3})`, 0.4);
+          }
         } else if (e.type === 'wreck') {
           // a hull gone: sparks off it (a fireball left behind at these speeds streaked the whole screen) and its shield
           // lit; it races on from there, flown through for 3 s

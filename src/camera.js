@@ -69,7 +69,7 @@ export class CameraRig {
       cam.position.copy(pos).add(off);
       lookAt.copy(pos).add(new THREE.Vector3(0, far ? 1.0 : 1.6, -30).applyQuaternion(cq));
       camUp.lerp(new THREE.Vector3(0, 1, 0).applyQuaternion(cq), this.rollFollow).normalize();
-      fov = 60 + 18 * smoothstep(40, 340, speed) + 6 * boost + 10 * (this.kick || 0) - 5 * (flight.brakeS || 0) * (1 - (flight.driftS || 0))
+      fov = 60 + 18 * smoothstep(40, 340, speed) + 6 * boost + 10 * (this.kick || 0) - 9 * (this.punch || 0) - 5 * (flight.brakeS || 0) * (1 - (flight.driftS || 0))
         + 4 * (flight.driftS || 0);
     } else if (this.mode === 'canopy') {
       cam.position.copy(pos).add(new THREE.Vector3(0, 2.25, 3.2).applyQuaternion(cq));
@@ -129,6 +129,7 @@ export class CameraRig {
     if (this.terrain.clearance && (this.mode === 'cinematic' || this.mode === 'orbit')) this.terrain.clearance(cam.position);
     // shake: impacts, boost, scraping - smooth noise, never a strobe
     this.shake = Math.max(0, this.shake - dt * 1.8);
+    this.punch = Math.max(0, (this.punch || 0) - dt * 3);    // an attack landing: a zoom punch (main.js)
     const amp = this.shake * 0.5 + boost * 0.04 * smoothstep(80, 200, speed) + flight.scrape * 0.12;
     if (amp > 0 && this.mode !== 'orbit') {
       const t = this.t * 9;
