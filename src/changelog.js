@@ -2,6 +2,15 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.6.2', date: '16 Oct 2026', name: 'The alien pillars',
+    notes: [
+      'The power line is gone: in its place a ring of colossal alien pillars round the ocean circuit, 650 - 1150 m tall - the drowned civilisation\'s oldest works',
+      'Fluted columns twisting up out of the sea on root buttresses, segmented and worn, great conduits clamped up their sides, a gallery of glowing nodes round each',
+      'Some still crowned with spires round a beacon, others broken off with their ribs standing out; girders reaching from one to the next, most snapped off part way',
+      'Cyan veins in their flutes - most dead, the few still alive pulsing slowly upward - and glowing rings round some of their collars',
+    ],
+  },
+  {
     version: '1.6.1', date: '16 Oct 2026', name: 'The old power line',
     notes: [
       'A ring of colossal old transmission towers round the ocean circuit - a kilometre tall, rusted lattice steel on concrete caissons in the sea, cables sagging from one to the next high over the track',
