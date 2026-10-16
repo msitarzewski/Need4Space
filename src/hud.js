@@ -1,5 +1,7 @@
 // HUD: position and lap, lap times, speed, boost energy, thrust, engine state, the countdown and the race banners
 // (lap, final lap, finish), messages, edge flashes, the minimap, the controls card (H) and the results table.
+import { shipName } from './ships.js';
+
 const $ = (id) => document.getElementById(id);
 
 export const fmt = (t) => {
@@ -16,7 +18,7 @@ export const CONTROLS = [
     [['A', 'D'], 'Steer'],
     [['↑', '↓'], 'In the air: ↓ nose down, ↑ nose up'],
     [['Shift'], 'Boost (orange pads on the track kick too)'],
-    [['←', '→'], 'Airbrakes left / right: sharper turns (Z / X too) - one at a time, 3 s to charge'],
+    [['←', '→'], 'Airbrakes left / right: sharper turns (Z / X too) - one at a time, 3 s to charge (the Anvil holds two)'],
     [['Mouse'], 'Click to steer (Esc releases)'],
   ]],
   ['Ship and track', [
@@ -173,7 +175,7 @@ export class HUD {
     const winner = rows[0].time, me = rows.findIndex((r) => r.player) + 1;
     const level = document.documentElement.dataset.level || 'normal';
     const tr = rows.map((r, i) => `<tr class="${r.player ? 'me' : ''}" style="--i:${i}"><td>${i + 1}</td>
-      <td><span class="sw" style="background:${r.css}"></span>${r.name}${r.player ? '<small>You</small>' : ''}</td>
+      <td><span class="sw" style="background:${r.css}"></span>${r.name}${r.player ? '<small>You</small>' : r.kind ? `<small class="r-ship">${shipName(r.kind)}</small>` : ''}</td>
       <td>${r.est ? '~' : ''}${fmt(r.time)}</td><td class="r-gap">${i ? '+' + (r.time - winner).toFixed(2) : ''}</td>
       <td>${Number.isFinite(r.best) ? fmt(r.best) : '-'}</td></tr>`).join('');
     $('results').innerHTML = `
@@ -221,13 +223,22 @@ export class HUD {
     const over = Math.max(0, Math.min(1, (s.boostEnergy - 1) / 0.5));
     if (over !== this.over) { $('bstx').style.transform = `scaleX(${over})`; this.over = over; }
     $('thr').style.transform = `scaleX(${Math.max(0, Math.min(1, s.throttle))})`;
-    // the airbrake charging (one every 3 s): lit when ready
-    const ab = Math.round((s.airCharge ?? 1) * 100) / 100;
+    // the airbrake charging (one every 3 s): lit when one is ready; split in two for a ship that holds two
+    const ab = Math.round((s.airCharge ?? 1) * 100) / 100, abN = s.airCharges || 1;
+    if (abN !== this.abN) { $('abr').parentElement.classList.toggle('two', abN === 2); this.abN = abN; this.ab = null; }
     if (ab !== this.ab) {
       $('abr').style.transform = `scaleX(${ab})`;
-      const ready = ab >= 1;
+      const ready = ab * abN >= 0.999;
       if (ready !== this.abReady) { $('abr').parentElement.classList.toggle('ready', ready); this.abReady = ready; }
       this.ab = ab;
+    }
+    // the hull: full .. empty, amber under half, red under a quarter; while a wreck is being flown through, the ghost
+    // colour
+    if (s.health != null) {
+      const hp = Math.round(Math.max(0, Math.min(1, s.health)) * 100) / 100, gh = s.ghost > 0;
+      if (hp !== this.hp) { $('hul').style.transform = `scaleX(${hp})`; this.hp = hp; }
+      const band = gh ? 'ghost' : hp < 0.25 ? 'red' : hp < 0.5 ? 'amber' : '';
+      if (band !== this.hpBand) { $('hul').parentElement.dataset.band = band; this.hpBand = band; }
     }
     // the drift's charge: shown while drifting, coloured by the step it has reached
     const dr = !!s.drifting;

@@ -2,6 +2,17 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.8.0', date: '17 Oct 2026', name: 'Hulls and rivals',
+    notes: [
+      'The rivals fly all three ships: four Feathers, two Comets and two Anvils (Settings: Feathers only)',
+      'Hull damage: walls and other ships wear the hull down - a graze or a slow touch costs nothing, a hard knock at speed a lot, another ship\'s knock less than a wall\'s. The Anvil\'s hull is the toughest and it hits hardest, the Comet\'s the weakest and softest. A hull at zero resets the ship where it is, slowed, and for 3 seconds it can be flown through. A Hull meter on the HUD, a switch in Settings',
+      'The airbrake is a weapon: fired toward a ship alongside, it shoves it off its line - it loses speed and hull, you hold yours. The Anvil holds two airbrakes',
+      'Each difficulty has an ace, a rival a bit smarter and faster than the rest, starting on pole: an Anvil on Easy and Normal, a Comet on Hard, a Feather on Brutal. The Comets are a touch quick overall',
+      'The ocean: the long bend round the aqueduct is banked into the turn - it threw the ships off the road and into the wall, every lap - and the run into the great gate is eased',
+      'The results show each rival\'s ship; the Ship screen shows its toughness and ramming',
+    ],
+  },
+  {
     version: '1.7.0', date: '16 Oct 2026', name: 'The Anvil',
     notes: [
       'A third ship: the Anvil H1 - a heavy armoured lifting body, two pulse engines in its housings with magnet balls orbiting them, headlamps across its nose and a cockpit under the canopy',

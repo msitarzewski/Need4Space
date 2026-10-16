@@ -49,15 +49,19 @@ pt(1840, 58, 300); pt(1830, 60, 520, 0, 'breach');
 // a long descending left-hander, banked, and south of the Keeper the dive
 pt(1760, 54, 760, 18); pt(1580, 44, 930, 26); pt(1400, 30, 905, 20); pt(1292, 16, 740, 10); pt(1272, 5, 520, 0, 'diveIn');
 // down twice round the Keeper, the colossus standing out of the sea - 290 m out from its axis, to 620 m under the sea
+// (banked -28; at the gate only -10: the way still bends right there as it lines up with the spiral, and the full
+// left-down bank threw the hulls off the deck at speed)
 for (let k = 0; k <= 32; k++) {
   const a = -(k / 32) * Math.PI * 4;
-  pt(KEEPER.x + 290 * Math.cos(a), -22 - 598 * (k / 32), KEEPER.z + 290 * Math.sin(a), -28, k === 0 ? 'gate' : k === 16 ? 'spiralMid' : k === 32 ? 'spiralOut' : null);
+  pt(KEEPER.x + 290 * Math.cos(a), -22 - 598 * (k / 32), KEEPER.z + 290 * Math.sin(a), k === 0 ? -10 : -28, k === 0 ? 'gate' : k === 16 ? 'spiralMid' : k === 32 ? 'spiralOut' : null);
 }
 // through the city at its feet, among the towers: round the great dome, through the hall on the temple mount, under
-// the aqueduct, round and back
+// the aqueduct, round and back. (The long right-hander round the back is banked into the turn, right edge down: it
+// kept the left-hander's tilt, outside edge low - at speed the bend threw the hulls off the deck, and in the air they
+// slid 40 m across into the outer wall, every ship, every lap)
 pt(1160, -632, 20, -8, 'avenue'); pt(1000, -642, -230, -14); pt(780, -648, -420, -18, 'dome'); pt(520, -650, -520, -6);
 pt(280, -650, -560, 0, 'hallIn'); pt(40, -645, -590, 0, 'hallOut');
-pt(-170, -632, -680, -14, 'aqueduct'); pt(-420, -620, -820, -26); pt(-560, -600, -1060, -32); pt(-480, -582, -1320, -30); pt(-230, -560, -1440, -18); pt(60, -540, -1430, -6);
+pt(-170, -632, -680, 0, 'aqueduct'); pt(-420, -620, -820, 26); pt(-560, -600, -1060, 32); pt(-480, -582, -1320, 30); pt(-230, -560, -1440, 18); pt(60, -540, -1430, 6);
 // the long climb up out of the abyss, bursting out of the sea and off the kicker
 pt(380, -485, -1330); pt(750, -385, -1210); pt(1120, -265, -1120); pt(1460, -150, -1065); pt(1760, -60, -1035, 0, 'surge');
 pt(1990, -12, -1022); pt(2190, 10, -1012, 0, 'crest2'); pt(2410, 16, -1010);

@@ -1,9 +1,10 @@
-// The race: nine Feathers on a grid (the player fifth), lights, three laps, live positions, ship-to-ship bumping,
-// a score and a results table. Rivals are clones of the player's ship in their own paint, driven by AI on the same
-// track physics.
+// The race: nine ships on a grid (the player fifth), lights, three laps, live positions, ship-to-ship bumping and
+// damage, a score and a results table. Rivals - four Feathers in their teams' paint, two Comets and two Anvils in
+// liveries of their own - are clones of the loaded ships, driven by AI on the same track physics.
 import * as THREE from 'three';
-import { TrackRacer, TRACK_W, turnRate, gripAt } from './track.js';
+import { TrackRacer, TRACK_W, turnRate, gripAt, DAMAGE, damageSpeed, ATTACK } from './track.js';
 import { Ship } from './ship.js';
+import { HANDLING, RIVAL_SHIPS, LIVERIES } from './ships.js';
 import { clamp, damp, mulberry32, smoothstep } from './noise.js';
 
 export const LAPS = 3;
@@ -21,24 +22,35 @@ export const TEAMS = [
 ];
 const POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2];
 const PLAYER_SLOT = 4;
-const HOLD = { throttleUp: 0, throttleDown: 0, throttleAxis: 0, boost: 0, yaw: 0, roll: 0, airL: 0, airR: 0 };
+const HOLD = { throttleUp: 0, throttleDown: 0, throttleAxis: 0, boost: 0, yaw: 0, roll: 0, airL: 0, airR: 0, pitch: 0 };
 
 // AI difficulty (settings: "AI difficulty"). pace: engine thrust = p0 - slot * step + rnd * spread (the front of the
 // grid a touch quicker); corner: the share of the line's speed limit it dares; pads: the chance it takes each pad;
 // boost: 'plan' (spent where the lap has room to use it) or 'random'; lane: how far it strays off the line where that
 // costs nothing; band: more / less thrust when far behind / far ahead of the player - never within sight of it;
 // wander: a slow drift off the line, everywhere (m: a human's line); defend: how firmly it covers the player's way
-// past; aggression: how close it passes, how late it gives way
+// past; aggression: how close it passes, how late it gives way.
+// ace: the one rival a bit smarter and faster than the rest ("anvil the smartest and mostly a winner at lower
+// difficulties ... comet the fastest at higher ... balanced the winner at the highest"): the first rival of that ship
+// on the grid, starting on pole (the fastest ship mid-field was always passing: it brushed hulls and ran into tails
+// until its hull gave out, or sat boxed in), its engine pace per cent stronger and its racecraft (drive) a step up. kinds: each ship's engine (pace)
+// on top of the level's, and the share of its own speed limit in the bends it dares (corner), so the ships finish
+// close together - the Comet a little ahead overall ("a slight
+// cheater"), the Feather and the Anvil level (the Anvil gains on the levels that plan their boost, wrecks least)
 export const AI_LEVELS = {
   // "add an easy setting ... and the enemies are also slower": a tenth less engine than Normal, careful in the bends,
   // pads and boost left to chance, wide of the line, never blocking, easing off more when well ahead of the player
-  easy: { pace: [0.85, 0.004, 0.02], corner: 0.9, pads: 0.3, boost: 'random', lane: 10, wander: 7, band: [0.03, 0.08], defend: 0, aggression: 0.35, speed: 0.25 },
+  easy: { pace: [0.84, 0.004, 0.02], corner: 0.9, pads: 0.3, boost: 'random', lane: 10, wander: 7, band: [0.03, 0.08], defend: 0, aggression: 0.35, speed: 0.25,
+    kinds: { rocket: { pace: 0.92 }, heavy: { pace: 1.035 } }, ace: { kind: 'heavy', pace: 0, drive: { pads: 0.55, boost: 'plan', lane: 6, wander: 4, corner: 0.92 } } },
   // "make normal, hard and brutal a bit easier, like 30 % easier overall": each one's lap a third of the way back
   // toward Easy's (median laps on the ice: Normal 47.0 -> 48.2 s, Hard 44.9 -> 46.4, Brutal 44.6 -> 46.2, Easy 50.2),
   // its aggression and defence 30 % of the way too. speed: the menu's bar for their pace (the laps, not the engine)
-  normal: { pace: [0.9235, 0.004, 0.02], corner: 0.95, pads: 0.45, boost: 'random', lane: 8, wander: 5, band: [0.04, 0.04], defend: 0, aggression: 0.45, speed: 0.5 },
-  hard: { pace: [0.89, 0.0025, 0.008], corner: 1, pads: 1, boost: 'plan', lane: 3, wander: 0, band: [0.05, 0.015], defend: 0.42, aggression: 0.67, speed: 0.78 },
-  brutal: { pace: [0.905, 0.0015, 0.004], corner: 1, pads: 1, boost: 'plan', lane: 2, wander: 0, band: [0.08, 0], defend: 0.7, aggression: 0.8, speed: 0.88 },
+  normal: { pace: [0.9235, 0.004, 0.02], corner: 0.95, pads: 0.45, boost: 'random', lane: 8, wander: 5, band: [0.04, 0.04], defend: 0, aggression: 0.45, speed: 0.5,
+    kinds: { rocket: { pace: 0.92 }, heavy: { pace: 1.035 } }, ace: { kind: 'heavy', pace: -0.005, drive: { pads: 0.7, boost: 'plan', lane: 5, wander: 3, corner: 0.96 } } },
+  hard: { pace: [0.895, 0.0025, 0.008], corner: 1, pads: 1, boost: 'plan', lane: 3, wander: 0, band: [0.05, 0.015], defend: 0.42, aggression: 0.67, speed: 0.78,
+    kinds: { rocket: { pace: 0.965 }, heavy: { pace: 0.995 } }, ace: { kind: 'rocket', pace: 0.02, drive: { lane: 2 } } },
+  brutal: { pace: [0.905, 0.0015, 0.004], corner: 1, pads: 1, boost: 'plan', lane: 2, wander: 0, band: [0.08, 0], defend: 0.7, aggression: 0.8, speed: 0.88,
+    kinds: { rocket: { pace: 0.965 }, heavy: { pace: 0.995 } }, ace: { kind: 'feather', pace: 0.025, drive: {} } },
 };
 
 // The rivals' plan of the lap, made once per track. In this physics a ship has to yaw at v x (the track's curvature +
@@ -105,16 +117,7 @@ function makePlan(track, lim, T) {
     ka[i] = kh / 9;
     c[i] = kh / 9 + (w(i + D) - 2 * x[i] + w(i - D)) / ((D * st) ** 2);
   }
-  for (let i = 0; i < n; i++) {
-    let k = 0;
-    for (let j = -3; j <= 3; j++) k = Math.max(k, Math.abs(c[(i + j + n) % n]));
-    let lo = 40, hi = 400;                               // the fastest v with v * k <= turnRate(v) * A
-    for (let it = 0; it < 22; it++) { const m = (lo + hi) / 2; if (m * k <= turnRate(m) * T.A) lo = m; else hi = m; }
-    vlim[i] = lo;
-  }
-  for (let pass = 0; pass < 2; pass++) {
-    for (let i = n - 1; i >= 0; i--) vlim[i] = Math.min(vlim[i], Math.sqrt(vlim[(i + 1) % n] ** 2 + 2 * T.brakeD * st));
-  }
+  vlim.set(speedLimits(track, c, T, HANDLING.feather));
   // where a lane of its own costs nothing: a straight, no pad just ahead, clear of the cuts and the loop
   const slack = new Float32Array(n), raw = new Float32Array(n), R = Math.round(150 / st);
   for (let i = 0; i < n; i++) {
@@ -130,6 +133,23 @@ function makePlan(track, lim, T) {
   }
   for (let i = 0; i < n; i++) { let a = 0; for (let j = -20; j <= 20; j++) a += raw[(i + j + n) % n]; slack[i] = a / 41; }
   return { x, slope, c, vlim, slack, pads };
+}
+
+// the speed each metre of the line allows a ship that flies as H does (ships.js HANDLING: it turns as the Feather at
+// the same share of its own top speed, then by its own turn), and the braking back from every limit
+function speedLimits(track, c, T, H) {
+  const n = track.n, st = track.step, vR = Math.sqrt(H.thrust / H.drag), vlim = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let k = 0;
+    for (let j = -3; j <= 3; j++) k = Math.max(k, Math.abs(c[(i + j + n) % n]));
+    let lo = 40, hi = 400 * vR;                          // the fastest v with v * k <= its turn rate * A
+    for (let it = 0; it < 22; it++) { const m = (lo + hi) / 2; if (m * k <= turnRate(m / vR) * vR * H.turn * T.A) lo = m; else hi = m; }
+    vlim[i] = lo;
+  }
+  for (let pass = 0; pass < 2; pass++) {
+    for (let i = n - 1; i >= 0; i--) vlim[i] = Math.min(vlim[i], Math.sqrt(vlim[(i + 1) % n] ** 2 + 2 * T.brakeD * st));
+  }
+  return vlim;
 }
 
 class Driver {
@@ -168,9 +188,13 @@ class Driver {
   }
 
   setLevel(name) {
-    const L = AI_LEVELS[name] || AI_LEVELS.hard, [p0, step, spread] = L.pace, [a, b, c] = this.seed;
+    const L0 = AI_LEVELS[name] || AI_LEVELS.hard, ace = this.e.ace && L0.ace, [p0, step, spread] = L0.pace, [a, b, c] = this.seed;
+    const L = ace ? { ...L0, ...ace.drive } : L0;
     this.level = L;
-    this.pace = p0 - this.slot * step + a * spread;      // engine: the front of the grid a touch quicker
+    // engine: the front of the grid a touch quicker; by its ship; the ace's a step stronger
+    const K = L0.kinds?.[this.e.kind] || {};
+    this.pace = (p0 - this.slot * step + a * spread) * (K.pace || 1) * (ace ? 1 + ace.pace : 1);
+    this.cornerK = K.corner || 1;
     this.lane = (b - 0.5) * 2 * L.lane;                  // where it sits where the line leaves room
     this.aggression = L.aggression * (0.8 + 0.2 * c);
   }
@@ -180,12 +204,15 @@ class Driver {
   // player's inputs: steer, airbrakes, throttle, brake, boost.
   think(dt) {
     const r = this.e.racer, race = this.race, tr = race.track, plan = race.plan, n = tr.n, T = Driver.tune;
-    const L = this.level, lim = race.lim, v = Math.max(20, r.vs);
+    const L = this.level, lim = race.lim, v = Math.max(20, r.vs), VL = race.vlims?.[this.e.kind] || plan.vlim;
     const i = ((Math.floor(r.s / tr.step) % n) + n) % n;
     const at = (m) => (i + Math.round(m / tr.step) + n) % n;
     const air = r.y > 2.6;
     const jump = air || tr.inGap(r.s + 20) || tr.inGap(r.s + v * 0.8) || tr.inGap(r.s) || tr.inGap(r.s - 40);
     const loop = tr.inLoop(r.s, 60);
+    // thrown off a crest (no cut under it, just ahead or just behind): nose down, back onto the deck sooner (track.js
+    // airPitch) - in the air the hull barely grips, and a track bending under it slides it across into the wall
+    this.inp.pitch = air && !tr.inGap(r.s) && !tr.inGap(r.s + v * 1.2) && !tr.inGap(r.s - 60) && tr.flipAt(r.s) < 0 ? -1 : 0;
     // the line where the ship will be once the steering has answered
     const iA = at(v * T.lead);
     const ws = r.s + this.seed[3] * 5000, wander = L.wander * (0.6 * Math.sin(ws / 173) + 0.4 * Math.sin(ws / 61 + this.seed[1] * 20));
@@ -222,21 +249,24 @@ class Driver {
     this.defT = Math.max(0, this.defT - dt);
     const straight = Math.abs(plan.c[i]) < 0.0012 && Math.abs(plan.c[at(v)]) < 0.0012;
     for (const o of race.entries) {
-      if (o === this.e) continue;
+      // (a wrecked ship being flown through - or this one - is no traffic)
+      if (o === this.e || o.racer.ghost > 0 || r.ghost > 0) continue;
       const or = o.racer, ds = race.gap(or.s, r.s), dx = or.x - r.x, close = r.vs - or.vs;
       if (ds < -60 || ds > 60 + Math.max(0, close) * 2.2 || Math.abs(or.y - r.y) > 4) continue;
-      if (ds > 12) {
+      // the two hulls' contact sizes (a Feather pair: 9.8 m across, 12.8 m along; the Anvil is bigger)
+      const W = race.wid(this.e, o), LN = race.len(this.e, o);
+      if (ds > LN - 0.8) {
         // ahead: closing on it in its path - pass, on a side picked once and held (the inside of the next bend when
         // there is room there, else the side the line is going anyway); boxed in: sit in its slipstream and wait
-        const ttc = close > 0 ? (ds - 12.8) / close : Infinity;
-        const inPath = Math.abs(or.x - xT) < 11 || Math.abs(dx) < 11;
+        const ttc = close > 0 ? (ds - LN) / close : Infinity;
+        const inPath = Math.abs(or.x - xT) < W + 1.2 || Math.abs(dx) < W + 1.2;
         if (inPath && close > 1 && ttc < 1.6 && !jump) {
           if (this.passT <= 0 || this.passWho !== o) {
-            const roomR = lim - 1 - or.x, roomL = or.x + lim - 1, need = 11.5 + 1.5 * (1 - this.aggression);
+            const roomR = lim - 1 - or.x, roomL = or.x + lim - 1, need = W + 1.7 + 1.5 * (1 - this.aggression);
             let okR = roomR > need, okL = roomL > need;
             // a pad just ahead: only a side that still runs over it (or a ship far slower than it): else wait for it
             // in the slipstream and go after the pad, with its speed
-            const lane = (sd) => or.x + sd * (11.6 + 1.2 * (1 - this.aggression));
+            const lane = (sd) => or.x + sd * (W + 1.8 + 1.2 * (1 - this.aggression));
             if (padX != null && close < 15) { okR = okR && Math.abs(lane(1) - padX) < 5; okL = okL && Math.abs(lane(-1) - padX) < 5; }
             let side = 0;
             if (nextC && (nextC > 0 ? okR : okL)) side = nextC;
@@ -244,20 +274,20 @@ class Driver {
             else side = okR ? 1 : okL ? -1 : 0;
             this.passSide = side; this.passWho = o; this.passT = side ? 1.6 : 0.3;
           }
-          if (this.passSide) xT = or.x + this.passSide * (11.6 + 1.2 * (1 - this.aggression));
+          if (this.passSide) xT = or.x + this.passSide * (W + 1.8 + 1.2 * (1 - this.aggression));
         } else if (ds < 45 && close > -8 && Math.abs(dx) < 8 && this.odo > 700 && straight && !jump && !loop && this.passT <= 0) draftX = or.x;
         // never into its tail (the rammer pays): ease off, harder the sooner the noses would meet - judged by where
         // its own drift across (a pass under way) will have put it by then
         const xAt = this.passT > 0 ? r.x + clamp(r.vx * Math.min(ttc, 1.2), -15, 15) : r.x;
-        if (close > 0 && ttc < 1.2 && Math.abs(or.x - xAt) < 10.5) follow = Math.min(follow, or.vs - 2 - (1.2 - ttc) * 14);
-        else if (ds < 22 && Math.abs(dx) < 10.5) follow = Math.min(follow, or.vs + (ds - 16) * (0.6 + this.aggression));
-      } else if (ds > -14) {
+        if (close > 0 && ttc < 1.2 && Math.abs(or.x - xAt) < W + 0.7) follow = Math.min(follow, or.vs - 2 - (1.2 - ttc) * 14);
+        else if (ds < LN + 9.2 && Math.abs(dx) < W + 0.7) follow = Math.min(follow, or.vs + (ds - LN - 3.2) * (0.6 + this.aggression));
+      } else if (ds > -LN - 1.2) {
         // alongside: hold the gap across (never steer into it) - judged a moment ahead, drift and all; pinned at the
         // wall, drop back or press on
         const dxP = dx + (or.vx - r.vx) * 0.35;
-        if (Math.abs(dx) < 12.5 || Math.abs(dxP) < 12.5) {
-          if (dx > 0) xT = Math.min(xT, or.x - 11.8); else xT = Math.max(xT, or.x + 11.8);
-          if (Math.abs(xT) > lim - 0.5 && Math.abs(dx) < 10.5) follow = Math.min(follow, ds > 0 ? or.vs - 6 : Infinity);
+        if (Math.abs(dx) < W + 2.7 || Math.abs(dxP) < W + 2.7) {
+          if (dx > 0) xT = Math.min(xT, or.x - W - 2); else xT = Math.max(xT, or.x + W + 2);
+          if (Math.abs(xT) > lim - 0.5 && Math.abs(dx) < W + 0.7) follow = Math.min(follow, ds > 0 ? or.vs - 6 : Infinity);
         }
       } else if (o.player && L.defend > 0 && ds > -45 && (or.vs > r.vs + 1 || ds > -30)) guard = o;
     }
@@ -268,8 +298,8 @@ class Driver {
     // (then no new move for a while: no weaving)
     this.defCool = Math.max(0, (this.defCool || 0) - dt);
     if (guard && !jump && !loop && straight && this.passT <= 0) {
-      const g = guard.racer, back = -race.gap(g.s, r.s), ttc = (back - 12.8) / Math.max(0.1, g.vs - r.vs);
-      if (this.defT <= 0 && this.defCool <= 0 && back > 16 && ttc > 0.8 && Math.abs(g.x - r.x) > 2) {
+      const LN = race.len(this.e, guard), g = guard.racer, back = -race.gap(g.s, r.s), ttc = (back - LN) / Math.max(0.1, g.vs - r.vs);
+      if (this.defT <= 0 && this.defCool <= 0 && back > LN + 3.2 && ttc > 0.8 && Math.abs(g.x - r.x) > 2) {
         this.defX = r.x + (g.x - r.x) * L.defend; this.defT = 2.0; this.defCool = 3.5;
       }
       if (this.defT > 0 && this.defX != null) xT = this.defX;
@@ -282,7 +312,9 @@ class Driver {
     // velocity follows the nose at the grip's rate (a heading that turns it there in ~tauTh, plus the slip the bend
     // needs), the nose follows the steering at the turn rate (in ~tauPsi, slower than the 0.12 s the stick takes to
     // answer); the bend ahead is fed forward. Gains fixed in steer units over-steered slowly and under-damped fast.
-    const tRate = turnRate(v), g = gripAt(v), slope = plan.slope[iA];
+    // (its own ship's turn and grip: track.js scales them by its top speed and turn)
+    const H = r.handling, vR = Math.sqrt(H.thrust / H.drag);
+    const tRate = turnRate(v / vR) * vR * H.turn, g = gripAt(v / vR) * vR * H.turn, slope = plan.slope[iA];
     const slip = clamp((v * cFF) / g, -0.3, 0.3), th = Math.atan2(r.vx, v);
     const thD = Math.atan(slope) - clamp((r.x - xT) / (v * T.tauE), -0.3, 0.3);
     let psiDes = clamp(th + (thD - th) / (g * T.tauTh) + slip, -0.45, 0.45);
@@ -312,8 +344,8 @@ class Driver {
     this.inp.airR = this.airOn > 0 ? 1 : 0;
     // speed: the line's limit just ahead (braking already folded in), traffic; flat out over a cut
     let vT = Infinity;
-    for (let d = 0; d <= v * 0.3; d += 8) vT = Math.min(vT, plan.vlim[at(d)]);
-    vT *= L.corner;
+    for (let d = 0; d <= v * 0.3; d += 8) vT = Math.min(vT, VL[at(d)]);
+    vT *= L.corner * (this.cornerK || 1);
     let vF = Math.min(vT, Math.max(20, follow));
     if (esc > 0.85 && Math.abs(cFF) > 0.002) vF = Math.min(vF, r.vs - 8);   // running wide in a bend: lift
     if (jump) vF = Math.max(vF, r.vs + 50);
@@ -324,7 +356,7 @@ class Driver {
     // full; at once to finish a pass or to get back up to speed after a knock
     const E = r.boostEnergy;
     let room = Infinity;
-    for (let d = 0; d < v * T.boostRoom; d += 16) room = Math.min(room, plan.vlim[at(d)]);
+    for (let d = 0; d < v * T.boostRoom; d += 16) room = Math.min(room, VL[at(d)]);
     const roomy = room > Math.min(375, v + 45) && !loop && follow > r.vs + 10;
     let boost = false;
     this.knockT = (r.slow || 0) > 3 ? 1.5 : Math.max(0, (this.knockT || 0) - dt);
@@ -351,46 +383,92 @@ class Driver {
 export { Driver };
 
 export class Race {
-  // opts.rivals: the ship the rivals are cloned from (the Feather when the player flies another ship); opts.name: the
-  // player's ship's name in the standings
+  // opts.sources: the loaded ship of each kind the rivals are cloned from ({ feather, rocket, heavy }; a kind missing
+  // flies as a Feather); opts.mixed: false - Feathers in every rival slot; opts.kind: the player's ship; opts.livery:
+  // the player's livery (a rival of its ship wears another); opts.name: the player's ship's name in the standings
   constructor(scene, track, player, playerRacer, opts = {}) {
     this.scene = scene;
     this.track = track;
-    this.lim = TRACK_W / 2 - player.halfSpan * 0.92;      // the furthest a hull's centre gets from the middle
-    this.plan = makePlan(track, this.lim, Driver.tune);
     this.level = 'hard';
     this.entries = [];
     this.events = [];
-    const rnd = mulberry32(31);
+    const rnd = mulberry32(31), src = { feather: opts.rivals || player, ...(opts.sources || {}) }, pk = opts.kind || 'feather';
+    const worn = {};
     let team = 1;
     for (let slot = 0; slot < TEAMS.length; slot++) {
       let e;
-      if (slot === PLAYER_SLOT) e = { ship: player, racer: playerRacer, team: opts.name ? { ...TEAMS[0], name: opts.name } : TEAMS[0], player: true };
-      else {
-        const t = TEAMS[team++];
-        const ship = new Ship(null, { cloneOf: opts.rivals || player, team: t, lights: false, engine: t.engine });
+      if (slot === PLAYER_SLOT) {
+        playerRacer.handling = HANDLING[pk] || HANDLING.feather;
+        e = { ship: player, racer: playerRacer, team: opts.name ? { ...TEAMS[0], name: opts.name } : TEAMS[0], player: true, kind: pk };
+      } else {
+        const t = TEAMS[team++], want = opts.mixed === false ? 'feather' : RIVAL_SHIPS[slot] || 'feather';
+        const kind = src[want] ? want : 'feather';
+        // a Feather in its team's paint; a Comet or an Anvil in a livery of its own (not the one the player's wears)
+        const ship = new Ship(null, { cloneOf: src[kind], team: kind === 'feather' ? t : null, lights: false, engine: t.engine });
+        if (kind !== 'feather' && LIVERIES[kind]) {
+          const names = LIVERIES[kind].names, pool = [...names.slice(1), names[0]].filter((n) => !(pk === kind && n === opts.livery));
+          ship.kind = kind;
+          ship.livery = pool[(worn[kind] = (worn[kind] ?? -1) + 1) % pool.length];
+        }
         scene.add(ship.root);
         const racer = new TrackRacer(ship, track);
-        e = { ship, racer, team: t, player: false };
+        racer.handling = HANDLING[kind];
+        e = { ship, racer, team: t, player: false, kind };
         e.driver = new Driver(e, this, rnd, slot);
         e.engineDelay = 0.2 + rnd() * 1.0;
       }
-      e.slot = slot;
+      e.slot = e.home = slot;
+      e.idx = this.entries.length;
       e.racer.onEvent = (ev) => this.onRacerEvent(e, ev);
       this.entries.push(e);
     }
+    // each pair's contact box (the hulls' half spans and lengths; a Feather pair: 9.8 x 12.8 m)
+    const E = this.entries, n = E.length;
+    this.WID = new Float32Array(n * n); this.LEN = new Float32Array(n * n);
+    for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) {
+      this.WID[a * n + b] = (E[a].ship.halfSpan + E[b].ship.halfSpan) * 0.951;
+      this.LEN[a * n + b] = ((E[a].ship.length || 13.34) + (E[b].ship.length || 13.34)) * 0.48;
+    }
+    // the furthest a hull's centre gets from the middle - the widest ship's - the line, and each ship's speeds on it
+    this.lim = TRACK_W / 2 - Math.max(...E.map((e) => e.ship.halfSpan)) * 0.92;
+    this.replan();
     this.player = this.entries[PLAYER_SLOT];
+    this.setDifficulty(this.level);
     this.reset();
   }
 
-  // the settings' "AI difficulty": the rivals' engines, pads, boost and racecraft (at once, mid-race too)
+  wid(a, b) { return this.WID[a.idx * this.entries.length + b.idx]; }
+  len(a, b) { return this.LEN[a.idx * this.entries.length + b.idx]; }
+
+  // the settings' "AI difficulty": the rivals' engines, pads, boost and racecraft (at once, mid-race too) - and which
+  // of them is its ace (AI_LEVELS ace: the first of that ship on the grid; Feathers only: the front one)
   setDifficulty(level) {
     this.level = AI_LEVELS[level] ? level : 'hard';
+    const A = AI_LEVELS[this.level].ace, rivals = this.entries.filter((e) => !e.player);
+    const ace = A && (rivals.find((e) => e.kind === A.kind) || rivals[0]);
+    for (const e of this.entries) e.ace = e === ace;
+    // the ace on pole: it swaps grid slots with the one there (the grid takes it at the next reset - now, if the ships
+    // are still sitting on it)
+    const slots = this.entries.map((e) => e.slot);
+    for (const e of this.entries) e.slot = e.home;
+    if (ace) { const pole = this.entries.find((e) => e.slot === 0); [pole.slot, ace.slot] = [ace.slot, 0]; }
+    for (const e of this.entries) if (e.driver) e.driver.slot = e.slot;
+    if (this.state === 'grid' && this.entries.some((e, k) => e.slot !== slots[k])) this.reset();
     for (const e of this.entries) e.driver?.setLevel(this.level);
   }
 
+  // fresh characters for the rivals (seeded): the balance checks race many grids
+  reseed(seed) {
+    const rnd = mulberry32(1000 + seed);
+    for (const e of this.entries) if (e.driver) { e.driver.seed = [rnd(), rnd(), rnd(), rnd()]; e.driver.setLevel(this.level); }
+  }
+
   // the plan again after a change to Driver.tune's line or limit settings (tuning, profile.js)
-  replan() { this.plan = makePlan(this.track, this.lim, Driver.tune); }
+  replan() {
+    this.plan = makePlan(this.track, this.lim, Driver.tune);
+    this.vlims = {};
+    for (const e of this.entries) this.vlims[e.kind] ||= e.kind === 'feather' ? this.plan.vlim : speedLimits(this.track, this.plan.c, Driver.tune, HANDLING[e.kind]);
+  }
 
   // signed track distance a - b, wrapped to half a lap
   gap(a, b) {
@@ -416,12 +494,13 @@ export class Race {
       e.racer.locked = true;
       e.racer.pose(0);
       Object.assign(e, { progress: -p.back, lastS: e.racer.s, laps: [], lapStart: 0, finished: false, finishTime: null,
-        clean: true, best: Infinity });
+        clean: true, best: Infinity, wrecks: 0, dmgWall: 0, dmgShip: 0 });
+      e.racer.repair();
       e.driver?.reset();
       e.ship.clearTrails();
     }
     Object.assign(this, { state: 'grid', time: 0, count: 0, finishedAt: null, shown: false });
-    this.stats = { contacts: 0, walls: 0, jolts: 0, falls: 0 };   // for the automated checks
+    this.stats = { contacts: 0, walls: 0, jolts: 0, falls: 0, wrecks: 0 };   // for the automated checks
     this.touch = null;
     this.score = { pads: 0, clean: 0, position: 0, fastest: 0 };
   }
@@ -439,6 +518,16 @@ export class Race {
       e.ship.hit(new THREE.Vector3(-ev.side, 0, 0), ev.v / 18, e.ship.root.worldToLocal(ev.at.clone()));
       this.events.push({ type: 'wallfx', at: ev.at, v: ev.v, player: e.player });
     }
+    if (ev.type === 'damage') {
+      if (ev.why === 'wall') e.dmgWall += ev.amount; else e.dmgShip += ev.amount;
+      if (e.player) this.events.push({ type: 'damage', amount: ev.amount, why: ev.why, player: true });
+    }
+    if (ev.type === 'wreck') {
+      e.wrecks++;
+      if (this.stats) this.stats.wrecks++;
+      e.ship.hit(new THREE.Vector3(0, 0, 1), 1.5, new THREE.Vector3(0, 0.5, 0));
+      this.events.push({ type: 'wreck', at: ev.at, player: e.player, entry: e });
+    }
     if (!(this.state === 'racing' || this.state === 'finished') || e.finished) return;
     if (ev.type === 'scrape') { if (!e.player && ev.wall) this.stats.walls++; if (ev.v > 4) e.clean = false; }
     if (e.player && ev.type === 'pad') this.score.pads += 2;
@@ -449,7 +538,7 @@ export class Race {
 
   step(dt, inp, playerActive) {
     const racing = this.racing;
-    for (const e of this.entries) e.racer.locked = !racing;
+    for (const e of this.entries) { e.racer.locked = !racing; e.racer.armed = racing && !e.finished; }
     if (this.state === 'grid') {
       // the rivals' engines come alive with the player's; the lights start when everyone is ready
       if (this.player.ship.engineOn) {
@@ -467,7 +556,7 @@ export class Race {
     for (const e of this.entries) {
       let d = 0;
       for (const o of this.entries) {
-        if (o === e) continue;
+        if (o === e || o.racer.ghost > 0 || e.racer.ghost > 0) continue;
         const ds = this.gap(o.racer.s, e.racer.s);
         if (ds > 8 && ds < 45 && Math.abs(o.racer.x - e.racer.x) < 4.5 && e.racer.vs > 60) d = Math.max(d, 1 - (ds - 8) / 37);
       }
@@ -482,46 +571,90 @@ export class Race {
       e.racer.step(dt, !racing ? HOLD : e.finished ? e.driver.coast(dt) : e.driver.think(dt));
       e.racer.events.length = 0;
     }
-    if (racing) this.collide(dt, playerActive);
+    if (racing) { this.unghost(); this.collide(dt, playerActive); }
     this.count_laps();
+  }
+
+  // a ghost's time runs out only clear of every other hull (it would come back solid inside one)
+  unghost() {
+    const E = this.entries;
+    for (const e of E) {
+      const r = e.racer;
+      if (!(r.ghost > 0 && r.ghost < 0.05)) continue;
+      for (const o of E) {
+        if (o === e || o.racer.ghost > 0) continue;
+        if (Math.abs(this.gap(o.racer.s, r.s)) < this.len(e, o) && Math.abs(o.racer.x - r.x) < this.wid(e, o)) { r.ghost = 0.05; break; }
+      }
+    }
+  }
+
+  // a knock between two ships: each takes the other's ram (ships.js) - by the closing speed past a brush and by the
+  // speed (none at the grid's crawl), at a lower rate than a wall's. atk: an airbrake attack (+1 a on b, -1 b on a) -
+  // the one attacked takes ATTACK.dmg times its share, the attacker ATTACK.keep of its own
+  ram(ea, eb, v, atk = 0) {
+    const k = DAMAGE.ship * Math.max(0, v - DAMAGE.shipGraze) * damageSpeed(Math.max(ea.racer.vs, eb.racer.vs));
+    if (k <= 0) return;
+    ea.racer.hurt(k * (eb.racer.handling.ram || 1) * (atk < 0 ? ATTACK.dmg : atk > 0 ? ATTACK.keep : 1), 'ship');
+    eb.racer.hurt(k * (ea.racer.handling.ram || 1) * (atk > 0 ? ATTACK.dmg : atk < 0 ? ATTACK.keep : 1), 'ship');
   }
 
   // Ship to ship. Overlaps are pushed apart over a few steps (soft: a hull jumping sideways by the whole overlap in
   // one step read as a stutter) and the closing speed is traded between the two. The jolt, the shield flash and the
   // sparks come once per contact - or again for a fresh blow - never on every step two hulls stay touching.
   collide(dt, playerActive) {
-    const E = this.entries, n = E.length, LEN = 12.8, WID = 9.8, SOFT = 0.35;
-    if (!this.touch) { this.touch = new Float32Array(n * n); this.knock = new Float32Array(n * n); }
-    const lim = TRACK_W / 2 - E[0].ship.halfSpan * 0.92;
+    const E = this.entries, n = E.length, SOFT = 0.35;
+    if (!this.touch) { this.touch = new Float32Array(n * n); this.knock = new Float32Array(n * n); this.hurtT = new Float32Array(n * n); }
     for (let a = 0; a < n; a++) {
       for (let b = a + 1; b < n; b++) {
-        const key = a * n + b;
+        const key = a * n + b, LEN = this.LEN[key], WID = this.WID[key];
         this.knock[key] = Math.max(0, this.knock[key] - dt);
+        this.hurtT[key] = Math.max(0, this.hurtT[key] - dt);
         const A = E[a].racer, B = E[b].racer;
         const ds = this.gap(B.s, A.s), dx = B.x - A.x;
         if (((E[a].player || E[b].player) && !playerActive) || A.y > 4 || B.y > 4 ||  // one over the other in the air
+          A.ghost > 0 || B.ghost > 0 ||                                             // a wreck being flown through
           Math.abs(ds) >= LEN || Math.abs(dx) >= WID) { this.touch[key] = 0; continue; }
+        const limA = TRACK_W / 2 - E[a].ship.halfSpan * 0.92, limB = TRACK_W / 2 - E[b].ship.halfSpan * 0.92;
         const first = this.touch[key] === 0;
         this.touch[key] += dt;
         if (first) this.stats.contacts++;
         const ox = WID - Math.abs(dx), os = LEN - Math.abs(ds);
-        let v = 0, side = 0;
+        let v = 0, side = 0, atk = 0, struck = false;
         if (ox < os * 0.75) {                                // side by side: pushed apart sideways
           // at most 25 cm a step: two hulls landing on each other after a jump overlapped by metres and were shoved
           // apart in two or three lurches; the traded speed does the rest
           const sx = Math.sign(dx || 1), push = Math.min(0.25, (ox * SOFT) / 2);
-          A.x -= sx * push;
-          B.x += sx * push;
+          // an airbrake out on the other's side: an attack (ATTACK) - that hull holds its line, the other takes the
+          // push (atk +1: A on B, -1: B on A; both at once: an even shove)
+          const atkA = A.airIn * sx > 0.5, atkB = B.airIn * -sx > 0.5;
+          atk = atkA === atkB ? 0 : atkA ? 1 : -1;
+          if (atk > 0) B.x += sx * push * 2;
+          else if (atk < 0) A.x -= sx * push * 2;
+          else { A.x -= sx * push; B.x += sx * push; }
           // never through a wall: the one pinned there stays, the other takes the whole separation
-          if (Math.abs(A.x) > lim) { B.x += sx * (Math.abs(A.x) - lim); A.x = Math.sign(A.x) * lim; }
-          if (Math.abs(B.x) > lim) { A.x -= sx * (Math.abs(B.x) - lim); B.x = Math.sign(B.x) * lim; }
+          if (Math.abs(A.x) > limA) { B.x += sx * (Math.abs(A.x) - limA); A.x = Math.sign(A.x) * limA; }
+          if (Math.abs(B.x) > limB) { A.x -= sx * (Math.abs(B.x) - limB); B.x = Math.sign(B.x) * limB; }
           const rel = B.vx - A.vx;
           if (rel * sx < 0) {
-            const j = rel * 0.6; A.vx += j; B.vx -= j; v = Math.abs(rel);
+            const j = rel * 0.6;
+            if (atk > 0) B.vx -= 2 * j; else if (atk < 0) A.vx += 2 * j; else { A.vx += j; B.vx -= j; }
+            v = Math.abs(rel);
             if (first || this.knock[key] <= 0) {                // a side swipe costs both a little - once a blow
               const loss = 0.05 * Math.min(1, v / 15);
-              A.slow = (A.slow || 0) + A.vs * loss * A.handling.impact; B.slow = (B.slow || 0) + B.vs * loss * B.handling.impact;
+              if (atk <= 0) A.slow = (A.slow || 0) + A.vs * loss * A.handling.impact;
+              if (atk >= 0) B.slow = (B.slow || 0) + B.vs * loss * B.handling.impact;
             }
+          }
+          if (this.hurtT[key] <= 0 && (v > DAMAGE.shipGraze || atk)) {
+            this.hurtT[key] = 0.35;
+            if (atk) {                                         // the attack's blow: the other shoved off and slowed
+              const vic = atk > 0 ? B : A;
+              vic.vx += (atk > 0 ? sx : -sx) * ATTACK.shove;
+              vic.slow = (vic.slow || 0) + vic.vs * ATTACK.loss * vic.handling.impact;
+              v = Math.max(v, ATTACK.min);
+              struck = true;
+            }
+            this.ram(E[a], E[b], v, atk);
           }
           side = sx;
         } else {
@@ -534,6 +667,7 @@ export class Race {
             // hulls overlapped and both ships ground to a halt ("i hit a player and we both get stuck")
             const dv = rear.vs - front.vs, k = Math.min(1, dv / 15);
             rear.vs -= dv * 0.5;
+            if (this.hurtT[key] <= 0 && dv > DAMAGE.shipGraze) { this.hurtT[key] = 0.35; this.ram(E[a], E[b], dv); }
             if (first || this.knock[key] <= 0) {
               rear.slow = (rear.slow || 0) + 0.04 * rear.vs * k * rear.handling.impact;
               front.slow = (front.slow || 0) + front.vs * 0.03 * k * front.handling.impact;
@@ -549,21 +683,25 @@ export class Race {
         }
         A.pose(0);
         B.pose(0);
-        if (v <= 3 || !(first || (v > 8 && this.knock[key] <= 0))) continue;
+        if (!struck && (v <= 3 || !(first || (v > 8 && this.knock[key] <= 0)))) continue;
         this.knock[key] = 0.35;
         this.stats.jolts++;
-        // the hulls jolt apart, the shields light where they met
+        if (struck) this.stats.attacks = (this.stats.attacks || 0) + 1;
+        // the hulls jolt apart, the shields light where they met (an attacker barely moved, the one attacked hard)
         const at = A.pos.clone().add(B.pos).multiplyScalar(0.5), k = v / 12;
         if (side) {
-          E[a].ship.hit(new THREE.Vector3(-side, 0, 0), k, E[a].ship.root.worldToLocal(at.clone()));
-          E[b].ship.hit(new THREE.Vector3(side, 0, 0), k, E[b].ship.root.worldToLocal(at.clone()));
+          E[a].ship.hit(new THREE.Vector3(-side, 0, 0), k * (atk > 0 ? 0.3 : atk < 0 ? 1.5 : 1), E[a].ship.root.worldToLocal(at.clone()));
+          E[b].ship.hit(new THREE.Vector3(side, 0, 0), k * (atk < 0 ? 0.3 : atk > 0 ? 1.5 : 1), E[b].ship.root.worldToLocal(at.clone()));
         } else {
           const aRear = ds > 0;
           E[a].ship.hit(new THREE.Vector3(0, 0, aRear ? 1 : -1), k, E[a].ship.root.worldToLocal(at.clone()));
           E[b].ship.hit(new THREE.Vector3(0, 0, aRear ? -1 : 1), k, E[b].ship.root.worldToLocal(at.clone()));
         }
         if (v > 6) {                                       // a real hit: sparks (a brush is silent)
-          if (E[a].player || E[b].player) { this.player.clean = false; this.events.push({ type: 'bump', at, v }); }
+          if (E[a].player || E[b].player) {
+            this.player.clean = false;
+            this.events.push({ type: 'bump', at, v, attack: (atk > 0 && E[a].player) || (atk < 0 && E[b].player) });
+          }
           else this.events.push({ type: 'scrape', at, v, ai: true });
         }
       }
@@ -629,7 +767,7 @@ export class Race {
         time = this.time + (LAPS * L - e.progress) / avg;
         est = true;
       }
-      return { name: e.team.name, css: e.team.css, time, est, best: e.best, player: e.player };
+      return { name: e.team.name, css: e.team.css, time, est, best: e.best, player: e.player, kind: e.kind, wrecks: e.wrecks };
     });
     rows.sort((a, b) => a.time - b.time);
     return rows;

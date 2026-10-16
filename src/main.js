@@ -19,7 +19,7 @@ import { TrackRacer, TRACK_W, PERKS } from './track.js';
 import { patchShaders } from './look.js';
 import { smoothstep } from './noise.js';
 import { loadShip, Ship } from './ship.js';
-import { SHIP_URLS, RIVAL_TIER, HANDLING, shipChoice, shipName } from './ships.js';
+import { SHIP_URLS, RIVAL_TIER, HANDLING, LIVERIES, shipChoice, shipName } from './ships.js';
 import { Flight } from './flight.js';
 import { CameraRig } from './camera.js';
 import { Input } from './input.js';
@@ -108,9 +108,12 @@ async function boot() {
     if (!baking) { status(`Loading the ${SHIP_NAME}` + got); progress('ship', gotF); }
   });
   shipLoad.catch(() => {});
-  // the rivals are Feathers whichever ship the player flies: another ship brings the Feather along for them
-  const rivalLoad = SHIP !== 'feather' ? loadShip(SHIP_URLS.feather[RIVAL_TIER[Q.tier]]) : null;
-  rivalLoad?.catch(() => {});
+  // the rivals: Feathers, two Comets and two Anvils (Settings "Rival ships": Feathers only) - each ship the player's
+  // isn't is loaded alongside it, for them
+  const MIXED = savedSettings().rivalMix !== 'feather';
+  const rivalLoads = (MIXED ? ['feather', 'rocket', 'heavy'] : ['feather']).filter((k) => k !== SHIP)
+    .map((k) => [k, loadShip(SHIP_URLS[k][RIVAL_TIER[Q.tier]])]);
+  for (const [, l] of rivalLoads) l.catch(() => {});
   status(MAP === 'meadow' ? 'Raising the hills' : 'Building the circuit');
   progress('circuit');
   await Promise.all([nextFrame(), bakedLoad, jobLoad]);
@@ -127,10 +130,10 @@ async function boot() {
   progress('ship', gotF);
   const ship = await shipLoad;
   ship.kind = SHIP;                                        // (which ship: its livery - Settings)
-  const rivalShip = rivalLoad ? await rivalLoad : ship;
+  const sources = { [SHIP]: ship };                         // each ship the rivals are cloned from
+  for (const [k, l] of rivalLoads) sources[k] = await l;
   await world.ready;                                   // (a world's own models: the space station's - before the warm-up)
-  ship.upgradeMaterials(renderer.capabilities.getMaxAnisotropy(), renderer);
-  if (rivalShip !== ship) rivalShip.upgradeMaterials(renderer.capabilities.getMaxAnisotropy(), renderer);
+  for (const src of Object.values(sources)) src.upgradeMaterials(renderer.capabilities.getMaxAnisotropy(), renderer);
   scene.add(ship.root);
   console.info(`ship: ${Math.round(ship.tris)} tris, ${ship.rotors.length} rotors, canopy ${!!ship.canopy}, ` +
     `plumes ${ship.plumes.length}, tangents repaired ${ship.tangentsFixed}`);
@@ -143,7 +146,8 @@ async function boot() {
   // eight rivals, cloned before the player's ship first animates (their canopies and rotors start at rest)
   status('Rolling out the rivals');
   progress('rivals');
-  const race = racer ? new Race(scene, track, ship, racer, { rivals: rivalShip, name: SHIP_NAME }) : null;
+  const race = racer ? new Race(scene, track, ship, racer, { sources, mixed: MIXED, kind: SHIP, name: SHIP_NAME,
+    livery: savedSettings()[LIVERIES[SHIP]?.key] || LIVERIES[SHIP]?.names[0] }) : null;
   world.race = race;                                       // (a world may read the ships: the ice planet's wakes)
   let mode = racer ? 'race' : 'free';
   let ctl = racer || flight;
@@ -235,6 +239,7 @@ async function boot() {
   const rivalLights = [0, 1, 2].map(() => { const l = new THREE.PointLight(0xffffff, 0, 70, 1.6); l.userData.rivalLight = true; scene.add(l); return l; });
   const RIVAL_LIGHT = { y: 0.3, z: 9.5, cd: 320 };
   const input = new Input(canvas);
+  input.airbrakes = (HANDLING[SHIP] || HANDLING.feather).airbrakes || 1;   // (the Anvil holds two)
   const touch = new TouchControls(input);              // phones and tablets: sticks and buttons on screen (the setting)
   const fx = new FX(scene, camera);
   fx.track = track;
@@ -546,6 +551,7 @@ async function boot() {
     world.wreck?.setEffects(v.wreckFx !== false);       // the derelict's sparks, flickering lamps, drifting debris, arcs
     world.wreck?.setMist(v.wreckMist !== false);        // the coolant mist in its reactor and machinery halls
     TrackRacer.drifting = false;                        // (drifting is off: no longer a setting)
+    TrackRacer.damage = v.damage !== false;             // the hulls wear down; a wreck resets
     TrackRacer.airPitch = v.airPitch !== false;
     bloom.enabled = v.bloom;
     heat.enabled = v.engineHeat !== false;
@@ -704,7 +710,7 @@ async function boot() {
     }
   };
   const makeShowroom = () => (showroom ||= new Showroom(renderer, { player: ship, playerId: SHIP,
-    others: rivalShip !== ship ? { feather: rivalShip } : {}, tier: RIVAL_TIER[Q.tier], layers: camera.layers.mask }));
+    others: Object.fromEntries(Object.entries(sources).filter(([k]) => k !== SHIP)), tier: RIVAL_TIER[Q.tier], layers: camera.layers.mask }));
   const showcase = (on, id) => {
     if (!on || settings.v.showroom === false) { if (showroom) showroom.active = false; return; }
     makeShowroom().active = true;
@@ -924,7 +930,20 @@ async function boot() {
         } else if (e.type === 'go') { hud.message('GO!', 1.2); audio.go(); }
         else if (e.type === 'lap') { audio.lap(); hud.message(`Lap ${e.lap}: ${e.time.toFixed(2)} s${e.clean ? '  -  clean lap +5' : ''}`, 3); }
         else if (e.type === 'finish') { audio.finish(); hud.message(`Finished P${e.pos}!`, 3); }
-        else if (e.type === 'bump') { fx.scrape(e.at, ctl.vel, e.v / 15); rig.shake = Math.max(rig.shake, Math.min(0.7, e.v / 15)); audio.bump(e.at, e.v); }
+        else if (e.type === 'bump') {
+          // (the player's own airbrake attack: the hull held steady - a little shake)
+          fx.scrape(e.at, ctl.vel, e.v / 15); rig.shake = Math.max(rig.shake, Math.min(0.7, e.v / 15) * (e.attack ? 0.35 : 1)); audio.bump(e.at, e.v);
+        }
+        else if (e.type === 'wreck') {
+          // a hull gone: sparks off it (a fireball left behind at these speeds streaked the whole screen) and its shield
+          // lit; it races on from there, flown through for 3 s
+          if (camera.position.distanceTo(e.at) < 300) fx.scrape(e.at, e.entry.racer.vel, 1);
+          if (e.player && mode === 'race') {
+            audio.crash(e.at);
+            rig.shake = Math.max(rig.shake, 1.0);
+            hud.message('Hull down  -  flown through for 3 s', 2.5);
+          } else audio.bump(e.at, 30);
+        }
         else if (e.type === 'scrape') {
           if (camera.position.distanceTo(e.at) < 200) fx.scrape(e.at, new THREE.Vector3(), e.v / 20);
           audio.scrape(e.at, e.v);
@@ -1056,7 +1075,8 @@ async function boot() {
     else if (ship.power > 0.01) { state = 'SHUTTING DOWN'; cls = 'warn'; }
     const f = ctl.forward;
     hud.update(dt, { speed: ctl.speed, agl: MAP !== 'meadow' && mode === 'free' ? NaN : ctl.agl, throttle: ctl.throttle,
-      boostEnergy: ctl.boostEnergy, boosting: ctl.boosting, airCharge: inp.airCharge, state, stateClass: cls, camera: rig.name, assist: ctl.assist,
+      boostEnergy: ctl.boostEnergy, boosting: ctl.boosting, airCharge: inp.airCharge, airCharges: inp.airCharges, state, stateClass: cls, camera: rig.name, assist: ctl.assist,
+      health: mode === 'race' && racer ? racer.health / racer.maxHealth : null, ghost: mode === 'race' && racer ? racer.ghost : 0,
       drifting: mode === 'race' && !!ctl.drift, driftCharge: ctl.driftCharge, driftTier: ctl.driftTier || 0, driftChain: ctl.chain || 0,
       invert: input.invert, lapTime: lap.started ? lap.time : NaN, lastLap: lap.last, bestLap: lap.best, lap: lap.lap,
       x: ctl.pos.x, z: ctl.pos.z, fx: f.x, fz: f.z, race: race ? race.hud() : null, mode });

@@ -13,13 +13,23 @@ export const SHIPS = [
 // speed-squared drag (less of it: a higher top speed for the same pull); turn - the yaw rate and grip it has at the
 // same share of its own top speed; impact - what a knock costs it (walls, other ships). The Comet: a higher top
 // speed and a little sharper in the turns, a little less on the boost, and every knock costs it half as much again -
-// a clean lap a few per cent quicker than the Feather's, a scrappy one slower
+// a clean lap a few per cent quicker than the Feather's, a scrappy one slower.
+// health - its hull (track.js TrackRacer.hurt: walls and other ships wear it down; at 0 the ship is reset where it is,
+// slowed, and can be flown through for 3 s); ram - how hard it hits another ship (the damage it deals); airbrakes -
+// the charges it holds (input.js: one fires at a time, each back 3 s after it was spent). The Feather is the middle
+// of all three, the Comet a glass cannon, the Anvil the tank that hits hardest.
 export const HANDLING = {
-  feather: { thrust: 1, boost: 1, drag: 1, turn: 1, impact: 1 },
-  rocket: { thrust: 1, boost: 0.9, drag: 0.92, turn: 1.05, impact: 1.5 },   // (clean flying laps 2-4 % under the Feather's)
+  feather: { thrust: 1, boost: 1, drag: 1, turn: 1, impact: 1, health: 100, ram: 1, airbrakes: 1 },
+  rocket: { thrust: 1, boost: 0.9, drag: 0.92, turn: 1.05, impact: 1.5, health: 80, ram: 0.6, airbrakes: 1 },   // (clean flying laps 2-4 % under the Feather's)
   // the Anvil: a little slower off the line and in the turns, more on the boost, and knocks cost it a third less
-  heavy: { thrust: 0.97, boost: 1.12, drag: 1, turn: 0.94, impact: 0.65 },
+  heavy: { thrust: 0.97, boost: 1.12, drag: 1, turn: 0.94, impact: 0.65, health: 150, ram: 1.6, airbrakes: 2 },
 };
+
+// the rivals' ships, by grid slot (the player's slot, 4, is skipped): two Comets near the front (passing is hard: from
+// the back their speed was lost in the pack), two Anvils further back (off the front row their boost out-dragged the
+// pole-sitter and held the lead), the rest Feathers; the level's ace takes pole (race.js).
+// (Settings "Rival ships": Feathers only puts Feathers in every slot)
+export const RIVAL_SHIPS = ['feather', 'rocket', 'feather', 'rocket', null, 'heavy', 'feather', 'heavy', 'feather'];
 
 // which bake of the ships' maps the files are: a livery's maps (and its edge map) fit only the hull atlas they were
 // baked on, and Pages lets a browser keep a file ten minutes - a new bake changes the tag, so the ship and its liveries

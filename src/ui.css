@@ -166,9 +166,18 @@ body.lite .hp { background: linear-gradient(115deg, rgba(9, 13, 19, 0.86), rgba(
 #hud-speed.boost .bar.boost i { background: #c8e6ff; box-shadow: 0 0 0.8rem var(--boost); }
 #hud-speed.low .bar.boost { animation: low 0.7s steps(2) infinite; }
 .bar.thr { height: 0.3rem; }
-.bar.air { height: 0.3rem; }
+.bar.air { position: relative; height: 0.3rem; }
 .bar.air i { background: rgba(140, 170, 205, 0.55); }
 .bar.air.ready i { background: #7fd4ff; box-shadow: 0 0 0.5rem #3fa9ff; }
+/* a ship that holds two airbrakes (the Anvil): the bar split into its two charges */
+.bar.air.two::after { content: ''; position: absolute; left: calc(50% - 1px); top: 0; bottom: 0; width: 2px; background: #05080c; }
+/* the hull (race damage): steady colours - amber under half, red under a quarter, the shield's blue while a wreck is
+   being flown through */
+.bar.hull { height: 0.4rem; }
+.bar.hull i { background: #dfe8f0; transform: scaleX(1); transition: background 0.2s; }
+.bar.hull[data-band="amber"] i { background: #ffb428; }
+.bar.hull[data-band="red"] i { background: #ff4a3a; box-shadow: 0 0 0.5rem #ff4a3a; }
+.bar.hull[data-band="ghost"] i { background: #7fd4ff; box-shadow: 0 0 0.5rem #3fa9ff; }
 /* the drift's charge: there while drifting, its colour the step reached */
 .meter.drift { opacity: 0; transition: opacity 0.25s; }
 #hud-speed.drifting .meter.drift { opacity: 1; transition: opacity 0.08s; }
@@ -756,6 +765,7 @@ body.touch[data-ui="game"] #touch { display: block; }
 /* the HUD out from under the thumbs: speed in the bottom middle, the time compact, the map off on a phone */
 body.touch #hud-speed { left: 50%; bottom: 0.4rem; width: 14rem; padding: 0.45rem 0.75rem 0.5rem; transform: translateX(-50%); }
 body.touch #hud-speed .minor, body.touch #hud-speed .meter + .meter { display: none; }
+body.touch #hud-speed .meter.hull { display: grid; }
 body.touch #hud-time .trow:not(.score), body.touch #splits { display: none; }
 body.touch #hud-time { width: auto; min-width: 9rem; }
 body.touch #hud-tl { top: calc(var(--g) + env(safe-area-inset-top)); left: calc(var(--g) + env(safe-area-inset-left)); }

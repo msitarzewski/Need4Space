@@ -546,12 +546,13 @@ class ExhaustTrail {
 }
 
 // the ship's energy shield: invisible until hit, then a fresnel shell with hex cells, brightest round the point of
-// contact, fading in half a second
+// contact, fading in half a second. ghost (0..1): a wrecked ship being flown through - the whole shell up, steady
+// (no flicker): a rim and faint cell edges
 function shieldMaterial(tint) {
   return new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, side: THREE.DoubleSide,
     blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
-    uniforms: { hit: { value: new THREE.Vector3() }, amount: { value: 0 }, time: { value: 0 }, tint: { value: tint } },
+    uniforms: { hit: { value: new THREE.Vector3() }, amount: { value: 0 }, time: { value: 0 }, tint: { value: tint }, ghost: { value: 0 } },
     vertexShader: /* glsl */`
       varying vec3 vL; varying vec3 vN; varying vec3 vV;
       void main() {
@@ -564,7 +565,7 @@ function shieldMaterial(tint) {
     // there and each cell flashes as it passes - filled, not just outlined, each at its own strength and with its
     // own flicker - then the whole shell fades. A faint fresnel rim holds the shape while it is up.
     fragmentShader: /* glsl */`
-      uniform vec3 hit, tint; uniform float amount, time; varying vec3 vL; varying vec3 vN; varying vec3 vV;
+      uniform vec3 hit, tint; uniform float amount, time, ghost; varying vec3 vL; varying vec3 vN; varying vec3 vV;
       float h12(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
       float hexDist(vec2 p) { p = abs(p); return max(dot(p, vec2(0.5, 0.8660254)), p.x); }
       vec4 hexGrid(vec2 uv) {                     // (edge distance 0..0.5, cell id)
@@ -586,7 +587,7 @@ function shieldMaterial(tint) {
         float rim = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 3.0);
         float a = (lit * (0.12 + edge * 0.9) + rim * 0.12 + core * (2.0 + edge * 1.5)) * amount;
         vec3 c = mix(tint, vec3(1.0), clamp(core * 0.8 + band * edge * 0.3, 0.0, 1.0));
-        gl_FragColor = vec4(c * a, 1.0);
+        gl_FragColor = vec4(c * a + tint * ghost * (rim * 0.55 + edge * (0.035 + 0.035 * rnd) + 0.006), 1.0);
       }`,
   });
 }
@@ -1865,8 +1866,8 @@ export class Ship {
     // the brake lights: red with the brake (or what the caller says is braking), if the setting has them on
     const lamp = Ship.brakeLights !== false ? smoothstep(0.08, 0.6, ctrl.brakeLight ?? brake) : 0;
     if (this.orbits.length || this.pulses.length || this.lamps.length) this.updatePulse(dt, thr1, boost1, lamp, ctrl.speed || 0);
-    if (this.kind && LIVERIES[this.kind]) {        // the player's and the showroom's ships wear the chosen livery
-      const want = Ship.liveries?.[this.kind] || LIVERIES[this.kind].names[0];
+    if (this.kind && LIVERIES[this.kind]) {        // the player's and the showroom's ships wear the chosen livery (a rival its own)
+      const want = this.livery || Ship.liveries?.[this.kind] || LIVERIES[this.kind].names[0];
       if (want !== this.liveryShown) this.applyLivery(want);
       this.edgeU.edgeOn.value = Ship.sharpEdges !== false && this.edgeU.edgeMap.value ? 1 : 0;
     }
@@ -2103,7 +2104,10 @@ export class Ship {
     const su = this.shield.material.uniforms;
     su.time.value = t;
     su.amount.value = Math.max(0, su.amount.value - dt * 1.8);
-    this.shield.visible = su.amount.value > 0.01;
+    // a wreck being flown through: the shell up while it lasts (in over 0.2 s, out over its last half second)
+    const g = c.ghost || 0;                        // (s left of the 3)
+    su.ghost.value = clamp(Math.min(g / 0.5, (3 - g) / 0.2), 0, 1);
+    this.shield.visible = su.amount.value > 0.01 || su.ghost.value > 0.01;
     this.boostKick = Math.max(0, this.boostKick - dt * 1.4);
   }
 

@@ -1824,6 +1824,21 @@ export const ENERGY_MAX = 1.5, ENERGY_BLEED = 0.05;
 export const PERKS = { easy: { wall: 0.2, drift: 1.2, recharge: 1.1 }, normal: { wall: 0.7, drift: 1.2, recharge: 1.1 },
   hard: { wall: 0.8, drift: 1.1, recharge: 1 },
   brutal: { wall: 1, drift: 1, recharge: 1 } };
+// The hulls' damage ("hitting the edge of the tracks at low speed should not damage the ships, and hitting above a
+// limit and when faster do more damage based on speed"; "the damage from ship to ship hits would be lower than from
+// hitting the edges"). A wall knock: wall per m/s it hit by past a graze (at most cap: one knock never takes much
+// more than a third of a Feather's hull), times the speed share - none under v0 m/s (~290 km/h), 1 at v1 (900 km/h),
+// up to 1.4. Another ship's knock (race.js collide): ship per m/s of the closing
+// speed past shipGraze, times the same speed share and the hitter's ram (ships.js). At 0 the hull is reset where it
+// is, at wreckSpeed of its speed, and for ghost seconds it can be flown through: no contact with the other ships, no
+// damage - the pack goes by it.
+export const DAMAGE = { wall: 1.0, graze: 6, cap: 24, ship: 0.15, shipGraze: 5, v0: 80, v1: 250, wreckSpeed: 0.5, ghost: 3 };
+export const damageSpeed = (v) => clamp((Math.abs(v) - DAMAGE.v0) / (DAMAGE.v1 - DAMAGE.v0), 0, 1.4);
+// The airbrake as a weapon ("air brake on the side when next to an enemy should go harder on them and keep the ship
+// more stable, so its like an attack"): side by side with its airbrake out on the other's side, a hull holds its
+// line - none of the push, none of the speed lost - while the other is shoved away (shove m/s across), slowed (loss of
+// its speed) and takes dmg times a knock's damage (a knock of at least min m/s); the attacker keep of its share
+export const ATTACK = { shove: 7, loss: 0.06, dmg: 4, keep: 0.3, min: 16 };
 const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck
 
@@ -1849,7 +1864,10 @@ export class TrackRacer {
     this.airT = 0;                      // 0 on the deck .. 1 well clear of it
     this.yawKick = 0;                   // heading turned in one step (a wall glance): the animation eases it in
     this.perks = PERKS.brutal;          // the player's help by the difficulty (main.js); none for the rivals
-    this.handling = { thrust: 1, boost: 1, drag: 1, turn: 1, impact: 1 };   // how this ship flies (ships.js HANDLING; the rivals: the Feather's)
+    this.handling = { thrust: 1, boost: 1, drag: 1, turn: 1, impact: 1, health: 100, ram: 1 };   // how this ship flies (ships.js HANDLING)
+    this.health = 100;                  // the hull (hurt; Race.reset fills it)
+    this.ghost = 0;                     // s left of being flown through after a wreck
+    this.armed = false;                 // damage counts (Race: racing, not past the flag)
     this.drift = 0;                     // drifting: the side (+1 right), 0 not
     this.driftCharge = 0; this.driftKick = 0; this.driftS = 0; this.slip = 0;
     this.pitchIn = 0;
@@ -1898,8 +1916,36 @@ export class TrackRacer {
 
   emit(ev) { this.events.push(ev); this.onEvent?.(ev); }
 
+  get maxHealth() { return this.handling.health || 100; }
+
+  // a full hull, no ghosting (a new race)
+  repair() { this.health = this.maxHealth; this.ghost = 0; }
+
+  // damage to the hull (the player's eased by the difficulty, as a wall's speed cost is); at 0, a wreck
+  hurt(amount, why, at) {
+    if (!(amount > 0.05) || !this.armed || !TrackRacer.damage || this.ghost > 0) return 0;
+    amount *= this.perks.wall;
+    this.health -= amount;
+    this.emit({ type: 'damage', amount, why, at: at || this.pos.clone() });
+    if (this.health <= 0) this.wreck();
+    return amount;
+  }
+
+  // the hull gone: reset where it is - square to the track, at a share of its speed, the hull full again - and flown
+  // through by the other ships for DAMAGE.ghost seconds
+  wreck() {
+    const at = this.pos.clone();
+    if (this.drift) this.endDrift(false);
+    this.vs = Math.max(0, this.vs) * DAMAGE.wreckSpeed;
+    this.vx = 0; this.psi = 0; this.yawRate = 0; this.slow = 0; this.driftKick = 0;
+    this.health = this.maxHealth;
+    this.ghost = DAMAGE.ghost;
+    this.emit({ type: 'wreck', at });
+  }
+
   static drifting = true;              // settings: "Drift (brake + throttle in a corner)"
   static airPitch = true;              // settings: "Pitch in the air (nose down to land sooner)"
+  static damage = true;                // settings: "Ship damage"
 
   // a point's height over the deck at its own place along the track (world, m). The hull sits square to the deck
   // under its middle, but a long, wide hull reaches metres fore and aft: where the deck twists into a roll its tail
@@ -1922,7 +1968,7 @@ export class TrackRacer {
     this.yawKick = 0;
     return { steer: this.steerS, lat: this.latS, accel: this.accS, vy: this.vy, airbrake: this.airIn, land, air: this.airT,
       brake: this.brakeS || 0, yawKick, height: this.y, drift: this.driftS * (this.drift || this.driftSide || 0), slip: this.slip,
-      deckHeight: (this.deckFn ||= (w) => this.deckHeight(w)) };
+      deckHeight: (this.deckFn ||= (w) => this.deckHeight(w)), ghost: this.ghost };
   }
 
   get speed() { return Math.hypot(this.vs, this.vx, this.vy * 0.2); }
@@ -1933,6 +1979,7 @@ export class TrackRacer {
 
   step(dt, inp) {
     const ship = this.ship, power = ship.power, tr = this.track, f = tr.frame(this.s, this.f);
+    if (this.ghost > 0) this.ghost = Math.max(0, this.ghost - dt);
     // "make the break more powerful": S cuts the throttle and brakes at once (it used to wind the throttle lever down
     // for 1.4 s before any braking); W spools back up in under a second
     const braking = ship.ready && inp.throttleDown > 0.5;
@@ -2082,6 +2129,7 @@ export class TrackRacer {
           this.scrape = Math.min(1, hit / 20);
           const at = f.P.clone().addScaledVector(f.R, side * TRACK_W / 2).addScaledVector(f.U, 1.2);
           this.emit({ type: 'scrape', at, v: hit, side, wall: true });
+          this.hurt(DAMAGE.wall * clamp(hit - DAMAGE.graze, 0, DAMAGE.cap) * damageSpeed(this.vs), 'wall', at);
         }
       }
     }

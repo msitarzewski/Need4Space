@@ -104,6 +104,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             super().log_message(fmt, *args)
 
 
+class Server(http.server.ThreadingHTTPServer):
+    # several test browsers loading the game at once: the default backlog of 5 refused their connections
+    request_queue_size = 128
+    daemon_threads = True
+
+
 if __name__ == "__main__":
     print(f"serving {ROOT} on http://localhost:{PORT}", flush=True)
-    http.server.ThreadingHTTPServer((os.environ.get('NEED4SPACE_HOST', '127.0.0.1'), PORT), Handler).serve_forever()
+    Server((os.environ.get('NEED4SPACE_HOST', '127.0.0.1'), PORT), Handler).serve_forever()

@@ -104,18 +104,21 @@ export class Input {
       }
       s.boost = s.boost || t.boost;
     }
-    // the airbrakes (keys, bumpers, the touch stick): a press fires one - on while held, a second at most - and the next
-    // is ready three seconds after it fired ("once every 3 seconds"); pressed a little early and held, it fires the
-    // moment it is ready; one held on past its second does not fire again until let go. airCharge: 0 just fired .. 1
-    // ready (the HUD's meter)
+    // the airbrakes (keys, bumpers, the touch stick): a press fires one - on while held, a second at most - spending a
+    // charge; a charge comes back three seconds after it was spent ("once every 3 seconds"). The ship holds
+    // `airbrakes` of them (ships.js: the Anvil two - fired one after the other). Pressed a little early and held, one
+    // fires the moment a charge is back; one held on past its second does not fire again until let go. airCharge: the
+    // charges held over the most (the HUD's meter), airCharges: the most
     {
-      const want = s.airL > 0.5 ? -1 : s.airR > 0.5 ? 1 : 0;
+      const want = s.airL > 0.5 ? -1 : s.airR > 0.5 ? 1 : 0, N = this.airbrakes || 1;
+      this.abC = Math.min(N, (this.abC ?? N) + dt / AIRBRAKE_WAIT);
       this.abT = (this.abT ?? AIRBRAKE_WAIT) + dt;
       if (!want) this.abSpent = false;
       if (this.abOn && (want !== this.abOn || this.abT > AIRBRAKE_HOLD)) { this.abOn = 0; if (want) this.abSpent = true; }
-      else if (!this.abOn && want && !this.abSpent && this.abT >= AIRBRAKE_WAIT) { this.abOn = want; this.abT = 0; }
+      else if (!this.abOn && want && !this.abSpent && this.abC >= 1) { this.abOn = want; this.abT = 0; this.abC -= 1; }
       s.airL = this.abOn < 0 ? 1 : 0; s.airR = this.abOn > 0 ? 1 : 0;
-      s.airCharge = Math.min(1, this.abT / AIRBRAKE_WAIT);
+      s.airCharge = this.abC / N;
+      s.airCharges = N;
     }
     if (this.invert) s.pitch = -s.pitch;
     s.pitch = clamp(s.pitch, -1, 1);
