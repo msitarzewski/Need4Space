@@ -2,6 +2,13 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.11.5', date: '17 Oct 2026', name: 'Graphics card check',
+    notes: [
+      'A browser that cannot use the graphics card (hardware acceleration off, or a blocked driver) now says so and how to fix it, instead of a misleading out-of-memory error',
+      'A browser drawing in software, with no graphics card at all, is told first that the game would barely move - with a Start anyway button',
+    ],
+  },
+  {
     version: '1.11.4', date: '17 Oct 2026', name: 'Smoother',
     notes: [
       'No more hitch a few seconds into a race with Comets and Anvils in the field: every paint is loaded with the game',

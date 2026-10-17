@@ -46,6 +46,28 @@ const TAG_P = new THREE.Vector3(), WRECK_M = new THREE.Matrix4();     // (a wrec
 const paintOf = (e) => [new THREE.Color(...(e.team.body || [0.85, 0.85, 0.86])), new THREE.Color(...(e.team.livery || [0.7, 0.12, 0.1]))];
 const LUTS = ['assets/agx_punchy_lut65.bin', 'assets/agx_mhc_lut65.bin'];   // Blender's AgX looks: Punchy, Medium High Contrast
 const status = (t) => (document.getElementById('loadtext').textContent = t);
+// The graphics card out of the browser's reach (its hardware acceleration off, or a driver it blocks): what to do, not
+// a failed start that reads like a memory error. Chromium no longer falls back to drawing WebGL in software (the context
+// fails); where a browser still does - SwiftShader, llvmpipe, Windows' Basic Render Driver - the game runs at a frame or
+// two a second: said first, with a way on anyway.
+const SOFTWARE_GL = /SwiftShader|llvmpipe|softpipe|Basic Render/i;
+const GPU_HELP = 'Open the browser settings, search for <b>hardware acceleration</b> (Chrome and Edge: "Use graphics acceleration '
+  + 'when available"), turn it on and restart the browser. Already on? Update the graphics card driver, then reload.';
+function gpuHelp(title, anyway = false) {
+  window.__loadTaken = true;                               // (the page's first script would write over it)
+  const box = document.getElementById('loading'), help = document.getElementById('loadhelp'), go = document.getElementById('loadgo');
+  status(title);
+  help.innerHTML = GPU_HELP;
+  help.hidden = false;
+  box.classList.add('error');
+  if (!anyway) return null;
+  go.hidden = false;
+  return new Promise((r) => go.addEventListener('click', () => {
+    help.hidden = go.hidden = true;
+    box.classList.remove('error');
+    r();
+  }, { once: true }));
+}
 // The loading bar: each step's share of it (by how long it usually takes) and how far into it. The page's first script
 // had the first tenth (the files arriving); it only ever grows.
 const STEPS = { circuit: [10, 16], bakes: [16, 38], paint: [38, 46], ship: [46, 68], rivals: [68, 72], colour: [72, 74],
@@ -72,7 +94,9 @@ async function boot() {
     ...(MAP === 'desert' ? { fogChunk: DUST_FOG_CHUNK, fogPars: DUST_GLSL, worldOnly: true } : {}),
     ...(MAP === 'ocean' ? { fogChunk: SEA_FOG_CHUNK, fogPars: SEA_GLSL, worldOnly: true } : {}) });
   const canvas = document.getElementById('view');
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+  let renderer;
+  try { renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' }); }
+  catch (e) { gpuHelp('The browser cannot use the graphics card'); return; }
   // the GPU driver reset (too long a job for a slow GPU, or out of memory): say so rather than a frozen screen
   canvas.addEventListener('webglcontextlost', () => {
     status('The graphics driver stopped responding - reload the page (lower settings in Settings may help)');
@@ -84,6 +108,10 @@ async function boot() {
     const gl = renderer.getContext(), e = gl.getExtension('WEBGL_debug_renderer_info');
     return String(e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
   })();
+  if (SOFTWARE_GL.test(gpuName)) {
+    console.warn(`GPU: ${gpuName} - software rendering, no graphics card in use`);
+    await gpuHelp('The browser is drawing without the graphics card', true);
+  }
   // what the device can hold: the ship's maps and the bakes' sizes (quality.js)
   Q.tier = memoryTier(renderer, gpuName, isTouch(), !!savedSettings().laptop);
   const jobLoad = beginLoadJobs(MAP === 'forest');
