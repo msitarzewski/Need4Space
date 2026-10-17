@@ -656,6 +656,9 @@ export class Race {
     const u = vic.underAttack, hp = [A.health, V.health];
     this.ram(att, vic, ATTACK.slamMin, 1, mass);
     if (u && u.by === att) u.hp = hp;                   // (blocked within the window after all: clash gives it back)
+    // a slam landed: hull back for the one who threw it (ATTACK.heal)
+    const heal = Math.min(A.maxHealth - A.health, A.maxHealth * ATTACK.heal);
+    if (heal > 0 && !(A.ghost > 0)) { A.health += heal; this.events.push({ type: 'heal', amount: heal, share: heal / A.maxHealth, entry: att, player: att.player }); }
     this.stats.attacks = (this.stats.attacks || 0) + 1;
     if (att.player || vic.player) this.player.clean = false;
     const at = A.pos.clone().add(V.pos).multiplyScalar(0.5);
@@ -676,7 +679,7 @@ export class Race {
     // (answered after the slam landed: what it took is given back; and for a moment neither can be hurt - not by the
     // touch that follows, not by a wall the bounce carries it into)
     const u = def.underAttack;
-    if (u?.hp && u.by === att) { A.health = Math.max(A.health, u.hp[0]); D.health = Math.max(D.health, u.hp[1]); }
+    if (u?.hp && u.by === att) { A.health = u.hp[0]; D.health = Math.max(D.health, u.hp[1]); }     // (and the slam's heal taken back)
     A.safe = D.safe = 0.8;
     for (const [e, r] of [[att, A], [def, D]]) if (e.player) r.safe = Math.max(r.safe, ATTACK.selfSafe);
     const n = this.entries.length, ia = this.entries.indexOf(att), ib = this.entries.indexOf(def);

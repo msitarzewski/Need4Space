@@ -156,6 +156,13 @@ export class HUD {
   // a short pulse on an element (the drift meter reaching a step)
   pulse(id) { retrigger($(id).parentElement, 'pulse'); }
 
+  // hull back (a slam landed): the bar glows green and says how much
+  heal(pct) {
+    retrigger($('hullbar'), 'heal');
+    const t = $('hulh');
+    if (t) { t.textContent = `+${pct}`; retrigger(t, 'on'); }
+  }
+
   flash(colour, secs = 0.7) {
     const el = $('edgeflash');
     el.style.transition = 'none';

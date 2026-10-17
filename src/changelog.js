@@ -2,6 +2,13 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.11.3', date: '17 Oct 2026', name: 'Second wind',
+    notes: [
+      'Hitting the edge of the track costs every ship a third of the hull it did',
+      'A slam that lands gives the ship that threw it a fifth of its hull back (none if it is blocked) - the Hull bar glows green',
+    ],
+  },
+  {
     version: '1.11.2', date: '17 Oct 2026', name: 'Ship screen',
     notes: [
       'Ship screen: a click puts a ship on the stand and hovering no longer switches it; Enter or the Confirm button flies it - no more flying off by a second click when reaching for a paint',

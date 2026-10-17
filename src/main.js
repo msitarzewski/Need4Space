@@ -989,6 +989,9 @@ async function boot() {
             hud.flash(`rgba(255, 40, 25, ${Math.min(0.8, 0.22 + e.amount / 30).toFixed(2)})`, 0.55);
             rig.shake = Math.max(rig.shake, Math.min(0.9, 0.15 + e.amount / 28));
           }
+        } else if (e.type === 'heal') {
+          // a slam landed: the hull back - the bar glows green, a soft green flash
+          if (e.player && mode === 'race') { hud.heal(Math.round(e.share * 100)); hud.flash('rgba(70, 255, 150, 0.28)', 0.45); }
         } else if (e.type === 'lunge') {
           if (e.player && mode === 'race') { rig.shake = Math.max(rig.shake, 0.18); audio.driftKick(2); }
           // a slam the player is in: slow motion and the slam camera across the two ("i can barely see my ship smashing

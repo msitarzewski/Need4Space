@@ -1832,8 +1832,9 @@ export const PERKS = { easy: { wall: 0.2, drift: 1.2, recharge: 1.1 }, normal: {
 // speed past shipGraze, times the same speed share and the hitter's ram (ships.js). At 0 the hull is reset where it
 // is, stopped dead ("completely stopping its acceleration and speed and going from 0"), and for ghost seconds it can
 // be flown through - no contact with the other ships, no damage, no boost - the pack goes by it.
-// safe: no hull takes damage in the race's first s ("make sure ships dont take damage first 10 seconds")
-export const DAMAGE = { wall: 1.0, graze: 6, cap: 24, ship: 0.15, shipGraze: 5, v0: 80, v1: 250, ghost: 3, safe: 10 };
+// safe: no hull takes damage in the race's first s ("make sure ships dont take damage first 10 seconds"). wall a third
+// of what it was ("make the damage taken from hitting the edge of the track 3 times lower overall on all ships")
+export const DAMAGE = { wall: 1 / 3, graze: 6, cap: 24, ship: 0.15, shipGraze: 5, v0: 80, v1: 250, ghost: 3, safe: 10 };
 export const damageSpeed = (v) => clamp((Math.abs(v) - DAMAGE.v0) / (DAMAGE.v1 - DAMAGE.v0), 0, 1.4);
 // The slam - an ability on its own key (race.js attacks: the player's Space; "like an ability, so when in range it
 // should activate and always hit the target"). Pressed with a hull alongside in reach (overlapping along, at most
@@ -1848,7 +1849,9 @@ export const damageSpeed = (v) => clamp((Math.abs(v) - DAMAGE.v0) / (DAMAGE.v1 -
 // startLock: no slams in the race's first s ("make slam not possible first 10 seconds of the race"). selfSafe: the
 // player's own slam - no damage from the press until this many s after it lands ("when slaming into a ship i cant
 // control mine, which it takes me to an edge and i take dmg, maybe make me immune to dmg while in that and after")
-export const ATTACK = { startLock: 10, selfSafe: 2, range: 7, lunge: 60, lungeAcc: 2000, lungeT: 0.3, throw: 62, cap: 95, knock: 0.9, loose: 0.12,
+// heal: a slam that lands gives the one who threw it this share of its hull back ("when doing a succesful slam to
+// gain hp back"); a block takes it away again
+export const ATTACK = { startLock: 10, selfSafe: 2, heal: 0.2, range: 7, lunge: 60, lungeAcc: 2000, lungeT: 0.3, throw: 62, cap: 95, knock: 0.9, loose: 0.12,
   slamYaw: 0.2, slamLoss: 0.11, slamMin: 22, dmg: 4, keep: 0.3, wallCap: 28, wallK: 1.0, counter: 0.5, bounce: 14 };
 const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck

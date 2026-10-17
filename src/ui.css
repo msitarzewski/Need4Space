@@ -199,6 +199,14 @@ body.lite .hp { background: linear-gradient(115deg, rgba(9, 13, 19, 0.86), rgba(
 #hulv { font: 900 1.5rem/1 var(--display); color: #fff; text-align: right; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
 #hulv::after { content: '%'; font-size: 0.55em; color: var(--dim); margin-left: 0.1em; }
 #hullbar.hit #hulv { animation: hull-num 0.5s ease-out; }
+/* hull back (a slam landed): the bar glows green, +n rises off the number */
+#hullbar.heal .hb { animation: hull-heal 0.7s ease-out; }
+@keyframes hull-heal { 0% { border-color: #4dffa0; box-shadow: 0 0 1.6rem 0.2rem rgba(70, 255, 150, 0.85); } 100% { border-color: rgba(255, 255, 255, 0.16); box-shadow: none; } }
+#hullbar .hb-row { position: relative; }
+#hulh { position: absolute; right: 0; bottom: 100%; opacity: 0; pointer-events: none; font: 900 1.1rem/1 var(--display); font-style: normal;
+  color: #7dffb5; text-shadow: 0 0 0.7rem rgba(70, 255, 150, 0.8); }
+#hulh.on { animation: hull-plus 1.2s ease-out; }
+@keyframes hull-plus { 0% { opacity: 0; transform: translateY(0.4rem); } 15% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; transform: translateY(-1.2rem); } }
 /* the rivals the player has just hurt: their hull over them for 3 s (hud.js tags), edged in their team colour */
 #tags { position: absolute; inset: 0; overflow: hidden; }
 #tags .tag { position: absolute; left: 0; top: 0; width: 5.6rem; height: 0.5rem; padding: 2px; opacity: 0;
