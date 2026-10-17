@@ -11,9 +11,11 @@ An anti-gravity racer in space, built in the browser with [three.js](https://thr
 
 Every circuit has a gravity flip: the road ends, gravity turns over and you ride upside down on the road overhead.
 
+**Experimental WebXR support:** race from a tracked, seated cockpit with an Xbox controller, an in-headset HUD and menus, and adjustable VR resolution. See [WebXR setup and controls](#webxr).
+
 ## Running it
 
-The game is plain ES modules with no build step. three.js r170 is loaded from a CDN, so serve the folder and open it in a desktop browser (Chrome or Edge recommended):
+The game is plain ES modules with no build step. three.js r170 is loaded from a CDN, so serve the folder and open it in a desktop browser (Chrome or Edge recommended). For a headset, follow [WebXR setup](#webxr).
 
 ```
 python serve.py 8765
@@ -59,7 +61,14 @@ A standard-mapped Xbox controller works on desktop and in WebXR. Press a button 
 
 ## WebXR
 
-Open the game in a WebXR headset browser over **HTTPS**, pair an Xbox controller, and choose **Enter VR**. A tracked **Preparing VR** panel stays visible while the stereo shaders, eye buffers and first cockpit frame are prepared. The game waits for GPU completion before continuing; the existing scene and textures are reused. `localhost` also works for development; an HTTP LAN address does not provide the secure context WebXR requires. Choose the circuit and ship before entering, since changing either reloads the page and ends the session.
+WebXR support is experimental; compatibility and performance vary by headset and browser.
+
+1. Open the game in a WebXR headset browser over **HTTPS**. `localhost` also works for development; an HTTP LAN address does not provide the secure context WebXR requires.
+2. Pair a standard-mapped Xbox controller and press a button so the browser detects it.
+3. Choose the circuit and ship before entering VR; changing either reloads the page and ends the session.
+4. Choose **Enter VR** and wait for **Preparing VR** to finish. Use **Exit VR** in the headset panel or browser toolbar to return to the desktop view.
+
+A tracked **Preparing VR** panel stays visible while the stereo shaders, eye buffers and first cockpit frame are prepared. The game waits for GPU completion before continuing; the existing scene and textures are reused.
 
 VR uses a seated canopy view. Push the **left stick forward** for analog thrust, pull back to brake, and move it sideways to steer. Releasing forward stick / RT returns thrust to zero. **A adds boost**; it is separate from normal thrust. The **right stick** controls pitch. Look forward and press **B**, **right-stick click**, or **U** to recenter. Head movement stays independent of the ship's steering, and the cockpit follows the track through banks, loops and gravity flips. Desktop camera shake, zoom effects and cinematic cuts are bypassed in VR.
 
@@ -79,6 +88,7 @@ The Playwright harness in `tools/test_xr.js` checks stereo projections, recenter
 
 ## Features
 
+- **WebXR (experimental):** a tracked seated cockpit, Xbox controls, in-headset menus, a toggleable HUD, and saved 65% / 80% / 100% VR race resolution choices. See [WebXR](#webxr) for setup and limitations.
 - **Rivals:** AI on three difficulty levels, Normal, Hard and Brutal. They follow a racing line, plan their boost, use the boost pads, slipstream, overtake and defend.
 - **Physics:** track-space hover physics with jumps, loops, gravity flips, wall knocks and ship-to-ship contact. Drifting can be switched on in Settings.
 - **Picture:**
