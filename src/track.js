@@ -1834,26 +1834,18 @@ export const PERKS = { easy: { wall: 0.2, drift: 1.2, recharge: 1.1 }, normal: {
 // be flown through - no contact with the other ships, no damage, no boost - the pack goes by it.
 export const DAMAGE = { wall: 1.0, graze: 6, cap: 24, ship: 0.15, shipGraze: 5, v0: 80, v1: 250, ghost: 3 };
 export const damageSpeed = (v) => clamp((Math.abs(v) - DAMAGE.v0) / (DAMAGE.v1 - DAMAGE.v0), 0, 1.4);
-// The airbrake as a weapon ("air brake on the side when next to an enemy should go harder on them and keep the ship
-// more stable, so its like an attack"; "actually shoves in them when in range"). Fired toward a hull alongside -
-// overlapping along, at most range m of air between them across - the ship slides across into it: level, its nose
-// held straight (the airbrake press goes into the push - no turn, no drag until let go: TrackRacer airSpent), eased up to lunge m/s at
-// lungeAcc m/s2, for lungeT s or until they meet ("it should move ... not jump on a wing"). The blow ("literally
-// smashing in it", "push the enemy in the opposite direction ... more punchy"): the attacker drives on through it,
-// pressing for push s more, the other thrown ahead of it - at the attacker's speed across and slamShove m/s more (at
-// most cap) - and knocked loose (its grip down to loose of itself, back over knock s), so it slides right across -
-// turned off its heading (slamYaw rad), slowed (slamLoss of its speed), dmg times a knock's damage (a knock of at
-// least slamMin m/s); the attacker stops across and holds its line, keep of its share of the damage. An airbrake out
-// toward a hull already touching (no slide): the lighter shove / loss / min.
-// ("the slam should be way harder ... the anvil should do more damage to smaller ships, and push them harder in the
-// wall"): the throw, the damage and the knock scale with the masses (m = the attacker's over the other's, ships.js);
-// a hull knocked loose that meets the wall takes wallCap m/s of it at most (not DAMAGE.cap) and wallK more.
-// ("my ship should go and knock really hard the other ship, like fast and powerful ... I should remain on the hit
-// position and the enemy should fly into the wall"): the dash snaps to lunge m/s across at once (lungeAcc), for
-// lungeT s at most (a miss: it stops); the blow stops the attacker dead where it hit, and throws the other throw m/s
-// across x the masses (at most cap), loose for knock s - it flies on into the wall.
+// The slam - an ability on its own key (race.js attacks: the player's Space; "like an ability, so when in range it
+// should activate and always hit the target"). Pressed with a hull alongside in reach (overlapping along, at most
+// range m of air across) the ship snaps across at it - lunge m/s at once (lungeAcc), homing, and it lands within lungeT
+// s whatever ("my ship should go and knock really hard the other ship, like fast and powerful ... remain on the hit
+// position and the enemy should fly into the wall"). The blow stops the attacker dead where it hit and throws the other
+// throw m/s across x the masses (at most cap), loose for knock s (its grip at loose of itself) and off its heading
+// (slamYaw rad), slowed (slamLoss of its speed), hurt dmg x a knock of slamMin m/s; the attacker takes keep of its own
+// share. A hull thrown into a wall takes wallCap m/s of that knock at most, x wallK. Pressed back within counter s of a
+// slam at it - before it lands or after - it is a double attack: the two bounce bounce m/s apart, no one flies into the
+// wall, each hurt by clashDmg of a slam.
 export const ATTACK = { range: 7, lunge: 60, lungeAcc: 2000, lungeT: 0.3, throw: 62, cap: 95, knock: 0.9, loose: 0.12,
-  slamYaw: 0.2, slamLoss: 0.11, slamMin: 22, shove: 20, loss: 0.06, min: 16, dmg: 4, keep: 0.3, wallCap: 28, wallK: 1.0 };
+  slamYaw: 0.2, slamLoss: 0.11, slamMin: 22, dmg: 4, keep: 0.3, wallCap: 28, wallK: 1.0, counter: 0.5, bounce: 14, clashDmg: 0.5 };
 const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck
 
@@ -1933,8 +1925,11 @@ export class TrackRacer {
 
   get maxHealth() { return this.handling.health || 100; }
 
-  // a full hull, no ghosting (a new race)
-  repair() { this.health = this.maxHealth; this.ghost = 0; }
+  // a full hull, no ghosting, the slam ready (a new race)
+  repair() { this.health = this.maxHealth; this.ghost = 0; this.slamCool = 0; this.lunge = null; this.knocked = 0; }
+
+  // the slam's charge: 0 just used .. 1 ready (the HUD)
+  get slamCharge() { return 1 - (this.slamCool || 0) / (this.handling.slamCool || 4); }
 
   // damage to the hull (the player's eased by the difficulty, as a wall's speed cost is); at 0, a wreck
   hurt(amount, why, at) {
@@ -1952,7 +1947,7 @@ export class TrackRacer {
     const at = this.pos.clone();
     if (this.drift) this.endDrift(false);
     this.vs = 0; this.vx = 0; this.psi = 0; this.yawRate = 0; this.slow = 0; this.driftKick = 0;
-    this.throttle = 0; this.boosting = 0; this.lunge = null; this.airSpent = 0;
+    this.throttle = 0; this.boosting = 0; this.lunge = null;
     this.health = this.maxHealth;
     this.ghost = DAMAGE.ghost;
     this.emit({ type: 'wreck', at });
@@ -1999,13 +1994,8 @@ export class TrackRacer {
     // for 1.4 s before any braking); W spools back up in under a second
     const braking = ship.ready && inp.throttleDown > 0.5;
     const air = this.y > HOVER + 1.2, flipU = tr.flipAt(this.s);
-    const steer = clamp(inp.yaw + inp.roll, -1, 1);
-    let brakeL = inp.airL > 0.5 ? 1 : 0, brakeR = inp.airR > 0.5 ? 1 : 0;
-    this.airRaw = brakeR - brakeL;                      // (the airbrake as pressed: an attack starts on it - race.js)
-    // a press spent on an attack (race.js airSpent): it went into the push - no turn, no drag, the hull level - and it
-    // does nothing more until it is let go
-    if (this.airSpent && this.airRaw !== this.airSpent) this.airSpent = 0;
-    if (this.airSpent) brakeL = brakeR = 0;
+    const steer = clamp(inp.yaw + inp.roll, -1, 1), brakeL = inp.airL > 0.5 ? 1 : 0, brakeR = inp.airR > 0.5 ? 1 : 0;
+    if (this.slamCool > 0) this.slamCool = Math.max(0, this.slamCool - dt);    // (the slam charging - race.js)
     if (this.knocked > 0) this.knocked = Math.max(0, this.knocked - dt);    // (knocked loose by an attack: grip comes back)
     // the drift: the brake touched and the stick thrown over, on the deck at speed; held while the slide lasts and a
     // pedal is down, ended by catching it (or a rival saying so)

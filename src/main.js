@@ -960,6 +960,20 @@ async function boot() {
             if (e.slam) rig.punch = 1;
             hud.flash(`rgba(255, 170, 90, ${e.slam ? 0.5 : 0.3})`, 0.4);
           }
+        } else if (e.type === 'clash') {
+          // a double attack: both bursts, in both colours, meeting in the middle; both shaken
+          const A = e.a, B = e.b, vel = A.racer.vel.clone().add(B.racer.vel).multiplyScalar(0.5);
+          if (camera.position.distanceTo(e.at) < 320) {
+            fx.attack(e.at, vel, e.dir, new THREE.Color(...(A.team.engine || [0.1, 0.42, 1.0])), false);
+            fx.attack(e.at, vel, e.dir.clone().negate(), new THREE.Color(...(B.team.engine || [0.1, 0.42, 1.0])), false);
+          }
+          audio.bump(e.at, 45);
+          if ((A.player || B.player) && mode === 'race') {
+            audio.crash(e.at);
+            rig.shake = Math.max(rig.shake, 0.9); rig.punch = 0.7;
+            hud.flash('rgba(255, 230, 160, 0.45)', 0.4);
+            hud.message('Blocked', 1.2);
+          }
         } else if (e.type === 'wreck') {
           // a hull gone: sparks off it (a fireball left behind at these speeds streaked the whole screen) and its shield
           // lit; it races on from there, flown through for 3 s
@@ -1113,9 +1127,10 @@ async function boot() {
         tags.push({ id: e.idx, x: (TAG_P.x + 1) / 2, y: (1 - TAG_P.y) / 2, hp: e.racer.health / e.racer.maxHealth,
           a: Math.min(1, age / 0.12, (3 - age) / 0.5), css: e.team.css });
       }
-      if ((inp.airCharge ?? 1) * (inp.airCharges || 1) >= 0.999) atkHint = race.attackSide();
+      atkHint = race.attackSide();
     }
     hud.update(dt, { speed: ctl.speed, agl: MAP !== 'meadow' && mode === 'free' ? NaN : ctl.agl, throttle: ctl.throttle, tags, atkHint,
+      slamCharge: mode === 'race' && racer ? racer.slamCharge : null,
       boostEnergy: ctl.boostEnergy, boosting: ctl.boosting, airCharge: inp.airCharge, airCharges: inp.airCharges, state, stateClass: cls, camera: rig.name, assist: ctl.assist,
       health: mode === 'race' && racer ? racer.health / racer.maxHealth : null, ghost: mode === 'race' && racer ? racer.ghost : 0,
       drifting: mode === 'race' && !!ctl.drift, driftCharge: ctl.driftCharge, driftTier: ctl.driftTier || 0, driftChain: ctl.chain || 0,

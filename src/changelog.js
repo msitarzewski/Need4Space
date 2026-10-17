@@ -2,6 +2,14 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.10.0', date: '17 Oct 2026', name: 'Slam',
+    notes: [
+      'The slam is its own ability, on Space (X on a gamepad, the Slam button on a touchscreen): with a ship alongside in reach - the arrow shows the side - your ship snaps across and always lands it. Ready again after a few seconds, the Anvil\'s sooner (the Slam meter)',
+      'Slammed? Hit Space back within half a second - a red arrow shows where it comes from - and it is a double attack: you bounce off each other and no one goes into the wall. The rivals block too, more often the harder the level',
+      'The airbrakes are only airbrakes again',
+    ],
+  },
+  {
     version: '1.9.4', date: '17 Oct 2026', name: 'Knockout',
     notes: [
       'The slam is a punch: your ship snaps across into the other at once, stops dead where it hits, and the other is launched across the track into the wall',

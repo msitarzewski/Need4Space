@@ -19,6 +19,7 @@ export const CONTROLS = [
     [['↑', '↓'], 'In the air: ↓ nose down, ↑ nose up'],
     [['Shift'], 'Boost (orange pads on the track kick too)'],
     [['←', '→'], 'Airbrakes left / right: sharper turns (Z / X too) - one at a time, 3 s to charge (the Anvil holds two)'],
+    [['Space'], 'Slam a ship alongside when the arrow shows it in reach; slammed, hit Space back within half a second to block'],
     [['Mouse'], 'Click to steer (Esc releases)'],
   ]],
   ['Ship and track', [
@@ -37,7 +38,7 @@ export const CONTROLS = [
     [['Esc'], 'Pause menu'],
   ]],
 ];
-export const GAMEPAD = 'Left stick steer (in the air: nose up / down), RT / LT throttle, A boost, B camera, LB / RB airbrakes. ' +
+export const GAMEPAD = 'Left stick steer (in the air: nose up / down), RT / LT throttle, A boost, B camera, LB / RB airbrakes, X slam. ' +
   'In the menus: d-pad, A select, B back; View pauses.';
 
 export const controlsHTML = () => CONTROLS.map(([group, rows]) => `<div class="c-group"><div class="c-title">${group}</div>${rows.map(([keys, what]) =>
@@ -249,9 +250,18 @@ export class HUD {
       }
       for (const [id, el] of this.tagEls) if (!seen.has(id) && el.style.opacity !== '0') el.style.opacity = '0';
     }
-    // the airbrake attack in reach: a chevron on that side of the screen
-    const hint = s.atkHint > 0 ? 'r' : s.atkHint < 0 ? 'l' : '';
-    if (hint !== this.hint) { $('atkhint').dataset.side = hint; this.hint = hint; }
+    // the slam: a chevron on the side of a hull in reach (orange), or of a slam coming that can still be blocked (red)
+    const hint = (s.atkHint > 0 ? 'r' : s.atkHint < 0 ? 'l' : '') + (Math.abs(s.atkHint || 0) === 2 ? ' in' : '');
+    if (s.slamCharge != null) {
+      const sc = Math.round(Math.max(0, Math.min(1, s.slamCharge)) * 100) / 100;
+      if (sc !== this.sc) {
+        $('slm').style.transform = `scaleX(${sc})`;
+        const ready = sc >= 0.999;
+        if (ready !== this.slamReady) { $('slm').parentElement.classList.toggle('ready', ready); this.slamReady = ready; }
+        this.sc = sc;
+      }
+    }
+    if (hint !== this.hint) { $('atkhint').dataset.side = hint.split(' ')[0]; $('atkhint').classList.toggle('in', hint.includes('in')); this.hint = hint; }
     // the hull (the bar along the bottom): full .. empty, amber under half, red under a quarter, the ghost colour while
     // a wreck is flown through. A hit flares it and the chunk it took lingers before draining (the trail); filled again
     // (a wreck's new hull, a new race) the trail jumps with it

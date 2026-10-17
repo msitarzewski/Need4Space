@@ -209,6 +209,19 @@ body.lite .hp { background: linear-gradient(115deg, rgba(9, 13, 19, 0.86), rgba(
 #atkhint[data-side="l"] i.l { opacity: 1; transform: rotate(135deg) scale(1); }
 #atkhint[data-side="r"] i.r { opacity: 1; transform: rotate(-45deg) scale(1); }
 #hud:not([data-kind="race"]) #tags, #hud:not([data-kind="race"]) #atkhint { display: none; }
+/* a slam coming that can still be blocked: the chevron red, bigger, on the side it comes from */
+#atkhint.in i { border-color: #ff3a2a; filter: drop-shadow(0 0 0.9rem #ff2a10); }
+#atkhint.in[data-side="l"] i.l { transform: rotate(-45deg) scale(1.25); }
+#atkhint.in[data-side="r"] i.r { transform: rotate(135deg) scale(1.25); }
+/* the slam's charge (race only): lit when ready */
+.bar.slam { height: 0.3rem; }
+.bar.slam i { background: rgba(255, 150, 90, 0.5); }
+.bar.slam.ready i { background: #ff8a3a; box-shadow: 0 0 0.5rem #ff6a20; }
+#hud:not([data-kind="race"]) .meter.slam { display: none; }
+.t-slam { display: none; right: calc(27vmin + env(safe-area-inset-right)); bottom: 50vmin; width: 15vmin; height: 15vmin; font-size: 0.62rem;
+  letter-spacing: 0.06em; border-color: rgba(255, 138, 58, 0.7); }
+.t-slam.on { background: rgba(255, 138, 58, 0.55); border-color: #ff8a3a; box-shadow: 0 0 1.2rem #ff6a20; }
+#touch[data-mode="race"] .t-slam { display: grid; }
 @keyframes hull-num { 0% { color: #ff6a50; transform: scale(1.25); } 100% { color: #fff; transform: none; } }
 /* the drift's charge: there while drifting, its colour the step reached */
 .meter.drift { opacity: 0; transition: opacity 0.25s; }

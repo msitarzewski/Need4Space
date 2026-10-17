@@ -33,6 +33,7 @@ export class TouchControls {
       <div class="t-zone" data-side="l"><div class="t-stick"><i></i></div></div>
       <div class="t-zone" data-side="r"><div class="t-stick"><i></i></div></div>
       <button class="t-btn t-boost" data-b="boost">Boost</button>
+      <button class="t-btn t-slam" data-b="Space">Slam</button>
       <button class="t-btn t-engine" data-b="KeyE">Engines</button>
       <button class="t-btn t-small t-pause" data-b="pause" aria-label="Pause"><span class="t-bars"><i></i><i></i></span></button>
       <button class="t-btn t-small t-cam" data-b="KeyV" aria-label="Camera">Cam</button>`;

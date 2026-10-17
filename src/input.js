@@ -67,6 +67,7 @@ export class Input {
       reset: this.was('KeyR'), respawn: this.was('KeyT'), help: this.was('KeyH'), mute: this.was('KeyM'),
       assist: this.was('KeyL'), invert: this.was('KeyI'), click: this.was('Mouse0'), settings: this.was('KeyO'),
       airL: Math.max(k('KeyZ'), k('ArrowLeft')), airR: Math.max(k('KeyX'), k('ArrowRight')),
+      slam: this.was('Space'),                  // the race's slam (the touch Slam button presses Space too)
     };
     // gamepad (standard mapping)
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -84,6 +85,7 @@ export class Input {
       s.climb = Math.max(s.climb, b(5));
       s.descend = Math.max(s.descend, b(4));
       s.airL = Math.max(s.airL, b(4)); s.airR = Math.max(s.airR, b(5));     // race: the bumpers are airbrakes
+      s.slam = s.slam || edge(2) || edge(11);   // X or the right stick pressed: the slam (X: the canopy only with engines off)
       s.engine = s.engine || edge(3);
       s.canopy = s.canopy || edge(2);
       s.camera = s.camera || edge(1);
