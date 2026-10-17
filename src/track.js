@@ -1845,8 +1845,10 @@ export const damageSpeed = (v) => clamp((Math.abs(v) - DAMAGE.v0) / (DAMAGE.v1 -
 // share. A hull thrown into a wall takes wallCap m/s of that knock at most, x wallK. Pressed back within counter s of a
 // slam at it - before it lands or after - it is a double attack: the two bounce bounce m/s apart, no one flies into the
 // wall and neither hull is hurt ("when blocking an attack none of the ships take damage").
-// startLock: no slams in the race's first s ("make slam not possible first 10 seconds of the race")
-export const ATTACK = { startLock: 10, range: 7, lunge: 60, lungeAcc: 2000, lungeT: 0.3, throw: 62, cap: 95, knock: 0.9, loose: 0.12,
+// startLock: no slams in the race's first s ("make slam not possible first 10 seconds of the race"). selfSafe: the
+// player's own slam - no damage from the press until this many s after it lands ("when slaming into a ship i cant
+// control mine, which it takes me to an edge and i take dmg, maybe make me immune to dmg while in that and after")
+export const ATTACK = { startLock: 10, selfSafe: 2, range: 7, lunge: 60, lungeAcc: 2000, lungeT: 0.3, throw: 62, cap: 95, knock: 0.9, loose: 0.12,
   slamYaw: 0.2, slamLoss: 0.11, slamMin: 22, dmg: 4, keep: 0.3, wallCap: 28, wallK: 1.0, counter: 0.5, bounce: 14 };
 const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck

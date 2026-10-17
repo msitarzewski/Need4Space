@@ -1184,6 +1184,11 @@ export class Ship {
     this.glowBase = {};
     // engine glows 0.6x the export's: at full strength they bloomed into white blobs
     for (const n of [...GLOWS, ...AVIONICS]) if (this.mats[n]) this.glowBase[n] = this.mats[n].emissiveIntensity * (GLOWS.includes(n) ? 0.6 : 1);
+    // the GLB's own paint (the first livery), kept apart from the material a livery swaps: a copy of a ship already in
+    // another paint (the showroom's copy of a green Feather) cloned the green maps and took them for its own - "switch
+    // back to normal skin ... it still shows the green one"
+    const rb = this.mats.RacerBaked;
+    this.ownPaint = base ? base.ownPaint : rb && { map: rb.map, orm: rb.roughnessMap };
 
     if (base) {                        // same hull: same probes, tips and span, nozzles, parts atlas
       for (const k of ['probes', 'lows', 'bottom', 'tipR', 'tipL', 'halfSpan', 'length', 'tangentsFixed', 'nozzles', 'parts']) this[k] = base[k];
@@ -1983,7 +1988,7 @@ export class Ship {
     const m = this.mats.RacerBaked, LV = LIVERIES[this.kind];
     this.liveryShown = name;
     if (!m || !LV) return;
-    this.liveryTex ||= { [LV.names[0]]: { map: m.map, orm: m.roughnessMap } };
+    this.liveryTex ||= { [LV.names[0]]: this.ownPaint || { map: m.map, orm: m.roughnessMap } };
     this.loadEdges(name, this.atlasW || LV.res[0]);
     const put = (T) => {
       const mm = this.mats.RacerBaked;              // (the material as it is then: upgradeMaterials replaces it)

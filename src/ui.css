@@ -480,6 +480,16 @@ body.lite .m-news { backdrop-filter: none; background: linear-gradient(115deg, r
 /* the paints: a chip per livery on each ship's row - its two colours split on the diagonal; the one worn ringed, lit and
    named on the row under the selection */
 .m-screen[data-s="ship"] .m-list { width: min(44rem, 100%); }
+/* (the Ship screen: hovering a row only lights it - a click puts the ship on the stand) */
+.m-screen[data-s="ship"] .m-item:not(.sel):hover { color: rgba(238, 242, 246, 0.82); background: rgba(255, 255, 255, 0.04); }
+/* its confirm: fly the ship on the stand (Enter does the same) */
+.s-fly { all: unset; display: inline-flex; align-self: flex-start; width: max-content; align-items: center; gap: 0.75rem; margin: 1.6rem 0 0 1.3rem; padding: 0.8rem 1.4rem 0.75rem 0.9rem;
+  cursor: pointer; font: 700 1rem/1 var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: #061018;
+  background: var(--accent); box-shadow: 0 0 1.2rem color-mix(in srgb, var(--accent) 45%, transparent); transition: filter 0.15s, transform 0.15s; }
+.s-fly:hover { filter: brightness(1.12); transform: translateX(0.2rem); }
+.s-fly kbd { font: 700 0.7rem/1 var(--ui); letter-spacing: 0.1em; padding: 0.28rem 0.45rem 0.24rem; border: 1px solid rgba(0, 0, 0, 0.35);
+  border-radius: 0.2rem; background: rgba(0, 0, 0, 0.12); color: #061018; }
+body.touch .s-fly kbd { display: none; }
 .s-chips { margin-left: auto; display: flex; align-items: center; gap: 0.6rem; }
 .s-chips i { position: relative; width: 1.8rem; height: 1.8rem; border-radius: 50%; cursor: pointer; opacity: 0.55;
   background: linear-gradient(135deg, var(--a) 0 52%, var(--b) 52% 100%); border: 2px solid rgba(255, 255, 255, 0.25);

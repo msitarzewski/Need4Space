@@ -633,6 +633,7 @@ export class Race {
       if (!t) continue;
       r.slamCool = r.handling.slamCool || 10;
       r.lunge = { target: t.o, dir: t.side, t: ATTACK.lungeT };
+      if (e.player) r.safe = Math.max(r.safe || 0, ATTACK.lungeT + ATTACK.selfSafe);   // (the dash and after: unhurt)
       t.o.underAttack = { by: e, t: this.time, done: false };
       t.o.driver?.mayCounter(this);
       this.events.push({ type: 'lunge', entry: e, target: t.o, dir: t.side, player: e.player });
@@ -651,6 +652,7 @@ export class Race {
     V.psi += kick; V.yawKick += kick;
     V.slow = (V.slow || 0) + V.vs * ATTACK.slamLoss * V.handling.impact;
     A.vx = 0; A.lunge = null;
+    if (att.player) A.safe = Math.max(A.safe || 0, ATTACK.selfSafe);
     const u = vic.underAttack, hp = [A.health, V.health];
     this.ram(att, vic, ATTACK.slamMin, 1, mass);
     if (u && u.by === att) u.hp = hp;                   // (blocked within the window after all: clash gives it back)
@@ -676,6 +678,7 @@ export class Race {
     const u = def.underAttack;
     if (u?.hp && u.by === att) { A.health = Math.max(A.health, u.hp[0]); D.health = Math.max(D.health, u.hp[1]); }
     A.safe = D.safe = 0.8;
+    for (const [e, r] of [[att, A], [def, D]]) if (e.player) r.safe = Math.max(r.safe, ATTACK.selfSafe);
     const n = this.entries.length, ia = this.entries.indexOf(att), ib = this.entries.indexOf(def);
     if (this.hurtT) this.hurtT[Math.min(ia, ib) * n + Math.max(ia, ib)] = 0.8;
     const at = A.pos.clone().add(D.pos).multiplyScalar(0.5);

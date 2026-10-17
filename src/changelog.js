@@ -2,6 +2,14 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.11.2', date: '17 Oct 2026', name: 'Ship screen',
+    notes: [
+      'Ship screen: a click puts a ship on the stand and hovering no longer switches it; Enter or the Confirm button flies it - no more flying off by a second click when reaching for a paint',
+      'Switching a Feather flown in another paint back to Classic in the Ship screen shows the Classic paint again',
+      'Your own slam: no damage from the moment you press it until 2 seconds after it lands (or after a block) - no more losing hull to the wall it carries you into',
+    ],
+  },
+  {
     version: '1.11.1', date: '17 Oct 2026', name: 'Smooth start',
     notes: [
       'No hitch in the first lap of a race started straight after loading: the showroom of the Ship screen is now made ready only while you are in the menus',

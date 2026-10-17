@@ -80,7 +80,7 @@ const HINTS = {
   controls: K(['Esc'], 'Back', 'back'),
   support: K(['Enter'], 'Donate on Revolut', 'ok') + K(['Esc'], 'Back', 'back'),
   circuit: K(['↑', '↓'], 'Select', UD) + K(['Enter'], 'Fly it', 'ok') + K(['Esc'], 'Back', 'back'),
-  ship: K(['↑', '↓'], 'Select', UD) + K(['←', '→'], 'Paint', LR) + K(['Enter'], 'Fly it', 'ok') + K(['Esc'], 'Back', 'back'),
+  ship: K(['↑', '↓'], 'Select', UD) + K(['←', '→'], 'Paint', LR) + K(['Enter'], 'Confirm', 'ok') + K(['Esc'], 'Back', 'back'),
   scoreboard: K(['↑', '↓'], 'Circuit', UD) + K(['←', '→'], 'Difficulty', LR) + K(['R'], 'Refresh', 'refresh') + K(['Esc'], 'Back', 'back'),
   results: K(['←', '→'], 'Select', LR) + K(['Enter'], 'Confirm', 'ok') + K(['R'], 'Race again', 'again') + K(['Esc'], 'Main menu', 'back'),
 };
@@ -183,6 +183,7 @@ export class Menu {
         <nav class="m-list">${SHIPS.map(([id, name], i) => item(['ship:' + id, name], i).replace(/<\/button>$/, chips(id) + '</button>')).join('')}</nav>
         <div class="m-desc"></div>
         <div class="d-stats s-stats"></div>
+        <button class="s-fly" data-act="shipfly" tabindex="-1"><kbd>Enter</kbd><span class="s-fly-t">Confirm</span></button>
       </section>
       <section class="m-screen" data-s="settings">
         <header><div class="m-kicker">Options</div><h2 class="m-h2">Settings</h2></header>
@@ -385,6 +386,10 @@ export class Menu {
       this.h.showroom?.(true, id);
       const st = this.el.querySelector('.s-stats');
       if (st && st.dataset.id !== id) { st.dataset.id = id; st.innerHTML = statRows(shipStats(HANDLING[id] || HANDLING.feather)); retrigger(st, 'swap'); }
+      // the confirm button: fly the ship on the stand (the one flown already: just back to the menu)
+      const fly = this.el.querySelector('.s-fly-t'), now = id === (this.h.shipId || 'feather');
+      const label = now ? `Keep the ${shipName(id)}` : `Fly the ${shipName(id)}`;
+      if (fly && fly.textContent !== label) fly.textContent = label;
       // the paints: on every row, the one each ship wears ringed and named (left / right or a chip changes it; the
       // stand's ship takes it at once - main.js Ship.liveries)
       for (const it of items) {
@@ -495,7 +500,7 @@ export class Menu {
 
   hover(e) {
     const it = e.target.closest('.m-item');
-    if (!it || this.busy) return;
+    if (!it || this.busy || this.screen === 'ship') return;     // (the Ship screen: a ship is put on the stand by a click)
     const i = this.items().indexOf(it);
     if (i >= 0 && i !== (this.sel[this.screen] || 0)) { this.sel[this.screen] = i; this.refresh(); ui('move'); }
   }
@@ -508,8 +513,19 @@ export class Menu {
     const slot = e.target.closest('.d-slot');
     if (slot) { const i = +slot.dataset.i; if (i === this.diffI) this.confirmDiff(); else this.pick(i); return; }
     const b = e.target.closest('[data-act]');
+    // the Ship screen: a row clicked puts that ship on the stand (a second click by mistake, reaching for its paints,
+    // no longer flies it - "make it so you really have to press enter or a confirm button")
+    if (b && this.screen === 'ship' && b.dataset.act.startsWith('ship:')) { this.pickShip(this.items().indexOf(b)); return; }
     if (b) this.act(b.dataset.act);
     else if (e.target.closest('button[data-k]') && !e.target.closest('[data-lv]')) ui('move');
+  }
+
+  // the Ship screen: ship i on the stand (its stats, its paints), chosen - not yet flown
+  pickShip(i) {
+    if (i < 0 || i === (this.sel.ship || 0)) return;
+    this.sel.ship = i;
+    this.refresh();
+    ui('move');
   }
 
   press(k) {
@@ -593,6 +609,7 @@ export class Menu {
       case 'donate': ui('select'); donate(); break;
       case 'difficulty': ui('select'); this.go('diff', this.ctx === 'results' ? 'restart' : 'apply'); break;
       case 'confirm': this.confirmDiff(); break;
+      case 'shipfly': { const it = this.items()[this.sel.ship || 0]; if (it) this.act(it.dataset.act); break; }
       case 'resume': ui('select'); this.resume(); break;
       case 'restart': ui('select'); this.leave(() => h.restart()); break;
       case 'again': ui('select'); this.fromResults(() => h.restart()); break;
@@ -611,8 +628,7 @@ export class Menu {
           setTimeout(() => location.replace(u.href), 300);
         } else if (a.startsWith('paint:')) {          // a chip: that ship on the stand, in that paint
           const [, id, name] = a.split(':'), i = this.items().findIndex((el) => el.dataset.act === 'ship:' + id);
-          if (i >= 0 && i !== this.sel.ship) this.sel.ship = i;
-          this.refresh();
+          this.pickShip(i);
           this.paint(0, name);
         } else if (a.startsWith('ship:')) {         // another ship: saved, and the page reloads into it
           // (picked: straight back out - the one flown already: back to the menu at once)
