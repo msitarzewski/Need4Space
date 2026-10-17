@@ -1517,10 +1517,17 @@ export class Wreck {
   // smoothly as the camera moves.)
   lightingLamps(p, t) {
     if (!this.lgrid) this.nearLamps(p, 1, 1, t);
-    const small = [], cx = Math.floor(p.x / 200), cy = Math.floor(p.y / 200), cz = Math.floor(p.z / 200);
-    for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++) for (let c = -3; c <= 3; c++) {
-      for (const L of this.lgrid.get(`${cx + a},${cy + b},${cz + c}`) || []) small.push({ L, d: L.p.distanceTo(p) });
+    // (the small lamps of the 7 x 7 x 7 cells round the camera's: gathered again only when it moves into another cell -
+    // 343 keys built and looked up every frame before)
+    const cx = Math.floor(p.x / 200), cy = Math.floor(p.y / 200), cz = Math.floor(p.z / 200), cell = `${cx},${cy},${cz}`;
+    if (cell !== this.lcell) {
+      this.lcell = cell;
+      this.lnear = [];
+      for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++) for (let c = -3; c <= 3; c++) {
+        for (const L of this.lgrid.get(`${cx + a},${cy + b},${cz + c}`) || []) this.lnear.push(L);
+      }
     }
+    const small = this.lnear.map((L) => ({ L, d: L.p.distanceTo(p) }));
     if (this.effects) for (const e of this.sparks?.sites || []) if (e.flash > 0.02) small.push({ L: { p: e.p, col: [1.0, 0.62, 0.3], I: 900, reach: 75, f: e.flash, spark: true }, d: e.p.distanceTo(p) });
     const big = this.big.map((L) => ({ L, d: L.p.distanceTo(p) }));
     const edge = (e) => e.d - e.L.reach, byEdge = (x, y) => edge(x) - edge(y);

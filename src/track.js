@@ -799,8 +799,11 @@ float snN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
       { a: [s * E, WALL_H], b: [s * E, 0], n: [s, 0], kind: HULL_SIDE },
     ], s < 0);
     out.walls = [new THREE.Mesh(wall(-1), metal), new THREE.Mesh(wall(1), metal)];
-    // a glowing strip along the top of each wall's inner face
+    // a glowing strip along the top of each wall's inner face. 2 cm off the face: past ~250 m the depth buffer (near
+    // 0.2, far 30 km) no longer told them apart and the strip flickered in and out along the far walls ("the light line
+    // flicker in and out of existance in some places") - drawn a few depth steps toward the camera, at any distance
     const stripMat = new THREE.ShaderMaterial({
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
       vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
       fragmentShader: /* glsl */`varying vec2 vUv;
         void main() {
@@ -1776,9 +1779,11 @@ float snN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
     this.laneMat.uniforms.time.value = t;
     this.spillMat.uniforms.time.value = t;
     this.beamMat.uniforms.time.value = t;
+    // (the pads' flashes fading: sent to the GPU only while one is lit, and the frame it goes out)
     const fl = this.padFlashA.array;
-    for (let i = 0; i < fl.length; i++) fl[i] = Math.max(0, fl[i] - dt * 1.6);
-    this.padFlashA.needsUpdate = true;
+    let lit = false;
+    for (let i = 0; i < fl.length; i++) if (fl[i] > 0) { fl[i] = Math.max(0, fl[i] - dt * 1.6); lit = true; }
+    if (lit) this.padFlashA.needsUpdate = true;
   }
 }
 

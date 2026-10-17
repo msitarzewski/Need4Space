@@ -2,6 +2,14 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.11.4', date: '17 Oct 2026', name: 'Smoother',
+    notes: [
+      'No more hitch a few seconds into a race with Comets and Anvils in the field: every paint is loaded with the game',
+      'Sparks, smoke and other particles cost nothing while there are none, and far less is sent to the graphics card every frame',
+      'The light strips along the walls no longer flicker in and out in the distance (the forest moon most of all)',
+    ],
+  },
+  {
     version: '1.11.3', date: '17 Oct 2026', name: 'Second wind',
     notes: [
       'Hitting the edge of the track costs every ship a third of the hull it did',

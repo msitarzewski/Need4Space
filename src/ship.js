@@ -1999,15 +1999,16 @@ export class Ship {
     if (this.liveryTex[name]) { if (this.liveryTex[name].ready !== false) put(this.liveryTex[name]); return; }
     const fit = LV.res.filter((r) => r <= (this.atlasW || 8192)), res = fit.length ? Math.max(...fit) : Math.min(...LV.res);
     const T = { ready: false }, L = new THREE.TextureLoader();
-    let n = 0;
+    let n = 0, done;
+    T.loaded = new Promise((r) => (done = r));           // (preloadLivery waits on it; a missing map ends it too)
     const load = (f, srgb) => L.load(`assets/liveries/${this.kind}/${name}_${f}_${res / 1024}k.webp${BAKE}`, (t) => {
       t.flipY = false;
       t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
       t.anisotropy = m.map.anisotropy;
       t.wrapS = m.map.wrapS; t.wrapT = m.map.wrapT;
       t.needsUpdate = true;
-      if (++n === 2) { T.ready = true; put(T); }
-    });
+      if (++n === 2) { T.ready = true; put(T); done(); }
+    }, undefined, () => done());
     T.map = load('albedo', true);
     T.orm = load('orm', false);
     this.liveryTex[name] = T;
@@ -2025,6 +2026,8 @@ export class Ship {
     this.edgeU.edgeMap.value = null;
     if (E[name] !== undefined) { if (E[name]) put(); return; }
     E[name] = false;
+    let done;
+    (this.edgeLoads ||= {})[name] = new Promise((r) => (done = r));
     new THREE.TextureLoader().load(`assets/liveries/${this.kind}/${name}_edges_${res / 1024}k.webp${BAKE}`, (t) => {
       t.flipY = false;
       t.colorSpace = THREE.NoColorSpace;
@@ -2034,7 +2037,19 @@ export class Ship {
       t.needsUpdate = true;
       E[name] = t;
       put();
-    }, undefined, () => {});
+      done();
+    }, undefined, () => done());
+  }
+
+  // A livery's maps loaded and on the ship before the warm-up (which puts every material's maps on the GPU), not at
+  // its first frame in the race: a rival's 2K paint arriving there was decoded and uploaded in one frame - a 110 ms
+  // hitch a few seconds into the race. The edge map (a uniform, not a material map) is uploaded here.
+  async preloadLivery(renderer, name = this.livery) {
+    if (!this.kind || !LIVERIES[this.kind] || !name) return;
+    this.applyLivery(name);
+    await Promise.all([this.liveryTex?.[name]?.loaded, this.edgeLoads?.[name]]);
+    const e = this.edgeTex?.[name];
+    if (e) renderer.initTexture(e);
   }
 
   // The animation layer on the visual group - never fed back to the physics:

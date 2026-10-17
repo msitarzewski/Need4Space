@@ -52,6 +52,7 @@ const puffTex = () => canvas(128, (g, n) => {
 // Per particle: a plane (the deck there) to fall toward and bounce off, with a restitution.
 const CAM_VEL = new THREE.Vector3();      // the camera's velocity (FX.update): the streaks are motion blur
 
+const POOL_ATTRS = [['iPos', 3], ['iVel', 3], ['iAlpha', 1], ['iSize', 1], ['iCol', 3], ['iRot', 1], ['iStr', 1], ['iF', 1]];
 class Pool {
   constructor(scene, n, { additive = false, map, order = 3, stretch = false, ramp = 0 }) {
     this.n = n;
@@ -60,6 +61,7 @@ class Pool {
       drag: f(1), grav: f(1), a0: f(1), fadeIn: f(1), str: f(1), fr: f(1), pl: f(6), bounce: f(1) });
     this.age = new Float32Array(n).fill(1e9);
     this.next = 0;
+    this.busy = false;                 // anything alive (or just gone) to move and upload - else the pool sleeps
     const quad = new THREE.PlaneGeometry(1, 1);
     const g = new THREE.InstancedBufferGeometry();
     g.index = quad.index;
@@ -144,6 +146,7 @@ class Pool {
     plane = null, bounce = 0 } = {}) {
     const i = this.next;
     this.next = (this.next + 1) % this.n;
+    this.busy = true;
     this.p.set([p.x, p.y, p.z], i * 3);
     this.v.set([v.x, v.y, v.z], i * 3);
     this.c.set([col.r, col.g, col.b], i * 3);
@@ -155,10 +158,21 @@ class Pool {
     this.bounce[i] = plane ? bounce : 0;
   }
 
+  // Only what is alive moves and goes to the GPU: the range of particles alive or just gone this frame (a pool sent
+  // all of itself, every attribute, every frame - 370 KB a frame over the seven pools, idle or not). A pool with
+  // nothing in it is not drawn; the frame its last particle goes it still is, so the zeroed alphas reach the GPU.
   update(dt) {
+    if (!this.busy) { if (this.points.visible) this.points.visible = false; return; }
     const pl = this.pl;
+    let lo = this.n, hi = -1, alive = 0;
     for (let i = 0; i < this.n; i++) {
-      if (this.age[i] >= this.life[i]) { this.a[i] = 0; continue; }
+      if (this.age[i] >= this.life[i]) {
+        if (this.a[i] !== 0) { this.a[i] = 0; if (i < lo) lo = i; if (i > hi) hi = i; }
+        continue;
+      }
+      alive++;
+      if (i < lo) lo = i;
+      if (i > hi) hi = i;
       this.age[i] = Math.min(this.life[i], this.age[i] + dt);
       const f = this.age[i] / this.life[i], k = Math.exp(-this.drag[i] * dt), o = i * 3, q = i * 6;
       const nx = pl[q + 3], ny = pl[q + 4], nz = pl[q + 5], hasPlane = nx || ny || nz;
@@ -183,7 +197,15 @@ class Pool {
       this.a[i] = this.a0[i] * smoothstep(0, this.fadeIn[i], f) * (1 - f) * (1 - f);
     }
     const at = this.points.geometry.attributes;
-    for (const k of ['iPos', 'iVel', 'iAlpha', 'iSize', 'iCol', 'iRot', 'iStr', 'iF']) at[k].needsUpdate = true;
+    for (const [k, w] of POOL_ATTRS) {
+      const a = at[k];
+      a.clearUpdateRanges();
+      if (hi < lo) continue;
+      a.addUpdateRange(lo * w, (hi - lo + 1) * w);
+      a.needsUpdate = true;
+    }
+    this.busy = alive > 0;
+    this.points.visible = alive > 0 || hi >= lo;
   }
 }
 
@@ -854,6 +876,7 @@ export class FX {
       this.shards.setMatrixAt(i, _m.compose(d.p, d.q, _s.set(k, k, k)));
     }
     if (any) this.shards.instanceMatrix.needsUpdate = true;
+    this.shards.visible = any;              // (none in flight: not drawn - in the scene, AO and all - at all)
   }
 
   update(dt, camera, flight) {

@@ -627,6 +627,10 @@ async function boot() {
   // the trails - so every shader is compiled and every buffer and texture is on the GPU before the race. The first lap
   // stuttered: ~20 shaders compiled and the ships' far detail levels uploaded the first time each came into view.
   status('Warming up the shaders');
+  // every paint in the race on its ship first, for the warm-up to upload: the rivals' own liveries and the player's
+  // saved one (they loaded at each ship's first frame: a 2K paint decoded and uploaded there mid-race - 110 ms)
+  await Promise.all((race ? race.entries : [{ ship, player: true }]).map((e) => e.ship.preloadLivery(renderer,
+    e.player ? savedSettings()[LIVERIES[SHIP]?.key] || LIVERIES[SHIP]?.names[0] : undefined)));
   await nextFrame();
   {
     const keep = [];
