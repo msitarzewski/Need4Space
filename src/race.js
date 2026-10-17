@@ -619,7 +619,7 @@ export class Race {
       e.airWas = a;
       if (r.lunge) {
         r.lunge.t -= dt;
-        if (r.lunge.t <= 0 || r.ghost > 0) r.lunge = null;
+        if (r.lunge.t <= 0 || r.ghost > 0) { r.vx *= 0.2; r.lunge = null; }        // (a miss: it stops)
         else r.vx += r.lunge.dir * Math.min(Math.max(0, ATTACK.lunge - r.lunge.dir * r.vx), ATTACK.lungeAcc * dt);
       }
       if (!a || a === was || r.ghost > 0 || r.y > 4 || e.finished || (e.player ? !playerActive : !e.driver?.attacking)) continue;
@@ -728,15 +728,13 @@ export class Race {
               const att = atk > 0 ? A : B, vic = atk > 0 ? B : A, out = atk > 0 ? sx : -sx;
               slam = !!att.lunge;
               if (slam) {                                      // smashed into: thrown ahead of the attacker, knocked loose
-                // and off its heading - the heavier the attacker against it, the further and the longer; the attacker
-                // presses on a moment
+                // and off its heading - the heavier the attacker against it, the harder and the longer
                 mass = clamp((att.handling.mass || 1) / (vic.handling.mass || 1), 0.4, 2.2);
-                const drive = Math.max(out * att.vx, ATTACK.lunge * 0.8);
-                vic.vx = out * Math.min(Math.max(out * vic.vx, drive) + ATTACK.slamShove * mass, ATTACK.cap * Math.min(1.4, mass));
+                vic.vx = out * Math.min(ATTACK.throw * mass, ATTACK.cap);
                 vic.knocked = ATTACK.knock * Math.min(1.5, mass);
                 const kick = out * ATTACK.slamYaw * Math.min(1.5, mass);
                 vic.psi += kick; vic.yawKick += kick;
-                att.lunge.t = Math.min(att.lunge.t, ATTACK.push);
+                att.vx = 0; att.lunge = null;                  // the attacker stops dead where it hit
               } else { vic.vx = out * Math.min(Math.max(out * vic.vx, 0) + ATTACK.shove, ATTACK.cap); vic.knocked = ATTACK.knock * 0.5; }
               vic.slow = (vic.slow || 0) + vic.vs * (slam ? ATTACK.slamLoss : ATTACK.loss) * vic.handling.impact;
               v = slam ? ATTACK.slamMin : ATTACK.min;          // (the blow is the attack's own size, not the closing speed)

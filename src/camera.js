@@ -69,7 +69,7 @@ export class CameraRig {
       cam.position.copy(pos).add(off);
       lookAt.copy(pos).add(new THREE.Vector3(0, far ? 1.0 : 1.6, -30).applyQuaternion(cq));
       camUp.lerp(new THREE.Vector3(0, 1, 0).applyQuaternion(cq), this.rollFollow).normalize();
-      fov = 60 + 18 * smoothstep(40, 340, speed) + 6 * boost + 10 * (this.kick || 0) - 9 * (this.punch || 0) - 5 * (flight.brakeS || 0) * (1 - (flight.driftS || 0))
+      fov = 60 + 18 * smoothstep(40, 340, speed) + 6 * boost + 10 * (this.kick || 0) - 13 * (this.punch || 0) - 5 * (flight.brakeS || 0) * (1 - (flight.driftS || 0))
         + 4 * (flight.driftS || 0);
     } else if (this.mode === 'canopy') {
       cam.position.copy(pos).add(new THREE.Vector3(0, 2.25, 3.2).applyQuaternion(cq));

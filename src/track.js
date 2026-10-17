@@ -1848,8 +1848,12 @@ export const damageSpeed = (v) => clamp((Math.abs(v) - DAMAGE.v0) / (DAMAGE.v1 -
 // ("the slam should be way harder ... the anvil should do more damage to smaller ships, and push them harder in the
 // wall"): the throw, the damage and the knock scale with the masses (m = the attacker's over the other's, ships.js);
 // a hull knocked loose that meets the wall takes wallCap m/s of it at most (not DAMAGE.cap) and wallK more.
-export const ATTACK = { range: 7, lunge: 38, lungeAcc: 420, lungeT: 0.5, push: 0.3, slamShove: 24, cap: 60, knock: 0.8,
-  loose: 0.15, slamYaw: 0.2, slamLoss: 0.11, slamMin: 22, shove: 20, loss: 0.06, min: 16, dmg: 4, keep: 0.3, wallCap: 32, wallK: 1.25 };
+// ("my ship should go and knock really hard the other ship, like fast and powerful ... I should remain on the hit
+// position and the enemy should fly into the wall"): the dash snaps to lunge m/s across at once (lungeAcc), for
+// lungeT s at most (a miss: it stops); the blow stops the attacker dead where it hit, and throws the other throw m/s
+// across x the masses (at most cap), loose for knock s - it flies on into the wall.
+export const ATTACK = { range: 7, lunge: 60, lungeAcc: 2000, lungeT: 0.3, throw: 62, cap: 95, knock: 0.9, loose: 0.12,
+  slamYaw: 0.2, slamLoss: 0.11, slamMin: 22, shove: 20, loss: 0.06, min: 16, dmg: 4, keep: 0.3, wallCap: 28, wallK: 1.0 };
 const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck
 

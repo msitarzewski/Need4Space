@@ -2,6 +2,12 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.9.4', date: '17 Oct 2026', name: 'Knockout',
+    notes: [
+      'The slam is a punch: your ship snaps across into the other at once, stops dead where it hits, and the other is launched across the track into the wall',
+    ],
+  },
+  {
     version: '1.9.3', date: '17 Oct 2026', name: 'Heavy hitter',
     notes: [
       'The slam hits far harder: your ship drives in faster and the one hit is thrown across the track, sliding loose into the wall - and a wall it is thrown into hurts more',
