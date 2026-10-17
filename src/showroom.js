@@ -190,9 +190,10 @@ export class Showroom {
   }
 
   // in the background while the title shows: the studio and every ship already in memory (the one flown, the rivals'),
-  // ready before the Ship screen opens
-  async prepare() {
+  // ready before the Ship screen opens. ok(): may it go on now (main.js: not while a race is flown) - else it waits
+  async prepare(ok = () => true) {
     for (const id of [this.playerId, ...Object.keys(this.sources).filter((k) => k !== this.playerId)]) {
+      while (!ok() && !this.loading[id]) await new Promise((r) => setTimeout(r, 1000));
       try { await this.ensure(id); } catch { /* made on first show instead */ }
     }
   }

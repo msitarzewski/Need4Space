@@ -2,6 +2,12 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.11.1', date: '17 Oct 2026', name: 'Smooth start',
+    notes: [
+      'No hitch in the first lap of a race started straight after loading: the Ship screen's showroom is now made ready only while you are in the menus',
+    ],
+  },
+  {
     version: '1.11.0', date: '17 Oct 2026', name: 'Slam cam',
     notes: [
       'Your slams in slow motion: the camera swings out to the side to show the dash, the blow and the other ship thrown into the wall, with a hit-stop as it lands (Settings: Slam camera)',

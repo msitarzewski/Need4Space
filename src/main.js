@@ -729,12 +729,17 @@ async function boot() {
     makeShowroom().active = true;
     if (id) showroom.show(id);
   };
-  // made ready in the background a few seconds into the title: the first open no longer stalls on it all at once
-  setTimeout(() => {
+  // made ready in the background a few seconds into the title: the first open no longer stalls on it all at once.
+  // Only while no race is being flown (the title, paused, the results): a race started at once on a slow load had it
+  // made in the first lap - its environment map, three ships' maps and 14 shaders mid-race; held between ships too
+  const quiet = () => !race || mode !== 'race' || race.state === 'grid' || menu.paused || (menu.open && menu.ctx === 'results');
+  const prepShowroom = () => {
     if (settings.v.showroom === false || showroom) return;
-    const go = () => makeShowroom().prepare();
+    if (!quiet()) { setTimeout(prepShowroom, 1000); return; }
+    const go = () => { if (showroom) return; if (!quiet()) setTimeout(prepShowroom, 1000); else makeShowroom().prepare(quiet); };
     if (window.requestIdleCallback) requestIdleCallback(go, { timeout: 4000 }); else go();
-  }, 3500);
+  };
+  setTimeout(prepShowroom, 3500);
   const render = () => {
     if (showroom && showroom.active) { drawShowroom(); return; }
     scene.updateMatrixWorld(); shipLook(); world.preRender?.(renderer);
