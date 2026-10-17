@@ -972,3 +972,77 @@ export class EngineHeatPass extends Pass {
     this.quad.render(renderer);
   }
 }
+
+// Shockwaves (fx.js shock): rings of refraction racing out from a slam's blow or a blast - the picture behind pushed
+// outward just ahead of the ring and drawn back in just behind it (a pressure front, as air bends light), the colours
+// split a little across it (dispersion) and the band faintly brighter. set() projects each from the world every frame:
+// its centre on the frame (uv), its radius and the band's half-width (in frame heights), the bend (frame heights), the
+// dispersion and the brightening. Not drawn at all with none running (main.js turns it on); allowed: the setting.
+export class ShockPass extends Pass {
+  constructor(max = 4) {
+    super();
+    this.needsSwap = true;
+    this.max = max;
+    this.n = 0;
+    this.allowed = true;
+    this.quad = new FullScreenQuad(new THREE.ShaderMaterial({
+      uniforms: { tDiffuse: { value: null }, n: { value: 0 }, aspect: { value: 1 },
+        S: { value: Array.from({ length: max }, () => new THREE.Vector4()) }, K: { value: Array.from({ length: max }, () => new THREE.Vector4()) } },
+      vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+      fragmentShader: /* glsl */`
+        uniform sampler2D tDiffuse; uniform int n; uniform float aspect; uniform vec4 S[${max}], K[${max}]; varying vec2 vUv;
+        void main() {
+          vec2 off = vec2(0.0);
+          float disp = 0.0, lift = 0.0;
+          for (int i = 0; i < ${max}; i++) {
+            if (i >= n) break;
+            vec2 d = vUv - S[i].xy;
+            d.x *= aspect;
+            float r = length(d), x = (r - S[i].z) / S[i].w;
+            if (abs(x) >= 1.0 || r < 1e-4) continue;
+            float e = 1.0 - abs(x);
+            off += vec2(d.x / aspect, d.y) / r * sin(x * 3.14159) * e * K[i].x;
+            disp = max(disp, K[i].y * e * e);
+            lift += K[i].z * e * e * e;
+          }
+          vec2 uv = vUv - off;
+          vec4 c = texture2D(tDiffuse, uv);
+          if (disp > 0.0) {
+            c.r = texture2D(tDiffuse, uv - off * disp).r;
+            c.b = texture2D(tDiffuse, uv + off * disp).b;
+          }
+          gl_FragColor = vec4(c.rgb * (1.0 + lift), c.a);
+        }`,
+    }));
+  }
+
+  // this frame's shocks (fx.shocks: { at, t 0..1, size m, k, disp, lift }) as the camera sees them
+  set(list, camera) {
+    const u = this.quad.material.uniforms, P = (this._p ||= new THREE.Vector3()), V = (this._v ||= new THREE.Vector3());
+    let n = 0;
+    if (this.allowed && list.length) {
+      camera.updateMatrixWorld();
+      const th = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+      for (const s of list) {
+        if (n >= this.max) break;
+        const z = -V.copy(s.at).applyMatrix4(camera.matrixWorldInverse).z;
+        if (z < 1.5) continue;
+        P.copy(s.at).project(camera);
+        const grow = 1 - Math.pow(1 - s.t, 2.4), R = s.size * grow / (z * th) * 0.5;        // (frame heights)
+        if (Math.abs(P.x) > 1 + 2 * R * 2 || Math.abs(P.y) > 1 + 2 * R * 2) continue;
+        const k = s.k * Math.pow(1 - s.t, 1.4) * Math.min(1, R * 12) * Math.min(1, s.t * 12);
+        u.S.value[n].set((P.x + 1) / 2, (P.y + 1) / 2, R, Math.max(0.008, R * 0.3));
+        u.K.value[n].set(k, s.disp, s.lift * (1 - s.t), 0);
+        n++;
+      }
+    }
+    u.aspect.value = camera.aspect;
+    u.n.value = this.n = n;
+  }
+
+  render(renderer, writeBuffer, readBuffer) {
+    this.quad.material.uniforms.tDiffuse.value = readBuffer.texture;
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    this.quad.render(renderer);
+  }
+}

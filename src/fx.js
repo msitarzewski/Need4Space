@@ -367,6 +367,8 @@ class DeckTrails {
 
 const ZERO = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0), WHITE = new THREE.Color(1, 1, 1);
 const SMOKE = new THREE.Color(0.42, 0.41, 0.4), FLAME_A = new THREE.Color(1.0, 0.45, 0.1), FLAME_B = new THREE.Color(1.0, 0.75, 0.35);
+const SHARDS = 72, NONE = new THREE.Matrix4().makeScale(0, 0, 0), BARE = new THREE.Color(0.32, 0.33, 0.35), _q = new THREE.Quaternion(), _m = new THREE.Matrix4();
+const _s = new THREE.Vector3();
 
 export class FX {
   constructor(scene, camera) {
@@ -405,6 +407,42 @@ export class FX {
     });
     this.waveN = 0;
     this.kick = 0;
+    this.flashVel = new THREE.Vector3();      // (the flash travels with what lit it: a slam between two ships at speed)
+    // shockwaves (post.js ShockPass): rings of refraction, not drawn shapes
+    this.shocks = [];
+    // debris (debris()): small torn plates of hull, lit like any metal, tumbling off a blow or a blast, bouncing along
+    // the deck and shrinking away. Always in the scene, the spent ones at scale 0: no program is built mid-race.
+    const shard = new THREE.TetrahedronGeometry(0.5, 0);
+    shard.scale(1, 0.3, 1.7);
+    this.shards = new THREE.InstancedMesh(shard, new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.7, roughness: 0.38 }), SHARDS);
+    this.shards.frustumCulled = false;
+    this.shards.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    for (let i = 0; i < SHARDS; i++) { this.shards.setMatrixAt(i, NONE); this.shards.setColorAt(i, WHITE); }
+    scene.add(this.shards);
+    this.sh = Array.from({ length: SHARDS }, () => ({ age: 1, life: 0, p: new THREE.Vector3(), v: new THREE.Vector3(), q: new THREE.Quaternion(),
+      ax: new THREE.Vector3(1, 0, 0), spin: 0, size: 1, s: 0, f: {} }));
+    this.shardN = 0;
+  }
+
+  // a shockwave from at (travelling with vel): size m across at its widest, its bend k (frame heights), over life s
+  shock(at, vel, size, k, life, disp = 0.35, lift = 0.18) {
+    if (this.shocks.length >= 6) this.shocks.shift();
+    this.shocks.push({ at: at.clone(), vel: (vel || ZERO).clone(), t: 0, life, size, k, disp, lift });
+  }
+
+  // n plates of hull torn off at at - flung along dir and every way, carrying vel; cols: their paint (and bare metal);
+  // s: where on the track (they bounce along its deck)
+  debris(at, vel, dir, n, cols, s = null) {
+    for (let k = 0; k < n; k++) {
+      const i = this.shardN++ % SHARDS, d = this.sh[i];
+      d.p.copy(at).add(_v.randomDirection().multiplyScalar(0.8 * Math.random()));
+      d.v.copy(dir).multiplyScalar(8 + Math.random() * 30).add(_v.randomDirection().multiplyScalar(6 + Math.random() * 14))
+        .addScaledVector(UP, 3 + Math.random() * 9).add(vel);
+      d.q.random(); d.ax.randomDirection();
+      Object.assign(d, { spin: 5 + Math.random() * 16, size: 0.35 + Math.random() * 0.75, age: 0, life: 1.1 + Math.random() * 1.3, s });
+      this.shards.setColorAt(i, Math.random() < 0.3 ? BARE : cols[Math.floor(Math.random() * cols.length)]);
+    }
+    this.shards.instanceColor.needsUpdate = true;
   }
 
   // a ring racing out over the deck at `at`, lying in the plane of `basis` (a matrix with the deck's axes); vel: it
@@ -419,44 +457,82 @@ export class FX {
     m.visible = true;
   }
 
-  // An airbrake attack landing (race.js 'attack'): the blow lights white, two shockwave rings are thrown out from it
-  // in the plane across the shove - the attacker's engine colour, then white - a ring of sparks blasts out in that
-  // plane, and an energy jet drives across into the one hit. All of it travels with the ships (vel). A slam (the
-  // lunge's blow) is the full size, a shove of an airbrake already touching smaller.
-  attack(at, vel, dir, colour, slam) {
+  // A slam landing (race.js 'attack'; slam false: a block's or a wall's smaller burst). Built as a blow is filmed, not
+  // drawn ("stop using paint effects"): the air itself bent by the shock (ShockPass - refraction, no rings), real light
+  // from the blow on both hulls and the deck (the flash point light, travelling with them), a white-hot core gone in a
+  // blink, a ring of sparks across the shove and a cone of them driven into the one hit, plates of its hull torn off
+  // and tumbling, embers falling, a breath of smoke. All of it carried along with the two (vel). colour: the
+  // attacker's engine; cols: the paint of the one hit; s: where on the track.
+  attack(at, vel, dir, colour, slam, cols = null, s = null) {
     const K = slam ? 1 : 0.55, Y = dir.clone().normalize();
     const X = new THREE.Vector3().crossVectors(Y, Math.abs(Y.y) < 0.9 ? UP : new THREE.Vector3(1, 0, 0)).normalize();
-    const Z = new THREE.Vector3().crossVectors(X, Y), basis = new THREE.Matrix4().makeBasis(X, Y, Z);
-    const hot = colour.clone().multiplyScalar(2.6), white = new THREE.Color(0.9, 0.95, 1.0), V = new THREE.Vector3();
-    this.wave(at, basis, hot, 5 + 7 * K, 0.3, vel);
-    this.wave(at.clone().addScaledVector(Y, 1.5), basis, white, 6 + 8 * K, 0.4, vel);
-    const tint = colour.clone().lerp(new THREE.Color(1, 1, 1), 0.45);
-    for (let i = 0, n = Math.round(200 * K); i < n; i++) {
-      const a = Math.random() * Math.PI * 2, sp = 22 + Math.random() * 40;
+    const Z = new THREE.Vector3().crossVectors(X, Y), V = new THREE.Vector3(), P = new THREE.Vector3();
+    const hot = colour.clone().multiplyScalar(2.6), tint = colour.clone().lerp(WHITE, 0.45);
+    this.shock(at, vel, 7 + 9 * K, 0.006 + 0.016 * K, 0.42);
+    if (slam) this.shock(at.clone().addScaledVector(Y, 2), vel, 26, 0.008, 0.85, 0.3, 0.08);
+    this.flash.position.copy(at);
+    this.flashVel.copy(vel);
+    this.flash.color.copy(colour).lerp(WHITE, 0.6);
+    this.flashT = Math.max(this.flashT, 0.45 + 0.4 * K);
+    // the core: white-hot, small, gone in a blink (seen in slow motion it must not hang over the blow)
+    this.glints.emit(at, vel.clone(), new THREE.Color(1, 0.95, 0.9), { size: 3 + 3 * K, grow: 16, life: 0.1, alpha: 3, drag: 0, fadeIn: 0.005 });
+    this.glints.emit(at, vel.clone(), hot, { size: 3, grow: 12, life: 0.2, alpha: 0.9, drag: 0, fadeIn: 0.005 });
+    for (let i = 0, n = Math.round(180 * K); i < n; i++) {
+      const a = Math.random() * Math.PI * 2, sp = 22 + Math.random() * 44;
       V.copy(X).multiplyScalar(Math.cos(a) * sp).addScaledVector(Z, Math.sin(a) * sp).addScaledVector(Y, Math.random() * 12).add(vel);
-      this.sparks.emit(at, V, Math.random() < 0.5 ? tint : WHITE, { size: 0.06 + Math.random() * 0.07, life: 0.3 + Math.random() * 0.4,
-        alpha: 2.2, drag: 0.4, grav: 4, fadeIn: 0.01, stretch: 0.025 });
+      this.sparks.emit(at, V, Math.random() < 0.5 ? tint : WHITE, { size: 0.05 + Math.random() * 0.06, life: 0.25 + Math.random() * 0.4,
+        alpha: 2.2, drag: 0.4, grav: 6, fadeIn: 0.005, stretch: 0.025 });
     }
-    const from = at.clone().addScaledVector(Y, -3);
-    for (let i = 0, n = Math.round(60 * K); i < n; i++) {
-      V.copy(Y).multiplyScalar(30 + Math.random() * 45).addScaledVector(X, (Math.random() - 0.5) * 10).addScaledVector(Z, (Math.random() - 0.5) * 10).add(vel);
-      this.ions.emit(from, V, hot, { size: 0.12 + Math.random() * 0.1, life: 0.18 + Math.random() * 0.15, alpha: 2.6, drag: 0.4, fadeIn: 0.01, stretch: 0.04 });
+    if (!slam) return;
+    for (let i = 0; i < 160; i++) {          // the cone: driven into the one hit
+      V.copy(Y).multiplyScalar(40 + Math.random() * 60).addScaledVector(X, (Math.random() - 0.5) * 30).addScaledVector(Z, (Math.random() - 0.5) * 30).add(vel);
+      this.sparks.emit(at, V, Math.random() < 0.4 ? tint : FLAME_B, { size: 0.05 + Math.random() * 0.07, life: 0.3 + Math.random() * 0.45,
+        alpha: 2.2, drag: 0.5, grav: 7, fadeIn: 0.005, stretch: 0.03 });
     }
-    this.glints.emit(at, vel.clone(), new THREE.Color(1, 0.95, 0.9), { size: 7 + 8 * K, grow: 34, life: 0.22, alpha: 4, drag: 0, fadeIn: 0.01 });
+    const hit = at.clone().addScaledVector(Y, 1.5);
+    this.debris(hit, vel, Y, 16, cols || [WHITE], s);
+    for (let i = 0; i < 18; i++) {           // embers: hot bits falling away
+      V.copy(Y).multiplyScalar(10 + Math.random() * 20).addScaledVector(X, (Math.random() - 0.5) * 20).addScaledVector(Z, (Math.random() - 0.5) * 20)
+        .addScaledVector(UP, Math.random() * 8).add(vel);
+      this.sparks.emit(hit, V, FLAME_A, { size: 0.12 + Math.random() * 0.1, life: 0.6 + Math.random() * 0.8, alpha: 2.2, drag: 0.3, grav: 14,
+        fadeIn: 0.01, stretch: 0.01 });
+    }
+    for (let i = 0; i < 10; i++) {           // a breath of smoke off the blow
+      V.set(Math.random() - 0.5, Math.random() * 0.5, Math.random() - 0.5).multiplyScalar(6).addScaledVector(vel, 0.97);
+      P.copy(at).addScaledVector(Y, (Math.random() - 0.3) * 3);
+      this.smoke.emit(P, V, SMOKE, { size: 1.2, grow: 4, life: 0.45 + Math.random() * 0.35, alpha: 0.18, drag: 0.6, grav: -1, spin: (Math.random() - 0.5) * 2, fadeIn: 0.03 });
+    }
   }
 
-  // A damaged hull (race.js visuals: under half its hull): smoke torn off it, thicker the worse it is; under a quarter
-  // flames lick out of it and sparks crackle off - the others can see who is hurt. Rate per second, kept per ship.
-  damaged(ship, r, hp, dt) {
+  // A hull thrown by a slam (race.js visuals while it is knocked across fast): sparks torn off it all the way to the
+  // wall - a streak across the track
+  thrown(ship, r, dt) {
+    const R = ship.root, hs = (ship.halfSpan || 5) * 0.6, L = (ship.length || 13) * 0.4;
+    const P = (this._tp ||= new THREE.Vector3()), V = (this._tv ||= new THREE.Vector3());
+    ship.thrAcc = (ship.thrAcc || 0) + dt * 220 * Math.min(1, r.knocked / 0.5);
+    for (; ship.thrAcc >= 1; ship.thrAcc -= 1) {
+      P.set((Math.random() - 0.5) * 2 * hs, 0.3 + Math.random() * 0.7, (Math.random() - 0.3) * L).applyQuaternion(R.quaternion).add(R.position);
+      V.set(Math.random() - 0.5, Math.random() * 0.7, Math.random() - 0.5).multiplyScalar(12).addScaledVector(r.vel, 0.88);
+      this.sparks.emit(P, V, Math.random() < 0.55 ? FLAME_B : WHITE, { size: 0.06 + Math.random() * 0.07, life: 0.25 + Math.random() * 0.35,
+        alpha: 2.2, drag: 0.5, grav: 7, fadeIn: 0.01, stretch: 0.025 });
+    }
+  }
+
+  // A damaged hull (race.js visuals: under half its hull): wisps of smoke torn off it, more the worse it is; under a
+  // quarter flames lick out of it and sparks crackle off - the others can see who is hurt. Kept thin and short ("the
+  // smoke when ship is damaged is too powerful, it blocks the visibility"): small, faint puffs that fall behind and are
+  // gone in half a second; the player's own (mine) thinner still - it streams back past the chase camera. Rate per
+  // second, kept per ship.
+  damaged(ship, r, hp, dt, mine = false) {
     const k = Math.min(1, (0.5 - hp) / 0.5), R = ship.root, hs = (ship.halfSpan || 5) * 0.55, L = (ship.length || 13) * 0.35;
     const P = (this._dp ||= new THREE.Vector3()), V = (this._dv ||= new THREE.Vector3());
-    ship.dmgAcc = (ship.dmgAcc || 0) + dt * (10 + 34 * k);
+    ship.dmgAcc = (ship.dmgAcc || 0) + dt * (6 + 14 * k) * (mine ? 0.5 : 1);
     for (; ship.dmgAcc >= 1; ship.dmgAcc -= 1) {
       P.set((Math.random() - 0.5) * 2 * hs, 0.3 + Math.random() * 0.9, (Math.random() - 0.2) * L).applyQuaternion(R.quaternion).add(R.position);
-      V.set(Math.random() - 0.5, Math.random() * 0.6, Math.random() - 0.5).multiplyScalar(4).addScaledVector(r.vel, 0.94);
-      this.smoke.emit(P, V, SMOKE, { size: 1.6 + 1.4 * k, grow: 4.5 + 5 * k, life: 0.9 + Math.random() * 0.7, alpha: 0.35 + 0.3 * k,
-        drag: 0.5, grav: -1.2, spin: (Math.random() - 0.5) * 1.5, fadeIn: 0.06 });
-      if (hp < 0.25 && Math.random() < 0.8) {
+      V.set(Math.random() - 0.5, Math.random() * 0.6, Math.random() - 0.5).multiplyScalar(4).addScaledVector(r.vel, 0.9);
+      this.smoke.emit(P, V, SMOKE, { size: 0.9 + 0.7 * k, grow: 2.2 + 2.2 * k, life: 0.45 + Math.random() * 0.35,
+        alpha: (0.15 + 0.13 * k) * (mine ? 0.55 : 1), drag: 0.5, grav: -1.2, spin: (Math.random() - 0.5) * 1.5, fadeIn: 0.06 });
+      if (hp < 0.25) {
         this.fire.emit(P, V, Math.random() < 0.5 ? FLAME_A : FLAME_B, { size: 1.5 + Math.random() * 1.2, grow: 3, life: 0.28 + Math.random() * 0.2,
           alpha: 1.8, drag: 0.4, fadeIn: 0.02 });
         if (Math.random() < 0.5) {
@@ -698,6 +774,7 @@ export class FX {
         alpha: 1.6, drag: 0.35, grav: 9.8, fadeIn: 0.01, stretch: 0.03 });
     }
     this.flash.position.copy(at).add(new THREE.Vector3(0, 2, 0));
+    this.flashVel.set(0, 0, 0);
     this.flash.color.set(0xff9a4a);
     this.flashT = 1;
     this.ring.position.copy(at);
@@ -706,17 +783,18 @@ export class FX {
   }
 
   // A hull destroyed in a race (main.js 'wreck'): it blows up where it stops. A white-hot core and the light of it, a
-  // fireball rolling out, two shockwaves over the deck (its engine colour, then white), burning debris and sparks
-  // flung on - the faster it was going the further - and a smoke cloud left hanging. near (m to the camera): the
+  // fireball rolling out, two shockwaves bending the air (ShockPass), plates of its hull flung out (debris), burning
+  // debris and sparks flung on - the faster it was going the further - and a smoke cloud left hanging. near (m to the camera): the
   // fire and the smoke thinned up close (a fireball over the lens fills the screen).
-  blast(at, vel, basis, colour, near = 100) {
+  blast(at, vel, basis, colour, near = 100, cols = null, s = null) {
     const V = new THREE.Vector3(), P = new THREE.Vector3(), up = new THREE.Vector3().setFromMatrixColumn(basis, 1);
     const k = Math.min(1, Math.max(0.3, (near - 6) / 30)), on = vel.clone().multiplyScalar(0.35);
     const hotA = new THREE.Color(1.0, 0.86, 0.55), hotB = new THREE.Color(1.0, 0.5, 0.14), white = new THREE.Color(1, 0.95, 0.85);
     this.glints.emit(at, ZERO, white, { size: 5, grow: 26, life: 0.2, alpha: 2.2 * k, drag: 0, fadeIn: 0.01 });
     this.glints.emit(at, ZERO, hotB, { size: 9, grow: 22, life: 0.45, alpha: 1.3 * k, drag: 0, fadeIn: 0.01 });
-    this.wave(at, basis, colour.clone().multiplyScalar(2.6), 34, 0.55);
-    this.wave(at.clone().addScaledVector(up, 0.3), basis, white, 52, 0.8);
+    this.shock(at, ZERO, 44, 0.03, 0.75, 0.7, 0.3);
+    this.shock(at, ZERO, 80, 0.012, 1.3, 0.3, 0.06);
+    this.debris(at, on, up, 30, cols || [BARE], s);
     for (let i = 0; i < 90; i++) {           // the fireball: hot puffs thrown out, swelling and burning out in a second
       V.set(Math.random() - 0.5, Math.random() - 0.3, Math.random() - 0.5).normalize().multiplyScalar(6 + Math.random() * 20).addScaledVector(up, 3);
       P.copy(at).addScaledVector(V, 0.05);
@@ -742,8 +820,40 @@ export class FX {
         fadeIn: 0.01, stretch: 0.012 });
     }
     this.flash.position.copy(at).addScaledVector(up, 2);
+    this.flashVel.set(0, 0, 0);
     this.flash.color.set(0xffa050);
     this.flashT = 0.75;
+  }
+
+  // the plates in flight: falling, tumbling, bouncing on the deck under them (the track's frame, followed along by
+  // how far each has gone), shrinking away at the end
+  updateDebris(dt) {
+    let any = false;
+    const tr = this.track;
+    for (let i = 0; i < SHARDS; i++) {
+      const d = this.sh[i];
+      if (d.age >= d.life) continue;
+      any = true;
+      d.age += dt;
+      if (d.age >= d.life) { this.shards.setMatrixAt(i, NONE); continue; }
+      d.v.y -= 16 * dt;
+      d.v.multiplyScalar(Math.exp(-0.35 * dt));
+      d.p.addScaledVector(d.v, dt);
+      if (tr && d.s != null) {
+        const f = tr.frame(d.s, d.f);
+        d.s += d.v.dot(f.T) * dt;
+        const h = _v.copy(d.p).sub(f.P).dot(f.U);
+        if (h < 0.12 && Math.abs(_v.dot(f.R)) < TRACK_HALF + 2) {
+          d.p.addScaledVector(f.U, 0.12 - h);
+          const vn = d.v.dot(f.U);
+          if (vn < 0) { d.v.addScaledVector(f.U, -1.45 * vn).multiplyScalar(0.72); d.spin *= 0.7; }
+        }
+      }
+      d.q.multiply(_q.setFromAxisAngle(d.ax, d.spin * dt));
+      const k = d.size * Math.min(1, (d.life - d.age) / 0.35);
+      this.shards.setMatrixAt(i, _m.compose(d.p, d.q, _s.set(k, k, k)));
+    }
+    if (any) this.shards.instanceMatrix.needsUpdate = true;
   }
 
   update(dt, camera, flight) {
@@ -767,6 +877,10 @@ export class FX {
     }
     this.flashT = Math.max(0, this.flashT - dt * 1.6);
     this.flash.intensity = 5000 * this.flashT * this.flashT;
+    if (this.flashT > 0) this.flash.position.addScaledVector(this.flashVel, dt);
+    for (const s of this.shocks) { s.t += dt / s.life; s.at.addScaledVector(s.vel, dt); }
+    if (this.shocks.length && this.shocks[0].t >= 1) this.shocks = this.shocks.filter((s) => s.t < 1);
+    this.updateDebris(dt);
     this.glowT = (this.glowT || 0) + dt;
     if (this.glow && this.flashT < 0.02) {
       const g = this.glow;

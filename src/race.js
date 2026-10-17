@@ -635,7 +635,7 @@ export class Race {
       r.lunge = { target: t.o, dir: t.side, t: ATTACK.lungeT };
       t.o.underAttack = { by: e, t: this.time, done: false };
       t.o.driver?.mayCounter(this);
-      this.events.push({ type: 'lunge', entry: e, dir: t.side, player: e.player });
+      this.events.push({ type: 'lunge', entry: e, target: t.o, dir: t.side, player: e.player });
     }
   }
 
@@ -651,7 +651,9 @@ export class Race {
     V.psi += kick; V.yawKick += kick;
     V.slow = (V.slow || 0) + V.vs * ATTACK.slamLoss * V.handling.impact;
     A.vx = 0; A.lunge = null;
+    const u = vic.underAttack, hp = [A.health, V.health];
     this.ram(att, vic, ATTACK.slamMin, 1, mass);
+    if (u && u.by === att) u.hp = hp;                   // (blocked within the window after all: clash gives it back)
     this.stats.attacks = (this.stats.attacks || 0) + 1;
     if (att.player || vic.player) this.player.clean = false;
     const at = A.pos.clone().add(V.pos).multiplyScalar(0.5);
@@ -661,7 +663,7 @@ export class Race {
   }
 
   // the double attack: a slam answered within the window - before it lands or after - the two meet and bounce off
-  // each other; no one knocked loose, no one into the wall; each hurt by clashDmg of a slam
+  // each other; no one knocked loose, no one into the wall, no one hurt - nor by the touch that follows it
   clash(att, def) {
     const A = att.racer, D = def.racer, out = Math.sign(D.x - A.x) || 1;
     if (def.underAttack) def.underAttack.done = true;
@@ -669,11 +671,13 @@ export class Race {
     A.vx = -out * ATTACK.bounce; D.vx = out * ATTACK.bounce;
     A.knocked = 0; D.knocked = 0;
     D.slamCool = D.handling.slamCool || 10;
-    const k = DAMAGE.ship * (ATTACK.slamMin - DAMAGE.shipGraze) * damageSpeed(Math.max(A.vs, D.vs)) * ATTACK.dmg * ATTACK.clashDmg;
-    A.hurt(k * (D.handling.ram || 1), 'ship');
-    D.hurt(k * (A.handling.ram || 1), 'ship');
-    if (att.player) def.playerHitT = this.time;
-    if (def.player) att.playerHitT = this.time;
+    // (answered after the slam landed: what it took is given back; and for a moment neither can be hurt - not by the
+    // touch that follows, not by a wall the bounce carries it into)
+    const u = def.underAttack;
+    if (u?.hp && u.by === att) { A.health = Math.max(A.health, u.hp[0]); D.health = Math.max(D.health, u.hp[1]); }
+    A.safe = D.safe = 0.8;
+    const n = this.entries.length, ia = this.entries.indexOf(att), ib = this.entries.indexOf(def);
+    if (this.hurtT) this.hurtT[Math.min(ia, ib) * n + Math.max(ia, ib)] = 0.8;
     const at = A.pos.clone().add(D.pos).multiplyScalar(0.5);
     att.ship.hit(new THREE.Vector3(-out, 0, 0), 1, att.ship.root.worldToLocal(at.clone()));
     def.ship.hit(new THREE.Vector3(out, 0, 0), 1, def.ship.root.worldToLocal(at.clone()));
@@ -930,7 +934,9 @@ export class Race {
       }
       // a hull under half smokes, under a quarter burns (fx.damaged): who is hurt shows
       const hp = r.health / r.maxHealth;
-      if (this.racing && hp < 0.5 && !(r.ghost > 0) && camera.position.distanceToSquared(r.pos) < 300 * 300) fx.damaged(ship, r, hp, dt);
+      if (this.racing && hp < 0.5 && !(r.ghost > 0) && camera.position.distanceToSquared(r.pos) < 300 * 300) fx.damaged(ship, r, hp, dt, e.player);
+      // thrown by a slam: a streak of sparks torn off it on its way to the wall
+      if (this.racing && r.knocked > 0.2 && Math.abs(r.vx) > 25 && camera.position.distanceToSquared(r.pos) < 250 * 250) fx.thrown(ship, r, dt);
     }
   }
 

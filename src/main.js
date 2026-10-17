@@ -27,7 +27,7 @@ import { TouchControls, isTouch } from './touch.js';
 import { FX } from './fx.js';
 import { HUD } from './hud.js';
 import { GameAudio } from './audio.js';
-import { agxPass, speedBlurPass, LayeredRenderPass, DeckSSRPass, StreakPass, BloomPass, ResamplePass, ShaftPass, LensWaterPass, GradePass, EngineHeatPass } from './post.js';
+import { agxPass, speedBlurPass, LayeredRenderPass, DeckSSRPass, StreakPass, BloomPass, ResamplePass, ShaftPass, LensWaterPass, GradePass, EngineHeatPass, ShockPass } from './post.js';
 import { Settings, savedSettings } from './settings.js';
 import { Race, Driver } from './race.js';
 import { Menu } from './menu.js';
@@ -42,6 +42,8 @@ const MAP = { meadow: 'meadow', forest: 'forest', space: 'space', ice: 'ice', de
 // the ship: the one chosen in the menu (saved), or ?ship=feather / rocket (ships.js); its model by memory tier
 const SHIP = shipChoice(savedSettings().ship), SHIP_URL = SHIP_URLS[SHIP], SHIP_NAME = shipName(SHIP);
 const TAG_P = new THREE.Vector3(), WRECK_M = new THREE.Matrix4();     // (a wreck blast: the deck's axes)
+// a ship's paint, for the plates torn off it (fx.debris): its team's body and livery colours
+const paintOf = (e) => [new THREE.Color(...(e.team.body || [0.85, 0.85, 0.86])), new THREE.Color(...(e.team.livery || [0.7, 0.12, 0.1]))];
 const LUTS = ['assets/agx_punchy_lut65.bin', 'assets/agx_mhc_lut65.bin'];   // Blender's AgX looks: Punchy, Medium High Contrast
 const status = (t) => (document.getElementById('loadtext').textContent = t);
 // The loading bar: each step's share of it (by how long it usually takes) and how far into it. The page's first script
@@ -400,6 +402,10 @@ async function boot() {
   const heat = new EngineHeatPass();
   heat.camera = camera;
   composer.addPass(heat);
+  // the shockwaves of slams and blasts (fx.js shock): the picture bent, before the bloom - on only while one runs
+  const shock = new ShockPass();
+  shock.enabled = false;
+  composer.addPass(shock);
   // only what is really bright, a tight halo (at 0.45 / threshold 1.1 every light strip hazed into white); the
   // dual-filter bloom (post.js): no squares round a glint
   const bloom = new BloomPass({ threshold: 2.6, knee: 1.0, strength: 0.9, radius: 0.62 });
@@ -475,6 +481,7 @@ async function boot() {
   // (under water the shimmer is stronger: the sea bends the light more than the air)
   const shipLook = () => { deckLight(); if (heat.enabled) { heat.amount = 8 * (1 + 2.4 * (world.underK || 0)); heat.gather(camera, fleet()); } };
   let pixelRatio = Math.min(devicePixelRatio, 2), renderScale = 1, blurOn = true, aoRes = 'auto';
+  let slamCamOn = true;                                  // settings: "Slam camera" (slow motion and the side view)
   // half-size AO: asked for, or 'auto' with more than ~1440p of pixels to fill
   const applyAoRes = () => {
     const half = aoRes === 'half' || (aoRes === 'auto' && innerWidth * innerHeight * (pixelRatio * renderScale) ** 2 > 2560 * 1440 * 1.1);
@@ -500,7 +507,7 @@ async function boot() {
         // (compileAll hands every program over before its first wait: shown only for that moment, no frame between)
         showAll();
         renderer.setRenderTarget(scenePass.msaa);
-        const built = compileAll(renderer, [...jobs, ...postJobs(composer.passes.filter((p) => p.enabled || p === lens))]);
+        const built = compileAll(renderer, [...jobs, ...postJobs(composer.passes.filter((p) => p.enabled || p === lens || p === shock))]);
         renderer.setRenderTarget(null);
         restore();
         await built;
@@ -559,11 +566,13 @@ async function boot() {
     Ship.trailStyle = v.engineTrails || 'puffs';
     Ship.nozzleMotion = v.nozzleMotion !== false;
     Ship.blast = v.shipBlast !== false;                 // a hull destroyed in a race blows up
+    shock.allowed = v.shockwaves !== false;             // slams and blasts bend the picture
     // each ship's paint (the player's and the showroom's ships take theirs: Ship.update; the rivals keep their teams')
     Ship.liveries = { feather: v.featherLivery || 'classic', rocket: v.cometLivery || 'titanium', heavy: v.heavyLivery || 'hazard' };
     Ship.pulseRings = v.pulseRings !== false;
     Ship.sharpEdges = v.sharpEdges !== false;
     blurOn = v.blur;
+    slamCamOn = v.slamCam !== false;
     Ship.brakeLights = v.brakeLights;
     deck.k = v.deckLight !== false ? 1 : 0;           // the deck's light on the ships
     Ship.microShadow = v.hullShadows !== false ? 1 : 0;   // their seams and recesses shaded from the sun
@@ -607,7 +616,7 @@ async function boot() {
     // what the programs are built for: the lite shaders, the lights on, the shadows, the passes in use - a change
     // (a graphics preset, shadows on / off) builds them all again now, in the menu (rewarm below)
     const sig = [Q.lite, renderer.shadowMap.enabled, world.worldOnly, ...rivalLights.map((l) => l.visible),
-      ...composer.passes.map((p) => p.enabled)].join();
+      ...composer.passes.map((p) => p === shock || p.enabled)].join();
     if (warmed && sig !== programSig) rewarm();
     programSig = sig;
   }, integratedGPU(gpuName) || isTouch());             // (a phone or tablet: Laptop mode on a first visit too)
@@ -645,7 +654,7 @@ async function boot() {
     // Submit post shaders with the scene shaders instead of blocking on each warm-up draw.
     // OutputPass uses these defines for the renderer's ACES/sRGB output on its first draw.
     if (output.enabled) output.material.defines = { SRGB_TRANSFER: '', ACES_FILMIC_TONE_MAPPING: '' };
-    const post = postJobs(composer.passes.filter((p) => p.enabled || p === lens));
+    const post = postJobs(composer.passes.filter((p) => p.enabled || p === lens || p === shock));
     await compileAll(renderer, [...jobs, ...post], (k, n) => { status(`Compiling shaders  ${k} / ${n}`); progress('compile', k / n); });
     renderer.setRenderTarget(null);
     // the textures onto the GPU one at a time (an 8K map and its mips is one long job on a slow GPU)
@@ -671,11 +680,13 @@ async function boot() {
     composer.setSize(innerWidth, innerHeight);
     await nextFrame();
     lens.enabled = true;                               // (its shader too: else compiled at the first splash)
+    shock.enabled = true;                              // (and the shockwaves': else at the first slam)
     for (const level of [0, 1]) {
       for (const [m, , levels] of lods) if (levels[level]) m.geometry = levels[level];
       scene.updateMatrixWorld(); shipLook(); world.preRender?.(renderer); composer.render();
     }
     lens.enabled = false;
+    shock.enabled = false;
     for (const [m, g] of lods) m.geometry = g;
     for (const [o, v, f] of keep) { o.visible = v; o.frustumCulled = f; }
     resize();
@@ -695,7 +706,7 @@ async function boot() {
   let acc = 0, last = performance.now();
   // the Ship screen's showroom (showroom.js): its studio through the same picture - the scene pass pointed at it, the
   // passes that only belong on a circuit off - and everything put back after
-  const circuitOnly = () => [ssr, shafts, heat, streaks, blur, world.heat, grade, lens].filter(Boolean);
+  const circuitOnly = () => [ssr, shafts, heat, shock, streaks, blur, world.heat, grade, lens].filter(Boolean);
   const drawShowroom = () => {
     showroom.update();
     const keepPass = { sky: scenePass.sky, skyCam: scenePass.skyCam, scene: scenePass.scene, camera: scenePass.camera };
@@ -726,7 +737,10 @@ async function boot() {
   }, 3500);
   const render = () => {
     if (showroom && showroom.active) { drawShowroom(); return; }
-    scene.updateMatrixWorld(); shipLook(); world.preRender?.(renderer); composer.render();
+    scene.updateMatrixWorld(); shipLook(); world.preRender?.(renderer);
+    shock.set(fx.shocks, camera);
+    shock.enabled = shock.n > 0;
+    composer.render();
   };
   // drawn between the last two physics steps: at 144 Hz a frame got 0, 1 or 2 steps of 8.3 ms, and everything that
   // moves juddered against the camera
@@ -755,12 +769,30 @@ async function boot() {
   // other frame behind the title's darker screens made the browser throttle the page to ~1 frame a second: every frame
   // is drawn while the world moves.)
   let wasPaused = false;
+  // A slam the player is in, made something to watch ("make it more cinematic and dramatic"): the game's time slowed
+  // to k for hold s (real time) - the dash - then at the blow a hit-stop (stop s all but frozen) and post s more at
+  // kPost - the other thrown, all the way into the wall - and back to full speed over ramp s. w: the slam camera's
+  // share (camera.js) and the letterbox's.
+  const slow = { t: 9, hold: 0, ramp: 0, k: 1, stop: 0, post: 0.6, kPost: 0.4, other: null, mine: false,
+    start(other, mine, hold, ramp, k, post = 0.6, kPost = 0.4) { Object.assign(this, { t: 0, hold, ramp, k, post, kPost, other, mine }); },
+    get on() { return this.t < this.hold + this.ramp; },
+    impact() { if (this.on) { this.stop = 0.07; this.hold = this.t + this.post; this.k = this.kPost; } },
+    step(dt) {
+      if (this.stop > 0) { this.stop -= dt; return 0.03; }
+      this.t += dt;
+      if (!this.on) return 1;
+      return this.t < this.hold ? this.k : this.k + (1 - this.k) * smoothstep(this.hold, this.hold + this.ramp, this.t);
+    },
+    get w() { return this.on ? smoothstep(0, 0.12, this.t) * (1 - smoothstep(this.hold, this.hold + this.ramp, this.t)) : 0; },
+  };
+  window.__feather.slow = slow;
   function frame(now) {
     // (a frame's time held to 0.1 s at most: with 0.05 a slow GPU's long frames each lost time - a hitch in the motion)
     const raw = (now - last) / 1000, dt = Math.min(0.1, raw);
     last = now;
     if (menu.paused !== wasPaused) { wasPaused = menu.paused; redraw = 2; }
-    tick(menu.paused ? 0 : dt);                          // paused: a frame with no time in it (no physics, nothing moves)
+    const k = slow.step(menu.paused ? 0 : dt);           // (a slam's slow motion: the game's time, not the frame's)
+    tick(menu.paused ? 0 : dt * k);                      // paused: a frame with no time in it (no physics, nothing moves)
     // (while the programs are rebuilt the picture holds still: a draw would wait for each one still compiling)
     if (warming) redraw = 0;
     else if (!menu.paused) render();
@@ -941,17 +973,32 @@ async function boot() {
           // jolt, the bigger the harder (the Hull bar flares - hud.js)
           const near = camera.position.distanceTo(e.entry.racer.pos) < 260;
           if (near && e.amount > 1.5) fx.scrape(e.at || e.entry.racer.pos, e.entry.racer.vel, Math.min(1.6, e.amount / 12));
+          // thrown into the wall by a slam: the blow's burst against the wall too
+          const tr = e.entry.racer;
+          if (near && e.why === 'wall' && tr.knocked > 0 && e.amount > 4) {
+            const f = track.frame(tr.s);
+            fx.attack(e.at || tr.pos, tr.vel, f.R.clone().multiplyScalar(Math.sign(tr.x) || 1), new THREE.Color(1.0, 0.5, 0.15), false);
+            if (!e.player && slow.on && slow.other === e.entry) rig.shake = Math.max(rig.shake, 0.5);
+          }
           if (e.player && mode === 'race') {
             hud.flash(`rgba(255, 40, 25, ${Math.min(0.8, 0.22 + e.amount / 30).toFixed(2)})`, 0.55);
             rig.shake = Math.max(rig.shake, Math.min(0.9, 0.15 + e.amount / 28));
           }
         } else if (e.type === 'lunge') {
           if (e.player && mode === 'race') { rig.shake = Math.max(rig.shake, 0.18); audio.driftKick(2); }
+          // a slam the player is in: slow motion and the slam camera across the two ("i can barely see my ship smashing
+          // into the other one ... maybe use a camera trick too, to see what happens")
+          const other = e.player ? e.target : e.target?.player ? e.entry : null;
+          if (other && mode === 'race' && slamCamOn) {
+            if (e.player) slow.start(other, true, 0.6, 0.5, 0.18);
+            else slow.start(other, false, 0.45, 0.45, 0.3, 0.5, 0.45);     // (slammed: milder - it can still be blocked)
+          }
         } else if (e.type === 'attack') {
           // an airbrake attack landing: the burst (fx.attack) in the attacker's engine colour, travelling with the two;
           // the one hit is shaken hard, the attacker barely
           const A = e.attacker, B = e.victim, vel = A.racer.vel.clone().add(B.racer.vel).multiplyScalar(0.5);
-          if (camera.position.distanceTo(e.at) < 320) fx.attack(e.at, vel, e.dir, new THREE.Color(...(A.team.engine || [0.1, 0.42, 1.0])), e.slam);
+          if (camera.position.distanceTo(e.at) < 320) fx.attack(e.at, vel, e.dir, new THREE.Color(...(A.team.engine || [0.1, 0.42, 1.0])), e.slam, paintOf(B), B.racer.s);
+          if (A.player || B.player) slow.impact();
           audio.bump(e.at, e.slam ? 60 : 30);
           if ((A.player || B.player) && mode === 'race') audio.crash(e.at);      // (yours: the full crunch)
           if (B.player && mode === 'race') { rig.shake = Math.max(rig.shake, e.slam ? 1.5 : 0.8); rig.punch = 0.6; hud.flash('rgba(255, 60, 30, 0.7)', 0.6); }
@@ -970,6 +1017,9 @@ async function boot() {
           }
           audio.bump(e.at, 45);
           if ((A.player || B.player) && mode === 'race') {
+            if (!slow.on && slamCamOn) slow.start(A.player ? B : A, A.player, 0.35, 0.45, 0.25, 0.35, 0.35);
+            else if (slow.on) { slow.post = 0.35; slow.kPost = 0.35; }
+            slow.impact();
             audio.crash(e.at);
             rig.shake = Math.max(rig.shake, 0.9); rig.punch = 0.7;
             hud.flash('rgba(255, 230, 160, 0.45)', 0.4);
@@ -980,7 +1030,7 @@ async function boot() {
           // gone in the fireball, then blinking) and races on from there, flown through for 3 s. (Blast off: sparks.)
           const r = e.entry.racer, d = camera.position.distanceTo(e.at);
           if (Ship.blast !== false && d < 700) {
-            fx.blast(e.at, e.vel || r.vel, WRECK_M.makeRotationFromQuaternion(r.q), new THREE.Color(...(e.entry.team.engine || [0.1, 0.42, 1.0])), d);
+            fx.blast(e.at, e.vel || r.vel, WRECK_M.makeRotationFromQuaternion(r.q), new THREE.Color(...(e.entry.team.engine || [0.1, 0.42, 1.0])), d, paintOf(e.entry), r.s);
           } else if (d < 300) fx.scrape(e.at, r.vel, 1);
           if (e.player && mode === 'race') {
             audio.crash(e.at);
@@ -1064,6 +1114,8 @@ async function boot() {
         l.intensity = RIVAL_LIGHT.cd * e.ship.power * (world.nightLights ? 1 : 1 - track.caveLight(e.ship.root.position));
       });
     }
+    rig.slamW = slow.w;                                  // (the slam camera: where the other hull is - camera.js)
+    if (rig.slamW > 0 && slow.other) { rig.slamAt = slow.other.ship.root.position; rig.slamSide = Math.sign(slow.other.racer.x - racer.x) || 1; rig.slamMine = slow.mine; }
     rig.update(dt, view, inp, ctl.boosting);
     menu.camera(dt);                                     // the title's shots, or a blend between two camera views
     world.follow(ctl.rPos, camera);
@@ -1139,7 +1191,7 @@ async function boot() {
     }
     // what slams (the prompt by the arrow): the key, the pad's button, the touch button
     const slamKey = touch.on ? 'Slam' : inp.pad ? 'X' : 'Space';
-    hud.update(dt, { speed: ctl.speed, agl: MAP !== 'meadow' && mode === 'free' ? NaN : ctl.agl, throttle: ctl.throttle, tags, atkHint, slamKey,
+    hud.update(dt, { speed: ctl.speed, agl: MAP !== 'meadow' && mode === 'free' ? NaN : ctl.agl, throttle: ctl.throttle, tags, atkHint, slamKey, cine: slow.w,
       slamCharge: mode === 'race' && race ? (race.racing ? race.slamCharge() : 0) : null,
       boostEnergy: ctl.boostEnergy, boosting: ctl.boosting, airCharge: inp.airCharge, airCharges: inp.airCharges, state, stateClass: cls, camera: rig.name, assist: ctl.assist,
       health: mode === 'race' && racer ? racer.health / racer.maxHealth : null, ghost: mode === 'race' && racer ? racer.ghost : 0,

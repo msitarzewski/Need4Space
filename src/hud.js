@@ -261,6 +261,8 @@ export class HUD {
         this.sc = sc;
       }
     }
+    const lb = Math.round((s.cine || 0) * 50) / 50;      // (the slam's letterbox)
+    if (lb !== this.lb) { $('letterbox').style.setProperty('--lb', lb); this.lb = lb; }
     const key = (s.slamKey || 'Space') + hint;
     if (key !== this.atkKey) {
       // the prompt: what to press, and what it does (Slam, or Block a slam coming)

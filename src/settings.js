@@ -8,7 +8,7 @@ export const DEFAULTS = { ship: 'feather', tonemap: 'aces', ao: true, bloom: tru
   brakeLights: true, laptop: false, touch: 'auto', map: 'space', shafts: true, lensWater: true, iceSnow: true, iceDust: true, aurora: true,
   iceStorm: true, iceGeysers: true, wreckFx: true, wreckMist: true, airPitch: true, sandFx: true, dustDevils: true, heatHaze: true,
   sandstorm: true, caveFx: true, canyonAO: true, engineHeat: true, engineTrails: 'puffs', colossus: true, nozzleMotion: true, featherLivery: 'classic', cometLivery: 'titanium', heavyLivery: 'hazard', pulseRings: true, sharpEdges: true, showroom: true,
-  damage: true, shipBlast: true, rivalMix: 'mixed',
+  damage: true, shipBlast: true, slamCam: true, shockwaves: true, rivalMix: 'mixed',
   deckLight: true, hullShadows: true, engineFaces: 'dark', shipPaint: 'gloss', shipTrim: 'dark', shipAccents: true,
   seaLife: true, seaReflect: true, oceanStorm: true, shipWet: true, kraken: true, oceanRain: true, oceanPillars: true };
 // Graphics quality presets ("low, which would be laptop, balanced in between, and high the actual default"): each sets
@@ -35,6 +35,8 @@ const ROWS = [
   ['ai', 'AI difficulty', [['easy', 'Easy'], ['normal', 'Normal'], ['hard', 'Hard'], ['brutal', 'Brutal']]],
   ['damage', 'Ship damage (hulls wear down, a wreck resets)', [[true, 'On'], [false, 'Off']]],
   ['shipBlast', 'Ship explosions (a hull destroyed blows up)', [[true, 'On'], [false, 'Off']]],
+  ['slamCam', 'Slam camera (your slams in slow motion, seen from the side)', [[true, 'On'], [false, 'Off']]],
+  ['shockwaves', 'Shockwaves (slams and blasts bend the air)', [[true, 'On'], [false, 'Off']]],
   ['rivalMix', 'Rival ships (from the next load)', [['mixed', 'Feathers, Comets, Anvils'], ['feather', 'Feathers only']]],
   ['airPitch', 'Nose control in the air', [[true, 'On'], [false, 'Off']]],
   ['music', 'Music', [['off', 'Off'], ['low', 'Low'], ['mid', 'Medium'], ['high', 'High']]],

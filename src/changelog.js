@@ -2,6 +2,16 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.11.0', date: '17 Oct 2026', name: 'Slam cam',
+    notes: [
+      'Your slams in slow motion: the camera swings out to the side to show the dash, the blow and the other ship thrown into the wall, with a hit-stop as it lands (Settings: Slam camera)',
+      'Slams and explosions rebuilt: the shockwave bends the air itself, the blow lights both hulls, a cone of sparks drives into the ship hit and plates of its hull tear off and tumble along the track; the ship thrown streaks sparks all the way to the wall and bursts against it (Settings: Shockwaves)',
+      'A blocked slam costs neither ship any hull',
+      'The smoke off a damaged ship is much thinner and short-lived - it no longer blocks the view',
+      'Ship screen: every ship shows its paints as colour chips on its own row - click one to paint it, click the ship to fly it and go straight back',
+    ],
+  },
+  {
     version: '1.10.2', date: '17 Oct 2026', name: 'Blow up',
     notes: [
       'A ship alongside in reach now shows what to press by the arrow: Space (X on a gamepad, the Slam button on a touchscreen) - and Block when a slam is coming at you',

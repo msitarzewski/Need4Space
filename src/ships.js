@@ -50,10 +50,14 @@ export const SHIP_URLS = {
 // each ship's liveries (Settings, the Ship screen): the first is the GLB's own paint, the others' hull maps (colour,
 // roughness / metal) load from assets/liveries/<ship>/<livery>_albedo_<n>k.webp and _orm_ - in the sizes listed (the
 // largest not over the ship's own atlas is used); key - the setting that holds the choice
+// colors: each livery's two main colours (from its paint), for its chip on the Ship screen
 export const LIVERIES = {
-  feather: { names: ['classic', 'airracer', 'green'], labels: ['Classic', 'Air Racer', 'Racing Green'], key: 'featherLivery', res: [2048] },
-  rocket: { names: ['titanium', 'orbiter', 'testflight'], labels: ['Titanium', 'Orbiter', 'Test Flight'], key: 'cometLivery', res: [2048] },
-  heavy: { names: ['hazard', 'military', 'navy'], labels: ['Hazard', 'Military', 'Navy'], key: 'heavyLivery', res: [2048] },
+  feather: { names: ['classic', 'airracer', 'green'], labels: ['Classic', 'Air Racer', 'Racing Green'], key: 'featherLivery', res: [2048],
+    colors: [['#ecebe7', '#b3202a'], ['#e6dcc3', '#87342e'], ['#14462e', '#b0a996']] },
+  rocket: { names: ['titanium', 'orbiter', 'testflight'], labels: ['Titanium', 'Orbiter', 'Test Flight'], key: 'cometLivery', res: [2048],
+    colors: [['#c4c8cc', '#4a4e56'], ['#e6e6e2', '#1a1a1d'], ['#f05b16', '#e6e6e2']] },
+  heavy: { names: ['hazard', 'military', 'navy'], labels: ['Hazard', 'Military', 'Navy'], key: 'heavyLivery', res: [2048],
+    colors: [['#e8b51a', '#1b1b1b'], ['#5b633e', '#ad9c6f'], ['#1a3062', '#7d8aa8']] },
 };
 
 // the rivals' Feathers when the player flies another ship: a tier lighter - they are never as close to the camera as

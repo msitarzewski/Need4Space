@@ -122,6 +122,17 @@ export class CameraRig {
       camUp.copy(this.rollFollow > 0.9 ? up : new THREE.Vector3(0, 1, 0));
       fov = 45;
     }
+    // the slam camera (main.js: a slam the player is in, in slow motion - slamW its share): up and out to the side away
+    // from the other hull, looking down across the two - the dash, the blow, the other thrown into the wall. (Thrown
+    // yourself: higher and further back, clear of the wall you are flying at.)
+    const w = this.slamW || 0;
+    if (w > 0 && this.slamAt && (this.mode === 'chase' || this.mode === 'far')) {
+      const side = this.slamSide || 1, mine = this.slamMine;
+      const P = pos.clone().add(new THREE.Vector3(-side * (mine ? 6 : 3), mine ? 7.5 : 9, mine ? 17 : 19).applyQuaternion(cq));
+      cam.position.lerp(P, w);
+      lookAt.lerp(pos.clone().lerp(this.slamAt, 0.5).add(new THREE.Vector3(0, 0, -4).applyQuaternion(cq)), w);
+      fov += (56 - fov) * w;
+    }
     // never under the ground, never inside the track; on the circuit never under the deck behind the ship
     if (this.deckFn && (this.mode === 'chase' || this.mode === 'far')) this.deckFn(cam.position);
     const g = this.terrain.surface(cam.position.x, cam.position.z) + 0.6;

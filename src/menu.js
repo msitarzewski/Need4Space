@@ -113,7 +113,7 @@ export class Menu {
     h.hud.onResults = () => this.showResults();
     h.hud.onHideResults = () => { if (this.ctx === 'results' && !this.busy) this.resume(); };
     addEventListener('keydown', (e) => this.key(e), true);       // capture: before input.js sees the key
-    this.el.addEventListener('mousemove', (e) => this.hover(e));
+    this.el.addEventListener('pointermove', (e) => this.hover(e));
     this.el.addEventListener('click', (e) => this.click(e));
     // a pointer lock lost mid-game (Esc while steering by mouse, alt-tab) pauses - unless the game released it
     const unlock = h.input.unlock.bind(h.input);
@@ -135,6 +135,13 @@ export class Menu {
       `<span class="m-name">${name}</span>${act === 'race' || act === 'difficulty' ? '<span class="m-meta m-lvl"></span>'
         : act === 'circuit' ? `<span class="m-meta">${mapName}</span>` : act === 'ship' ? `<span class="m-meta">${shipName(shipId)}</span>`
           : act === 'map:' + map || act === 'ship:' + shipId ? '<span class="m-meta">Now</span>' : ''}</button>`;
+    // the Ship screen's rows: each ship with a chip per paint beside it ("make the skins ui better, people can barely
+    // see it") - its two colours, the one it wears ringed and named; a chip paints the ship, the row itself picks it
+    const chips = (id) => {
+      const L = LIVERIES[id];
+      return L ? `<span class="s-chips"><em></em>${L.names.map((n, k) => `<i data-act="paint:${id}:${n}" title="${L.labels[k]}" ` +
+        `style="--a: ${L.colors[k][0]}; --b: ${L.colors[k][1]}"></i>`).join('')}</span>` : '';
+    };
     const main = MAIN.filter(([a]) => a !== 'race' || h.race);
     const pause = PAUSE.filter(([a]) => a !== 'difficulty' || h.race);
     const cards = LEVELS.map((L, i) => `<div class="d-slot" data-i="${i}" data-id="${L.id}" style="--c: var(--c-${L.id})">
@@ -173,10 +180,9 @@ export class Menu {
       </section>
       <section class="m-screen" data-s="ship">
         <header><div class="m-kicker">What to fly</div><h2 class="m-h2">Ship</h2></header>
-        <nav class="m-list">${SHIPS.map(([id, name]) => ['ship:' + id, name]).map(item).join('')}</nav>
+        <nav class="m-list">${SHIPS.map(([id, name], i) => item(['ship:' + id, name], i).replace(/<\/button>$/, chips(id) + '</button>')).join('')}</nav>
         <div class="m-desc"></div>
         <div class="d-stats s-stats"></div>
-        <div class="s-paint"></div>
       </section>
       <section class="m-screen" data-s="settings">
         <header><div class="m-kicker">Options</div><h2 class="m-h2">Settings</h2></header>
@@ -379,16 +385,15 @@ export class Menu {
       this.h.showroom?.(true, id);
       const st = this.el.querySelector('.s-stats');
       if (st && st.dataset.id !== id) { st.dataset.id = id; st.innerHTML = statRows(shipStats(HANDLING[id] || HANDLING.feather)); retrigger(st, 'swap'); }
-      // its paint: the liveries side by side, the one it wears lit (left / right or a click changes it; the stand's ship
-      // takes it at once - main.js Ship.liveries)
-      const pv = this.el.querySelector('.s-paint'), L = LIVERIES[id];
-      const cur = L && (L.names.includes(this.h.settings.v[L.key]) ? this.h.settings.v[L.key] : L.names[0]);
-      if (pv && pv.dataset.at !== `${id}:${cur}`) {
-        const fresh = pv.dataset.at?.split(':')[0] !== id;
-        pv.dataset.at = `${id}:${cur}`;
-        pv.innerHTML = L ? `<span>Paint</span><div class="seg">${L.names.map((n, k) =>
-          `<button tabindex="-1" data-act="paint:${n}" class="${n === cur ? 'on' : ''}">${L.labels[k]}</button>`).join('')}</div>` : '';
-        if (fresh) retrigger(pv, 'swap');
+      // the paints: on every row, the one each ship wears ringed and named (left / right or a chip changes it; the
+      // stand's ship takes it at once - main.js Ship.liveries)
+      for (const it of items) {
+        const k = it.dataset.act.slice(5), L = LIVERIES[k];
+        if (!L) continue;
+        const cur = L.names.includes(this.h.settings.v[L.key]) ? this.h.settings.v[L.key] : L.names[0];
+        it.querySelectorAll('.s-chips i').forEach((c) => c.classList.toggle('on', c.dataset.act.endsWith(':' + cur)));
+        const em = it.querySelector('.s-chips em'), label = L.labels[L.names.indexOf(cur)];
+        if (em && em.textContent !== label) em.textContent = label;
       }
     }
     const d = this.el.querySelector(`.m-screen[data-s="${s}"] .m-desc`);
@@ -604,9 +609,13 @@ export class Menu {
           const u = new URL(location.href);
           u.searchParams.delete('map');
           setTimeout(() => location.replace(u.href), 300);
-        } else if (a.startsWith('paint:')) {
-          this.paint(0, a.slice(6));
+        } else if (a.startsWith('paint:')) {          // a chip: that ship on the stand, in that paint
+          const [, id, name] = a.split(':'), i = this.items().findIndex((el) => el.dataset.act === 'ship:' + id);
+          if (i >= 0 && i !== this.sel.ship) this.sel.ship = i;
+          this.refresh();
+          this.paint(0, name);
         } else if (a.startsWith('ship:')) {         // another ship: saved, and the page reloads into it
+          // (picked: straight back out - the one flown already: back to the menu at once)
           const id = a.slice(5);
           ui('select');
           if (id === (h.shipId || 'feather')) { this.back(true); break; }

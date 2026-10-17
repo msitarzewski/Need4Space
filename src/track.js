@@ -1844,10 +1844,10 @@ export const damageSpeed = (v) => clamp((Math.abs(v) - DAMAGE.v0) / (DAMAGE.v1 -
 // (slamYaw rad), slowed (slamLoss of its speed), hurt dmg x a knock of slamMin m/s; the attacker takes keep of its own
 // share. A hull thrown into a wall takes wallCap m/s of that knock at most, x wallK. Pressed back within counter s of a
 // slam at it - before it lands or after - it is a double attack: the two bounce bounce m/s apart, no one flies into the
-// wall, each hurt by clashDmg of a slam.
+// wall and neither hull is hurt ("when blocking an attack none of the ships take damage").
 // startLock: no slams in the race's first s ("make slam not possible first 10 seconds of the race")
 export const ATTACK = { startLock: 10, range: 7, lunge: 60, lungeAcc: 2000, lungeT: 0.3, throw: 62, cap: 95, knock: 0.9, loose: 0.12,
-  slamYaw: 0.2, slamLoss: 0.11, slamMin: 22, dmg: 4, keep: 0.3, wallCap: 28, wallK: 1.0, counter: 0.5, bounce: 14, clashDmg: 0.5 };
+  slamYaw: 0.2, slamLoss: 0.11, slamMin: 22, dmg: 4, keep: 0.3, wallCap: 28, wallK: 1.0, counter: 0.5, bounce: 14 };
 const FLIP_LIFT = 3.5;          // how far the field lifts a ship off the deck it leaves, halfway through a flip (m)
 const PITCH_AIR = 14;           // nose down / up in the air: m/s2 more / less pull back to the deck
 
@@ -1928,14 +1928,14 @@ export class TrackRacer {
   get maxHealth() { return this.handling.health || 100; }
 
   // a full hull, no ghosting, the slam ready (a new race)
-  repair() { this.health = this.maxHealth; this.ghost = 0; this.slamCool = 0; this.lunge = null; this.knocked = 0; }
+  repair() { this.health = this.maxHealth; this.ghost = 0; this.safe = 0; this.slamCool = 0; this.lunge = null; this.knocked = 0; }
 
   // the slam's charge: 0 just used .. 1 ready (the HUD)
   get slamCharge() { return 1 - (this.slamCool || 0) / (this.handling.slamCool || 10); }
 
   // damage to the hull (the player's eased by the difficulty, as a wall's speed cost is); at 0, a wreck
   hurt(amount, why, at) {
-    if (!(amount > 0.05) || !this.armed || !TrackRacer.damage || this.ghost > 0) return 0;
+    if (!(amount > 0.05) || !this.armed || !TrackRacer.damage || this.ghost > 0 || this.safe > 0) return 0;
     amount *= this.perks.wall;
     this.health -= amount;
     this.emit({ type: 'damage', amount, why, at: at || this.pos.clone() });
@@ -1992,6 +1992,7 @@ export class TrackRacer {
   step(dt, inp) {
     const ship = this.ship, power = ship.power, tr = this.track, f = tr.frame(this.s, this.f);
     if (this.ghost > 0) this.ghost = Math.max(0, this.ghost - dt);
+    if (this.safe > 0) this.safe = Math.max(0, this.safe - dt);      // (just blocked a slam: no damage - race.js clash)
     // "make the break more powerful": S cuts the throttle and brakes at once (it used to wind the throttle lever down
     // for 1.4 s before any braking); W spools back up in under a second
     const braking = ship.ready && inp.throttleDown > 0.5;
