@@ -4,7 +4,7 @@ export const UPDATES = [
   {
     version: '1.11.1', date: '17 Oct 2026', name: 'Smooth start',
     notes: [
-      'No hitch in the first lap of a race started straight after loading: the Ship screen's showroom is now made ready only while you are in the menus',
+      'No hitch in the first lap of a race started straight after loading: the showroom of the Ship screen is now made ready only while you are in the menus',
     ],
   },
   {
