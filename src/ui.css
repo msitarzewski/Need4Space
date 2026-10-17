@@ -163,8 +163,8 @@ body.lite .hp { background: linear-gradient(115deg, rgba(9, 13, 19, 0.86), rgba(
 .bar.boost { position: relative; }
 .bar.boost i.over { position: absolute; left: 0; top: 0; width: 100%; background: linear-gradient(90deg, #ffb428, #ffe79a); box-shadow: 0 0 0.7rem #ffb428; }
 .bar.boost.pulse { animation: driftPulse 0.35s ease-out; }
-#hud-speed.boost .bar.boost i { background: #c8e6ff; box-shadow: 0 0 0.8rem var(--boost); }
-#hud-speed.low .bar.boost { animation: low 0.7s steps(2) infinite; }
+#hullbar.boost .bar.boost i { background: #c8e6ff; box-shadow: 0 0 0.8rem var(--boost); }
+#hullbar.low .bar.boost { animation: low 0.7s steps(2) infinite; }
 .bar.thr { height: 0.3rem; }
 .bar.air { position: relative; height: 0.3rem; }
 .bar.air i { background: rgba(140, 170, 205, 0.55); }
@@ -174,10 +174,17 @@ body.lite .hp { background: linear-gradient(115deg, rgba(9, 13, 19, 0.86), rgba(
 /* the hull (race damage): a wide bar along the bottom of the screen. The chunk a hit takes stays lit pale gold for a
    moment, then drains; the bar flares red with the hit. Steady colours - amber under half, red under a quarter, the
    shield's blue while a wreck is being flown through */
-#hullbar { position: absolute; left: 50%; bottom: var(--g); transform: translateX(-50%); width: min(36rem, 44vw);
-  display: grid; grid-template-columns: auto 1fr 3.4rem; align-items: center; gap: 0.9rem;
-  font: 700 0.82rem var(--ui); letter-spacing: 0.24em; text-transform: uppercase; color: var(--dim); }
-#hud:not([data-kind="race"]) #hullbar { display: none; }
+#hullbar { position: absolute; left: 50%; bottom: var(--g); transform: translateX(-50%); width: min(38rem, 46vw);
+  display: grid; gap: 0.55rem; font: 700 0.82rem var(--ui); letter-spacing: 0.24em; text-transform: uppercase; color: var(--dim); }
+#hullbar .hb-row { display: grid; grid-template-columns: 4.2rem 1fr 3.4rem; align-items: center; gap: 0.9rem; }
+/* boost and slam together over the hull, big enough to read at a glance */
+#hullbar .hb-top { display: grid; grid-template-columns: 4.2rem 1.7fr auto 1fr; align-items: center; gap: 0.9rem; margin-right: 4.3rem; }
+#hullbar .hb-top .bar { height: 1rem; border: 1px solid rgba(255, 255, 255, 0.22); background: rgba(9, 13, 19, 0.6); }
+#hullbar .lbl { color: #d6dee8; text-shadow: 0 0 0.4rem rgba(0, 0, 0, 0.8); }
+#hullbar .bar.slam i { background: rgba(255, 150, 90, 0.45); }
+#hullbar .bar.slam.ready i { background: linear-gradient(90deg, #ff6a20, #ffb27a); box-shadow: 0 0 0.7rem #ff6a20; }
+#hullbar .slam-l { letter-spacing: 0.2em; }
+#hud:not([data-kind="race"]) #hullbar .hb-row { display: none; }
 #hullbar .hb { position: relative; height: 1.15rem; background: rgba(9, 13, 19, 0.55); border: 1px solid rgba(255, 255, 255, 0.16);
   transform: skewX(-20deg); overflow: hidden; }
 #hullbar .hb i { position: absolute; inset: 0; transform-origin: left; transform: scaleX(1); }
@@ -213,11 +220,8 @@ body.lite .hp { background: linear-gradient(115deg, rgba(9, 13, 19, 0.86), rgba(
 #atkhint.in i { border-color: #ff3a2a; filter: drop-shadow(0 0 0.9rem #ff2a10); }
 #atkhint.in[data-side="l"] i.l { transform: rotate(-45deg) scale(1.25); }
 #atkhint.in[data-side="r"] i.r { transform: rotate(135deg) scale(1.25); }
-/* the slam's charge (race only): lit when ready */
-.bar.slam { height: 0.3rem; }
-.bar.slam i { background: rgba(255, 150, 90, 0.5); }
-.bar.slam.ready i { background: #ff8a3a; box-shadow: 0 0 0.5rem #ff6a20; }
-#hud:not([data-kind="race"]) .meter.slam { display: none; }
+/* (the slam's bar lives in #hullbar's top row; free flight has no slam) */
+#hud:not([data-kind="race"]) #hullbar .slam-l, #hud:not([data-kind="race"]) #hullbar .bar.slam { visibility: hidden; }
 .t-slam { display: none; right: calc(27vmin + env(safe-area-inset-right)); bottom: 50vmin; width: 15vmin; height: 15vmin; font-size: 0.62rem;
   letter-spacing: 0.06em; border-color: rgba(255, 138, 58, 0.7); }
 .t-slam.on { background: rgba(255, 138, 58, 0.55); border-color: #ff8a3a; box-shadow: 0 0 1.2rem #ff6a20; }
@@ -809,8 +813,8 @@ body.touch[data-ui="game"] #touch { display: block; }
 
 /* the HUD out from under the thumbs: speed in the bottom middle, the time compact, the map off on a phone */
 body.touch #hud-speed { left: 50%; bottom: 0.4rem; width: 14rem; padding: 0.45rem 0.75rem 0.5rem; transform: translateX(-50%); }
-body.touch #hud-speed .minor, body.touch #hud-speed .meter + .meter { display: none; }
-body.touch #hullbar { bottom: 7.2rem; width: 62vw; }
+body.touch #hud-speed .minor, body.touch #hud-speed .meter { display: none; }
+body.touch #hullbar { bottom: 6.2rem; width: 66vw; }
 body.touch #hud-time .trow:not(.score), body.touch #splits { display: none; }
 body.touch #hud-time { width: auto; min-width: 9rem; }
 body.touch #hud-tl { top: calc(var(--g) + env(safe-area-inset-top)); left: calc(var(--g) + env(safe-area-inset-left)); }

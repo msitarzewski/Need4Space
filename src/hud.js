@@ -288,8 +288,8 @@ export class HUD {
       if (s.driftChain !== this.driftChain) { $('dchain').dataset.c = s.driftChain; this.driftChain = s.driftChain; }
     }
     const sp = $('hud-speed'), boosting = s.boosting > 0.5, low = s.boostEnergy < 0.2;
-    if (boosting !== this.boosting) { sp.classList.toggle('boost', boosting); this.boosting = boosting; }
-    if (low !== this.low) { sp.classList.toggle('low', low); this.low = low; }
+    if (boosting !== this.boosting) { sp.classList.toggle('boost', boosting); $('hullbar').classList.toggle('boost', boosting); this.boosting = boosting; }
+    if (low !== this.low) { $('hullbar').classList.toggle('low', low); this.low = low; }
     this.set('state', s.state);
     if (s.stateClass !== this.stateClass) { $('state').className = 'chip ' + s.stateClass; this.stateClass = s.stateClass; }
     this.set('alt', Number.isFinite(s.agl) ? Math.max(0, s.agl).toFixed(s.agl < 10 ? 1 : 0) : '-');

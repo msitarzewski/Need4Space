@@ -2,6 +2,13 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.10.1', date: '17 Oct 2026', name: 'Clean start',
+    notes: [
+      'No slams in the first 10 seconds of a race - the Slam bar fills over them',
+      'The Boost and Slam bars sit together over the Hull bar at the bottom of the screen, bigger and easier to read',
+    ],
+  },
+  {
     version: '1.10.0', date: '17 Oct 2026', name: 'Slam',
     notes: [
       'The slam is its own ability, on Space (X on a gamepad, the Slam button on a touchscreen): with a ship alongside in reach - the arrow shows the side - your ship snaps across and always lands it. Ready again after a few seconds, the Anvil\'s sooner (the Slam meter)',

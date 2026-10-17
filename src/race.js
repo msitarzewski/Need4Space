@@ -626,7 +626,7 @@ export class Race {
       }
       const press = e.player ? playerActive && !!inp?.slam : !!e.driver?.slamNow;
       if (e.driver) e.driver.slamNow = false;
-      if (!press || r.slamCool > 0 || r.ghost > 0 || e.finished) continue;
+      if (!press || r.slamCool > 0 || r.ghost > 0 || e.finished || this.time < ATTACK.startLock) continue;
       const u = e.underAttack;                          // a slam at it within the window: hit back - a double attack
       if (u && !u.done && this.time - u.t <= ATTACK.counter && u.by.racer.ghost <= 0) { this.clash(u.by, e); continue; }
       const t = this.reach(e, 0, playerActive);
@@ -697,9 +697,12 @@ export class Race {
 
   // the HUD's arrow: a slam coming at the player it can still answer (+-2: the side it comes from), else a hull in
   // reach of its slam (+-1), 0 - only with its slam ready
+  // the player's slam charge for the HUD: filling over the start's lock, then its own
+  slamCharge() { return this.racing && this.time < ATTACK.startLock ? this.time / ATTACK.startLock : this.player.racer.slamCharge; }
+
   attackSide() {
     const p = this.player, r = p.racer, u = p.underAttack;
-    if (!this.racing || r.slamCool > 0 || r.ghost > 0) return 0;
+    if (!this.racing || r.slamCool > 0 || r.ghost > 0 || this.time < ATTACK.startLock) return 0;
     if (u && !u.done && this.time - u.t <= ATTACK.counter) return 2 * (Math.sign(u.by.racer.x - r.x) || 1);
     return this.reach(p)?.side || 0;
   }
