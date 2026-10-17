@@ -705,6 +705,47 @@ export class FX {
     this.ringT = 0;
   }
 
+  // A hull destroyed in a race (main.js 'wreck'): it blows up where it stops. A white-hot core and the light of it, a
+  // fireball rolling out, two shockwaves over the deck (its engine colour, then white), burning debris and sparks
+  // flung on - the faster it was going the further - and a smoke cloud left hanging. near (m to the camera): the
+  // fire and the smoke thinned up close (a fireball over the lens fills the screen).
+  blast(at, vel, basis, colour, near = 100) {
+    const V = new THREE.Vector3(), P = new THREE.Vector3(), up = new THREE.Vector3().setFromMatrixColumn(basis, 1);
+    const k = Math.min(1, Math.max(0.3, (near - 6) / 30)), on = vel.clone().multiplyScalar(0.35);
+    const hotA = new THREE.Color(1.0, 0.86, 0.55), hotB = new THREE.Color(1.0, 0.5, 0.14), white = new THREE.Color(1, 0.95, 0.85);
+    this.glints.emit(at, ZERO, white, { size: 5, grow: 26, life: 0.2, alpha: 2.2 * k, drag: 0, fadeIn: 0.01 });
+    this.glints.emit(at, ZERO, hotB, { size: 9, grow: 22, life: 0.45, alpha: 1.3 * k, drag: 0, fadeIn: 0.01 });
+    this.wave(at, basis, colour.clone().multiplyScalar(2.6), 34, 0.55);
+    this.wave(at.clone().addScaledVector(up, 0.3), basis, white, 52, 0.8);
+    for (let i = 0; i < 90; i++) {           // the fireball: hot puffs thrown out, swelling and burning out in a second
+      V.set(Math.random() - 0.5, Math.random() - 0.3, Math.random() - 0.5).normalize().multiplyScalar(6 + Math.random() * 20).addScaledVector(up, 3);
+      P.copy(at).addScaledVector(V, 0.05);
+      this.fire.emit(P, V.addScaledVector(on, 0.3), Math.random() < 0.3 ? hotA : hotB, { size: 2.5 + Math.random() * 3, grow: 8,
+        life: 0.5 + Math.random() * 0.7, alpha: 0.6 * k, drag: 2.6, grav: -3, spin: (Math.random() - 0.5) * 2, fadeIn: 0.03 });
+    }
+    const dark = new THREE.Color(0.08, 0.075, 0.07), grey = new THREE.Color(0.2, 0.19, 0.18);
+    for (let i = 0; i < 70; i++) {           // the smoke: a dark cloud left hanging, rising and spreading for seconds
+      V.set(Math.random() - 0.5, Math.random() * 0.5, Math.random() - 0.5).normalize().multiplyScalar(3 + Math.random() * 8).addScaledVector(up, 2);
+      P.copy(at).addScaledVector(V, 0.4);
+      this.smoke.emit(P, V, Math.random() < 0.6 ? dark : grey, { size: 4 + Math.random() * 4, grow: 4, life: 2.5 + Math.random() * 3,
+        alpha: 0.65 * k, drag: 0.9, grav: -1.6, spin: (Math.random() - 0.5) * 0.6, fadeIn: 0.25 });
+    }
+    for (let i = 0, n = Math.round(220 * k); i < n; i++) {     // sparks on ballistic arcs, half of them carried on with the speed it had
+      V.set(Math.random() - 0.5, Math.random() * 0.8 - 0.1, Math.random() - 0.5).normalize().multiplyScalar(14 + Math.random() * 50);
+      if (i % 2) V.add(on);
+      this.sparks.emit(at, V, Math.random() < 0.6 ? hotB : white, { size: 0.07 + Math.random() * 0.08, life: 0.6 + Math.random() * 1.6,
+        alpha: 2, drag: 0.35, grav: 9.8, fadeIn: 0.01, stretch: 0.022 });
+    }
+    for (let i = 0; i < 26; i++) {           // burning debris: bigger, slower embers falling for a couple of seconds
+      V.set(Math.random() - 0.5, 0.2 + Math.random() * 0.8, Math.random() - 0.5).normalize().multiplyScalar(8 + Math.random() * 22).add(on);
+      this.sparks.emit(at, V, hotA, { size: 0.25 + Math.random() * 0.2, life: 1.4 + Math.random() * 1.4, alpha: 2.4, drag: 0.25, grav: 9.8,
+        fadeIn: 0.01, stretch: 0.012 });
+    }
+    this.flash.position.copy(at).addScaledVector(up, 2);
+    this.flash.color.set(0xffa050);
+    this.flashT = 0.75;
+  }
+
   update(dt, camera, flight) {
     if (this.camLast && dt > 0) CAM_VEL.lerp(camera.position.clone().sub(this.camLast).divideScalar(dt), 0.5);
     (this.camLast ||= new THREE.Vector3()).copy(camera.position);

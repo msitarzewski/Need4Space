@@ -216,6 +216,18 @@ body.lite .hp { background: linear-gradient(115deg, rgba(9, 13, 19, 0.86), rgba(
 #atkhint[data-side="l"] i.l { opacity: 1; transform: rotate(135deg) scale(1); }
 #atkhint[data-side="r"] i.r { opacity: 1; transform: rotate(-45deg) scale(1); }
 #hud:not([data-kind="race"]) #tags, #hud:not([data-kind="race"]) #atkhint { display: none; }
+/* what to press, under the chevron: the key cap (Space / X / the Slam button) and Slam (or Block) */
+#atkhint .key { position: absolute; top: calc(52% + 2.3rem); display: flex; align-items: center; gap: 0.5rem; opacity: 0;
+  font: 800 1.05rem var(--ui); letter-spacing: 0.18em; text-transform: uppercase; color: #ffd2b0; white-space: nowrap;
+  text-shadow: 0 0 0.6rem rgba(0, 0, 0, 0.9); pointer-events: none; }
+#atkhint .key kbd { font: inherit; text-transform: uppercase; color: #fff; padding: 0.22rem 0.7rem 0.18rem; border: 2px solid #ff8a3a; border-bottom-width: 4px;
+  border-radius: 0.4rem; background: rgba(28, 12, 4, 0.7); box-shadow: 0 0 0.9rem rgba(255, 106, 32, 0.75); }
+#atkhint .key span:empty { display: none; }
+#atkhint[data-side="l"] .key { opacity: 1; left: calc(28% + 1.3rem); transform: translateX(-50%); animation: atkkey 0.6s ease-in-out infinite alternate; }
+#atkhint[data-side="r"] .key { opacity: 1; right: calc(28% + 1.3rem); transform: translateX(50%); animation: atkkey 0.6s ease-in-out infinite alternate; }
+@keyframes atkkey { to { filter: brightness(1.35); } }
+#atkhint.in .key { color: #ffb0a0; }
+#atkhint.in .key kbd { border-color: #ff3a2a; box-shadow: 0 0 1.1rem rgba(255, 42, 16, 0.85); }
 /* a slam coming that can still be blocked: the chevron red, bigger, on the side it comes from */
 #atkhint.in i { border-color: #ff3a2a; filter: drop-shadow(0 0 0.9rem #ff2a10); }
 #atkhint.in[data-side="l"] i.l { transform: rotate(-45deg) scale(1.25); }

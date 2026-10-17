@@ -17,13 +17,14 @@ export const SHIPS = [
 // health - its hull (track.js TrackRacer.hurt: walls and other ships wear it down; at 0 the ship is reset where it is,
 // slowed, and can be flown through for 3 s); ram - how hard it hits another ship (the damage it deals); airbrakes -
 // the charges it holds (input.js: one fires at a time, each back 3 s after it was spent); mass - in a slam the heavier
-// throws the lighter further and hurts it more (race.js); slamCool - s before its slam is ready again. The Feather is
+// throws the lighter further and hurts it more (race.js); slamCool - s before its slam is ready again ("give slam 10
+// seconds cooldown": the same for all three). The Feather is
 // the middle of all three, the Comet a glass cannon, the Anvil the tank that hits hardest.
 export const HANDLING = {
-  feather: { thrust: 1, boost: 1, drag: 1, turn: 1, impact: 1, health: 100, ram: 1, airbrakes: 1, mass: 1, slamCool: 4 },
-  rocket: { thrust: 1, boost: 0.9, drag: 0.92, turn: 1.05, impact: 1.5, health: 80, ram: 0.6, airbrakes: 1, mass: 0.8, slamCool: 4 },   // (clean flying laps 2-4 % under the Feather's)
+  feather: { thrust: 1, boost: 1, drag: 1, turn: 1, impact: 1, health: 100, ram: 1, airbrakes: 1, mass: 1, slamCool: 10 },
+  rocket: { thrust: 1, boost: 0.9, drag: 0.92, turn: 1.05, impact: 1.5, health: 80, ram: 0.6, airbrakes: 1, mass: 0.8, slamCool: 10 },   // (clean flying laps 2-4 % under the Feather's)
   // the Anvil: a little slower off the line and in the turns, more on the boost, and knocks cost it a third less
-  heavy: { thrust: 0.97, boost: 1.12, drag: 1, turn: 0.94, impact: 0.65, health: 150, ram: 1.6, airbrakes: 2, mass: 1.7, slamCool: 3 },
+  heavy: { thrust: 0.97, boost: 1.12, drag: 1, turn: 0.94, impact: 0.65, health: 150, ram: 1.6, airbrakes: 2, mass: 1.7, slamCool: 10 },
 };
 
 // the rivals' ships, by grid slot (the player's slot, 4, is skipped): two Comets near the front (passing is hard: from

@@ -18,6 +18,7 @@ export class Input {
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault();
       if (!this.keys.has(e.code)) this.pressed.add(e.code);
       this.keys.add(e.code);
+      this.pad = false;                  // (the last used: the keyboard - the slam prompt shows Space)
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     addEventListener('blur', () => this.keys.clear());
@@ -91,7 +92,9 @@ export class Input {
       s.camera = s.camera || edge(1);
       s.reset = s.reset || edge(9);
       this.padPrev = p.buttons.map((x) => x.value);
+      if (p.buttons.some((x) => x.value > 0.5) || [0, 1, 2, 3].some((i) => Math.abs(p.axes[i] || 0) > 0.5)) this.pad = true;
     }
+    s.pad = !!this.pad;
     // touch: left stick steer / roll and pitch, right stick the throttle lever (up / down, as W / S) and the airbrakes
     const t = this.touch?.on && this.touch.state;
     if (t) {

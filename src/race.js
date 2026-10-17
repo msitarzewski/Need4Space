@@ -546,7 +546,7 @@ export class Race {
       e.wrecks++;
       if (this.stats) this.stats.wrecks++;
       e.ship.hit(new THREE.Vector3(0, 0, 1), 1.5, new THREE.Vector3(0, 0.5, 0));
-      this.events.push({ type: 'wreck', at: ev.at, player: e.player, entry: e });
+      this.events.push({ type: 'wreck', at: ev.at, vel: ev.vel, player: e.player, entry: e });
     }
     if (!(this.state === 'racing' || this.state === 'finished') || e.finished) return;
     if (ev.type === 'scrape') { if (!e.player && ev.wall) this.stats.walls++; if (ev.v > 4) e.clean = false; }
@@ -558,7 +558,7 @@ export class Race {
 
   step(dt, inp, playerActive) {
     const racing = this.racing;
-    for (const e of this.entries) { e.racer.locked = !racing; e.racer.armed = racing && !e.finished; }
+    for (const e of this.entries) { e.racer.locked = !racing; e.racer.armed = racing && !e.finished && this.time >= DAMAGE.safe; }
     if (this.state === 'grid') {
       // the rivals' engines come alive with the player's; the lights start when everyone is ready
       if (this.player.ship.engineOn) {
@@ -631,7 +631,7 @@ export class Race {
       if (u && !u.done && this.time - u.t <= ATTACK.counter && u.by.racer.ghost <= 0) { this.clash(u.by, e); continue; }
       const t = this.reach(e, 0, playerActive);
       if (!t) continue;
-      r.slamCool = r.handling.slamCool || 4;
+      r.slamCool = r.handling.slamCool || 10;
       r.lunge = { target: t.o, dir: t.side, t: ATTACK.lungeT };
       t.o.underAttack = { by: e, t: this.time, done: false };
       t.o.driver?.mayCounter(this);
@@ -668,7 +668,7 @@ export class Race {
     A.lunge = null; D.lunge = null;
     A.vx = -out * ATTACK.bounce; D.vx = out * ATTACK.bounce;
     A.knocked = 0; D.knocked = 0;
-    D.slamCool = D.handling.slamCool || 4;
+    D.slamCool = D.handling.slamCool || 10;
     const k = DAMAGE.ship * (ATTACK.slamMin - DAMAGE.shipGraze) * damageSpeed(Math.max(A.vs, D.vs)) * ATTACK.dmg * ATTACK.clashDmg;
     A.hurt(k * (D.handling.ram || 1), 'ship');
     D.hurt(k * (A.handling.ram || 1), 'ship');
@@ -725,7 +725,7 @@ export class Race {
   // the one attacked takes ATTACK.dmg times its share, the attacker ATTACK.keep of its own
   ram(ea, eb, v, atk = 0, mass = 1) {
     const k = DAMAGE.ship * Math.max(0, v - DAMAGE.shipGraze) * damageSpeed(Math.max(ea.racer.vs, eb.racer.vs));
-    if (k <= 0) return;
+    if (k <= 0 || this.time < DAMAGE.safe) return;
     if (ea.player) eb.playerHitT = this.time;          // (the HUD: the hull of a rival the player has just hurt)
     if (eb.player) ea.playerHitT = this.time;
     ea.racer.hurt(k * (eb.racer.handling.ram || 1) * (atk < 0 ? ATTACK.dmg * mass : atk > 0 ? ATTACK.keep : 1), 'ship');

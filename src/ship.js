@@ -2109,9 +2109,10 @@ export class Ship {
     // the hull's model blinks: hiding the whole visual took its exhaust lights out of the scene, and a change in the
     // light count recompiled every lit shader in the game - a long stall on the player's own wreck
     const g = c.ghost || 0;                        // (s left of the 3)
-    su.ghost.value = clamp(Math.min(g / 0.5, (3 - g) / 0.2), 0, 1) * 0.6;
+    const gone = Ship.blast === false ? 0 : 0.6;   // (blown up: nothing of it shows in its fireball - fx.blast)
+    su.ghost.value = clamp(Math.min(g / 0.5, (3 - gone - g) / 0.2), 0, 1) * 0.6;
     this.shield.visible = su.amount.value > 0.01 || su.ghost.value > 0.01;
-    this.model.visible = !(g > 0 && (g * 8) % 1 < 0.45);
+    this.model.visible = !(g > 0 && (g > 3 - gone || (g * 8) % 1 < 0.45));
     this.boostKick = Math.max(0, this.boostKick - dt * 1.4);
   }
 

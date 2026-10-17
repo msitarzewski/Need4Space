@@ -41,7 +41,7 @@ import { Showroom } from './showroom.js';
 const MAP = { meadow: 'meadow', forest: 'forest', space: 'space', ice: 'ice', desert: 'desert', ocean: 'ocean' }[new URLSearchParams(location.search).get('map') || savedSettings().map] || 'space';
 // the ship: the one chosen in the menu (saved), or ?ship=feather / rocket (ships.js); its model by memory tier
 const SHIP = shipChoice(savedSettings().ship), SHIP_URL = SHIP_URLS[SHIP], SHIP_NAME = shipName(SHIP);
-const TAG_P = new THREE.Vector3();
+const TAG_P = new THREE.Vector3(), WRECK_M = new THREE.Matrix4();     // (a wreck blast: the deck's axes)
 const LUTS = ['assets/agx_punchy_lut65.bin', 'assets/agx_mhc_lut65.bin'];   // Blender's AgX looks: Punchy, Medium High Contrast
 const status = (t) => (document.getElementById('loadtext').textContent = t);
 // The loading bar: each step's share of it (by how long it usually takes) and how far into it. The page's first script
@@ -558,6 +558,7 @@ async function boot() {
     heat.enabled = v.engineHeat !== false;
     Ship.trailStyle = v.engineTrails || 'puffs';
     Ship.nozzleMotion = v.nozzleMotion !== false;
+    Ship.blast = v.shipBlast !== false;                 // a hull destroyed in a race blows up
     // each ship's paint (the player's and the showroom's ships take theirs: Ship.update; the rivals keep their teams')
     Ship.liveries = { feather: v.featherLivery || 'classic', rocket: v.cometLivery || 'titanium', heavy: v.heavyLivery || 'hazard' };
     Ship.pulseRings = v.pulseRings !== false;
@@ -975,14 +976,21 @@ async function boot() {
             hud.message('Blocked', 1.2);
           }
         } else if (e.type === 'wreck') {
-          // a hull gone: sparks off it (a fireball left behind at these speeds streaked the whole screen) and its shield
-          // lit; it races on from there, flown through for 3 s
-          if (camera.position.distanceTo(e.at) < 300) fx.scrape(e.at, e.entry.racer.vel, 1);
+          // a hull gone: it blows up where it stops ("when a ship is destroyed make it blow up" - fx.blast; the ship
+          // gone in the fireball, then blinking) and races on from there, flown through for 3 s. (Blast off: sparks.)
+          const r = e.entry.racer, d = camera.position.distanceTo(e.at);
+          if (Ship.blast !== false && d < 700) {
+            fx.blast(e.at, e.vel || r.vel, WRECK_M.makeRotationFromQuaternion(r.q), new THREE.Color(...(e.entry.team.engine || [0.1, 0.42, 1.0])), d);
+          } else if (d < 300) fx.scrape(e.at, r.vel, 1);
           if (e.player && mode === 'race') {
             audio.crash(e.at);
-            rig.shake = Math.max(rig.shake, 1.0);
-            hud.message('Hull down  -  flown through for 3 s', 2.5);
-          } else audio.bump(e.at, 30);
+            rig.shake = Math.max(rig.shake, 1.4); rig.punch = 0.8;
+            hud.flash('rgba(255, 140, 50, 0.5)', 0.8);
+            hud.message('Hull destroyed  -  flown through for 3 s', 2.5);
+          } else {
+            audio.blast(e.at);
+            if (mode === 'race' && d < 150) rig.shake = Math.max(rig.shake, 0.6 * (1 - d / 150));
+          }
         }
         else if (e.type === 'scrape') {
           if (camera.position.distanceTo(e.at) < 200) fx.scrape(e.at, new THREE.Vector3(), e.v / 20);
@@ -1129,7 +1137,9 @@ async function boot() {
       }
       atkHint = race.attackSide();
     }
-    hud.update(dt, { speed: ctl.speed, agl: MAP !== 'meadow' && mode === 'free' ? NaN : ctl.agl, throttle: ctl.throttle, tags, atkHint,
+    // what slams (the prompt by the arrow): the key, the pad's button, the touch button
+    const slamKey = touch.on ? 'Slam' : inp.pad ? 'X' : 'Space';
+    hud.update(dt, { speed: ctl.speed, agl: MAP !== 'meadow' && mode === 'free' ? NaN : ctl.agl, throttle: ctl.throttle, tags, atkHint, slamKey,
       slamCharge: mode === 'race' && race ? (race.racing ? race.slamCharge() : 0) : null,
       boostEnergy: ctl.boostEnergy, boosting: ctl.boosting, airCharge: inp.airCharge, airCharges: inp.airCharges, state, stateClass: cls, camera: rig.name, assist: ctl.assist,
       health: mode === 'race' && racer ? racer.health / racer.maxHealth : null, ghost: mode === 'race' && racer ? racer.ghost : 0,

@@ -261,6 +261,14 @@ export class HUD {
         this.sc = sc;
       }
     }
+    const key = (s.slamKey || 'Space') + hint;
+    if (key !== this.atkKey) {
+      // the prompt: what to press, and what it does (Slam, or Block a slam coming)
+      const block = hint.includes('in'), touch = s.slamKey === 'Slam';
+      $('atkkey').textContent = s.slamKey || 'Space';
+      $('atkdo').textContent = touch ? (block ? 'to block' : '') : block ? 'Block' : 'Slam';
+      this.atkKey = key;
+    }
     if (hint !== this.hint) { $('atkhint').dataset.side = hint.split(' ')[0]; $('atkhint').classList.toggle('in', hint.includes('in')); this.hint = hint; }
     // the hull (the bar along the bottom): full .. empty, amber under half, red under a quarter, the ghost colour while
     // a wreck is flown through. A hit flares it and the chunk it took lingers before draining (the trail); filled again

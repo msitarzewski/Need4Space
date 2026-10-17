@@ -2,6 +2,15 @@
 // the title shows the first entry.
 export const UPDATES = [
   {
+    version: '1.10.2', date: '17 Oct 2026', name: 'Blow up',
+    notes: [
+      'A ship alongside in reach now shows what to press by the arrow: Space (X on a gamepad, the Slam button on a touchscreen) - and Block when a slam is coming at you',
+      'No hull takes damage in the first 10 seconds of a race',
+      'The slam is ready again 10 seconds after it was used, on every ship',
+      'A destroyed hull blows up: a fireball, shockwaves over the deck, burning debris and a smoke cloud (Settings: Ship explosions)',
+    ],
+  },
+  {
     version: '1.10.1', date: '17 Oct 2026', name: 'Clean start',
     notes: [
       'No slams in the first 10 seconds of a race - the Slam bar fills over them',

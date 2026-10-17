@@ -723,6 +723,14 @@ export class GameAudio {
     this.tone(t, 1.1, o, { f: 1400, f1: 180, v: 0.12, tau: 0.5, attack: 0.05 });
     this.burst(t, 1.2, o, { f: 900, f1: 120, q: 1, v: 0.4, buf: this.pink });
   }
+  // a rival's hull blowing up: the boom where it is (the player's own: crash)
+  blast(pos) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, o = this.out(pos, 60, 1);
+    if (this.take('boom', o)) return;
+    this.tone(t, 1.2, o, { f: 60, f1: 22, v: 0.9, tau: 0.4 });
+    this.burst(t, 1.2, o, { type: 'lowpass', f: 1400, f1: 100, v: 0.8, buf: this.brown });
+  }
   crash(pos) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime, o = this.out(null, 0, 1);

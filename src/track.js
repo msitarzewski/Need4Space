@@ -1832,7 +1832,8 @@ export const PERKS = { easy: { wall: 0.2, drift: 1.2, recharge: 1.1 }, normal: {
 // speed past shipGraze, times the same speed share and the hitter's ram (ships.js). At 0 the hull is reset where it
 // is, stopped dead ("completely stopping its acceleration and speed and going from 0"), and for ghost seconds it can
 // be flown through - no contact with the other ships, no damage, no boost - the pack goes by it.
-export const DAMAGE = { wall: 1.0, graze: 6, cap: 24, ship: 0.15, shipGraze: 5, v0: 80, v1: 250, ghost: 3 };
+// safe: no hull takes damage in the race's first s ("make sure ships dont take damage first 10 seconds")
+export const DAMAGE = { wall: 1.0, graze: 6, cap: 24, ship: 0.15, shipGraze: 5, v0: 80, v1: 250, ghost: 3, safe: 10 };
 export const damageSpeed = (v) => clamp((Math.abs(v) - DAMAGE.v0) / (DAMAGE.v1 - DAMAGE.v0), 0, 1.4);
 // The slam - an ability on its own key (race.js attacks: the player's Space; "like an ability, so when in range it
 // should activate and always hit the target"). Pressed with a hull alongside in reach (overlapping along, at most
@@ -1930,7 +1931,7 @@ export class TrackRacer {
   repair() { this.health = this.maxHealth; this.ghost = 0; this.slamCool = 0; this.lunge = null; this.knocked = 0; }
 
   // the slam's charge: 0 just used .. 1 ready (the HUD)
-  get slamCharge() { return 1 - (this.slamCool || 0) / (this.handling.slamCool || 4); }
+  get slamCharge() { return 1 - (this.slamCool || 0) / (this.handling.slamCool || 10); }
 
   // damage to the hull (the player's eased by the difficulty, as a wall's speed cost is); at 0, a wreck
   hurt(amount, why, at) {
@@ -1945,13 +1946,13 @@ export class TrackRacer {
   // the hull gone: reset where it is - square to the track, stopped dead, the throttle closed and the boost cut, the
   // hull full again - and flown through by the other ships for DAMAGE.ghost seconds
   wreck() {
-    const at = this.pos.clone();
+    const at = this.pos.clone(), vel = this.vel.clone();        // (the speed it had: its debris flies on with it)
     if (this.drift) this.endDrift(false);
     this.vs = 0; this.vx = 0; this.psi = 0; this.yawRate = 0; this.slow = 0; this.driftKick = 0;
     this.throttle = 0; this.boosting = 0; this.lunge = null;
     this.health = this.maxHealth;
     this.ghost = DAMAGE.ghost;
-    this.emit({ type: 'wreck', at });
+    this.emit({ type: 'wreck', at, vel });
   }
 
   static drifting = true;              // settings: "Drift (brake + throttle in a corner)"
